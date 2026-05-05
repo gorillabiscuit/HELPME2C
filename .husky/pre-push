@@ -1,0 +1,2 @@
+bash scripts/scan-ai-attribution.sh || exit 1
+pnpm preflight
