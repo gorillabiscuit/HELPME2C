@@ -29,7 +29,8 @@ Group by package within the monorepo (root, then per-app, per-package).
 
 ## Root (workspace)
 
-(populated as Phase 2 progresses)
+- **typescript** *(^5.7.0)* — language. Required at root so per-package tsconfigs can extend `tsconfig.base.json` and the `pnpm typecheck` script has a compiler to invoke.
+- **@types/node** *(^20.10.0)* — Node API typings. Required at root for tooling configs and scripts; matches the `engines.node` floor in `package.json`.
 
 ## apps/web
 

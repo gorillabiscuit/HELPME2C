@@ -1,0 +1,21 @@
+{
+  "name": "helpme2c",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cross-medium recommendation engine for TV and anime — workspace root.",
+  "packageManager": "pnpm@10.6.5",
+  "engines": {
+    "node": ">=20.10.0"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "preflight": "pnpm typecheck && pnpm lint && pnpm test"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^20.10.0"
+  }
+}
