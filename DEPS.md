@@ -37,6 +37,7 @@ Group by package within the monorepo (root, then per-app, per-package).
 - **eslint-config-prettier** *(^10.0.0)* — disables ESLint stylistic rules that would conflict with Prettier; loaded last in the flat config.
 - **prettier** *(^3.4.0)* — formatter. Owns whitespace/quote/semicolon decisions so ESLint can focus on correctness.
 - **globals** *(^15.14.0)* — shared env-globals lookup (e.g. `globals.node`) for ESLint flat config `languageOptions`.
+- **vitest** *(^3.0.0)* — test runner. Single root config covers all packages (per the architectural call confirmed for step 3). Coverage tooling (`@vitest/coverage-v8`) deferred until a coverage gate is actually wanted.
 
 ## apps/web
 
