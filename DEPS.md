@@ -38,6 +38,8 @@ Group by package within the monorepo (root, then per-app, per-package).
 - **prettier** *(^3.4.0)* — formatter. Owns whitespace/quote/semicolon decisions so ESLint can focus on correctness.
 - **globals** *(^15.14.0)* — shared env-globals lookup (e.g. `globals.node`) for ESLint flat config `languageOptions`.
 - **vitest** *(^3.0.0)* — test runner. Single root config covers all packages (per the architectural call confirmed for step 3). Coverage tooling (`@vitest/coverage-v8`) deferred until a coverage gate is actually wanted.
+- **husky** *(^9.1.0)* — git-hook manager. Wires `.husky/pre-commit` (lint-staged) and `.husky/pre-push` (AI-attribution scan + preflight) on `pnpm install` via the `prepare` script.
+- **lint-staged** *(^15.0.0)* — runs ESLint and Prettier against staged files only at commit time. Keeps the pre-commit hook fast as the workspace grows.
 
 ## apps/web
 
