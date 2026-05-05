@@ -28,7 +28,7 @@ Next.js 15+ (App Router), React 19, TypeScript strict. Deployed on Vercel. Consu
 
 - **No client-side fetching to TMDB / AniList / external APIs** — all external calls go through tRPC (server-side) so we control caching, rate limiting, and credentials. Browser making a direct API call to a third-party = ADR-required exception.
 - **No `localStorage` / `sessionStorage` for sensitive data.** Auth tokens are managed by the auth provider; user preferences sync to the server.
-- **No CSS-in-JS that adds runtime cost** (styled-components, Emotion). Use Tailwind or vanilla CSS modules. Decided in Phase 2 styling ADR.
+- **No runtime CSS-in-JS** (styled-components, Emotion) per [ADR-0014](../../docs/decisions/0014-styling-approach-web.md). The single carve-out is `@mui/x-data-grid` (per [ADR-0016](../../docs/decisions/0016-component-library.md)) which brings Emotion as a transitive dep — only allowed in screens that genuinely need a serious data table. No other `@mui/*` packages.
 
 ## Server Components vs Client Components
 

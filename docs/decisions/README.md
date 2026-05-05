@@ -44,6 +44,7 @@ When the world changes:
 | 0013 | Recommendation cache backend | Accepted | 2026-05-04 |
 | 0014 | Styling approach (web) | Accepted | 2026-05-04 |
 | 0015 | API deployment shape (tRPC inside Next.js) | Accepted | 2026-05-04 |
+| 0016 | Component library (shadcn primary, MUI DataGrid carve-out) | Accepted | 2026-05-05 |
 
 (More to be filled in as Phase 1 progresses. See `QUEUE.md` for pending decisions.)
 

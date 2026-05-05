@@ -8,7 +8,7 @@ Inherits from root `CLAUDE.md`. Holds rules specific to the **web** React compon
 
 React components designed for `apps/web` (Next.js, web React, `react-dom`).
 
-Phase 1A scope: minimal cross-app primitives only (e.g. `<Mono>`). Most app-specific composed components (TitleCard, RecommendationList, etc) live in `apps/web/src/components/`. shadcn/ui primitives — when adopted per the planned ADR-0016 — live in `apps/web/src/components/ui/` per shadcn convention, NOT here. This package is reserved for things genuinely shared across apps or with no good app-level home.
+Phase 1A scope: minimal cross-app primitives only (e.g. `<Mono>`). Most app-specific composed components (TitleCard, RecommendationList, etc) live in `apps/web/src/components/`. shadcn/ui primitives (per [ADR-0016](../../docs/decisions/0016-component-library.md)) live in `apps/web/src/components/ui/` per shadcn convention, NOT here. This package is reserved for things genuinely shared across apps or with no good app-level home.
 
 ## What this is NOT
 
