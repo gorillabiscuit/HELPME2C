@@ -61,6 +61,7 @@ Group by package within the monorepo (root, then per-app, per-package).
 - **tailwind-merge** *(^2.6.0)* — merges Tailwind classes safely (resolves conflicts like `px-2 px-4` → `px-4`); paired with clsx inside `cn()`. Per ADR-0016.
 - **lucide-react** *(^0.469.0)* — icon library pinned by ADR-0016. shadcn's default; AI-tooling-friendly.
 - **radix-ui** *(^1.4.3)* — consolidated Radix UI primitives meta-package; single dep covering Slot, Label, Dialog, Popover, etc. Modern shadcn convention (replaces installing each `@radix-ui/react-*` package separately). Per ADR-0016.
+- **@clerk/nextjs** *(^7.3.0)* — auth provider's Next.js SDK per ADR-0004. Provides `<ClerkProvider>`, hosted auth UI components (`<SignInButton>`, `<SignUpButton>`, `<UserButton>`, `<Show>`), `clerkMiddleware()` for `proxy.ts`, and `auth()` for server-side session access.
 
 **Dev:**
 

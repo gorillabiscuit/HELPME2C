@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@clerk/nextjs": "^7.3.0",
     "@helpme2c/ml": "workspace:*",
     "@helpme2c/shared": "workspace:*",
     "@helpme2c/ui": "workspace:*",
