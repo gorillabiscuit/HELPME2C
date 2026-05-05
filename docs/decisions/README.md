@@ -46,6 +46,7 @@ When the world changes:
 | 0015 | API deployment shape (tRPC inside Next.js) | Accepted | 2026-05-04 |
 | 0016 | Component library (shadcn primary, MUI DataGrid carve-out) | Accepted | 2026-05-05 |
 | 0017 | Hosting platform (Vercel for Phase 1A with lock-in firewall) | Accepted | 2026-05-05 |
+| 0018 | Project tracker (Linear, team HM2C) | Accepted | 2026-05-05 |
 
 (More to be filled in as Phase 1 progresses. See `QUEUE.md` for pending decisions.)
 

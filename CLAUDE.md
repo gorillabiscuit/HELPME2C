@@ -11,7 +11,7 @@ Keep this file under 500 lines. Detail goes in `docs/decisions/` (ADRs), per-pac
 - **Service:** HelpME2C — cross-medium recommendation engine for TV and anime.
 - **Differentiator:** group recommendations with ghost-profile inference + theme-based cross-medium taxonomy.
 - **Phase:** 1A (MVP, web only, registered users only). Target: TBD; no time pressure; ship when ready.
-- **Tracker:** TBD (Linear or GitHub Projects, decided in Phase 3).
+- **Tracker:** Linear — workspace `wouterschreuders`, team `HelpME2C` (key `HM2C`), project `HelpME2C` (per [ADR-0018](docs/decisions/0018-project-tracker.md)).
 - **Read first:** `PROJECT.md` (product scope), `docs/decisions/0000-architecture-overview.md` (system shape).
 
 ### Repo structure
