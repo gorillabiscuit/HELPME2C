@@ -45,6 +45,9 @@ android/.gradle/
 # Personal — gitignored per CLAUDE.md §10
 .personal/
 
+# Claude Code per-user local settings (auto-generated; .claude/commands/ stays tracked)
+.claude/settings.local.json
+
 # Husky
 .husky/_
 
