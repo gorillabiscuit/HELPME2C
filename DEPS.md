@@ -62,6 +62,7 @@ Group by package within the monorepo (root, then per-app, per-package).
 - **lucide-react** *(^0.469.0)* — icon library pinned by ADR-0016. shadcn's default; AI-tooling-friendly.
 - **radix-ui** *(^1.4.3)* — consolidated Radix UI primitives meta-package; single dep covering Slot, Label, Dialog, Popover, etc. Modern shadcn convention (replaces installing each `@radix-ui/react-*` package separately). Per ADR-0016.
 - **@clerk/nextjs** *(^7.3.0)* — auth provider's Next.js SDK per ADR-0004. Provides `<ClerkProvider>`, hosted auth UI components (`<SignInButton>`, `<SignUpButton>`, `<UserButton>`, `<Show>`), `clerkMiddleware()` for `proxy.ts`, and `auth()` for server-side session access.
+- **@sentry/nextjs** *(^10.51.0)* — Sentry's Next.js SDK per ADR-0010. Configures three runtimes (browser via `instrumentation-client.ts`, Node server via `sentry.server.config.ts`, Edge middleware via `sentry.edge.config.ts`) with PII redaction per ADR-0012 §9 (`sendDefaultPii: false` + `beforeSend` belt-and-suspenders). No session replay (PostHog handles that per ADR-0010). Source map upload deferred to production deploy.
 
 **Dev:**
 
