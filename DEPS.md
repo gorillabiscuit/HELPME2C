@@ -49,6 +49,7 @@ Group by package within the monorepo (root, then per-app, per-package).
 - **react** *(^19.0.0)* — required peer of Next 16. App Router uses Server Components by default per apps/web/CLAUDE.md.
 - **react-dom** *(^19.0.0)* — required peer of React 19.
 - **@trpc/server** *(^11.0.0)* — internal API. ADR-0003. Server-side only at this stage; client wiring lands when first interactive component needs it.
+- **@helpme2c/ml** *(workspace:\*)* — workspace dep for the recommendation engine module (CLAUDE.md §2 invariant: "packages/ml is the recommendation engine boundary"). Imported by tRPC routers, never by client components.
 - **@helpme2c/shared** *(workspace:\*)* — workspace dep for shared utilities (e.g. `toIsoUtc` per CLAUDE.md §2 datetime invariant).
 - **zod** *(^3.23.0)* — runtime validation; backbone of tRPC procedure input schemas.
 - **tailwindcss** *(^4.0.0)* — utility CSS. ADR-0014. v4 uses CSS-import + PostCSS plugin (no JS config file).

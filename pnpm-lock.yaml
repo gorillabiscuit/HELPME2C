@@ -44,6 +44,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@helpme2c/ml':
+        specifier: workspace:*
+        version: link:../../packages/ml
       '@helpme2c/shared':
         specifier: workspace:*
         version: link:../../packages/shared
