@@ -1,3 +1,4 @@
+import { Mono } from '@helpme2c/ui';
 import { appRouter } from '@/server/router';
 
 export default async function HomePage() {
@@ -9,12 +10,10 @@ export default async function HomePage() {
       <h1 className="text-3xl font-semibold tracking-tight">HelpME2C</h1>
       <p className="mt-2 text-slate-600">Bootstrap placeholder.</p>
       <p className="mt-4 text-sm text-slate-500">
-        Server time (via tRPC + <code>@helpme2c/shared</code>):{' '}
-        <span className="font-mono">{serverTime}</span>
+        Server time (via tRPC + <code>@helpme2c/shared</code>): <Mono>{serverTime}</Mono>
       </p>
       <p className="mt-2 text-sm text-slate-500">
-        ML module status (via tRPC + <code>@helpme2c/ml</code>):{' '}
-        <span className="font-mono">{mlStatus}</span>
+        ML module status (via tRPC + <code>@helpme2c/ml</code>): <Mono>{mlStatus}</Mono>
       </p>
     </main>
   );
