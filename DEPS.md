@@ -56,6 +56,10 @@ Group by package within the monorepo (root, then per-app, per-package).
 - **tailwindcss** *(^4.0.0)* — utility CSS. ADR-0014. v4 uses CSS-import + PostCSS plugin (no JS config file).
 - **@tailwindcss/postcss** *(^4.0.0)* — required PostCSS plugin for Tailwind v4 build pipeline.
 - **postcss** *(^8.5.0)* — peer of @tailwindcss/postcss; PostCSS engine that runs the Tailwind plugin.
+- **class-variance-authority** *(^0.7.0)* — typed component-variant API used by shadcn primitives; foundation for the cn() helper and every Button/Input/Card variant. Per ADR-0016.
+- **clsx** *(^2.1.0)* — conditional className composition; paired with tailwind-merge inside the `cn()` helper at apps/web/src/lib/utils.ts. Per ADR-0016.
+- **tailwind-merge** *(^2.6.0)* — merges Tailwind classes safely (resolves conflicts like `px-2 px-4` → `px-4`); paired with clsx inside `cn()`. Per ADR-0016.
+- **lucide-react** *(^0.469.0)* — icon library pinned by ADR-0016. shadcn's default; AI-tooling-friendly.
 
 **Dev:**
 
