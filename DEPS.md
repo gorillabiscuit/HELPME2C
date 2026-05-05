@@ -31,6 +31,12 @@ Group by package within the monorepo (root, then per-app, per-package).
 
 - **typescript** *(^5.7.0)* — language. Required at root so per-package tsconfigs can extend `tsconfig.base.json` and the `pnpm typecheck` script has a compiler to invoke.
 - **@types/node** *(^20.10.0)* — Node API typings. Required at root for tooling configs and scripts; matches the `engines.node` floor in `package.json`.
+- **eslint** *(^9.18.0)* — linter. Single root flat config covers the whole monorepo (per step-2 architectural call).
+- **@eslint/js** *(^9.18.0)* — official recommended JS rule preset for ESLint flat config.
+- **typescript-eslint** *(^8.20.0)* — TypeScript parser + recommended rule preset (unified flat-config package, v8+).
+- **eslint-config-prettier** *(^10.0.0)* — disables ESLint stylistic rules that would conflict with Prettier; loaded last in the flat config.
+- **prettier** *(^3.4.0)* — formatter. Owns whitespace/quote/semicolon decisions so ESLint can focus on correctness.
+- **globals** *(^15.14.0)* — shared env-globals lookup (e.g. `globals.node`) for ESLint flat config `languageOptions`.
 
 ## apps/web
 
