@@ -43,7 +43,22 @@ Group by package within the monorepo (root, then per-app, per-package).
 
 ## apps/web
 
-(populated as Phase 2 progresses)
+**Runtime:**
+
+- **next** *(^16.0.0)* — framework. ADR-0002. Hosts both rendering and the tRPC server per ADR-0015.
+- **react** *(^19.0.0)* — required peer of Next 16. App Router uses Server Components by default per apps/web/CLAUDE.md.
+- **react-dom** *(^19.0.0)* — required peer of React 19.
+- **@trpc/server** *(^11.0.0)* — internal API. ADR-0003. Server-side only at this stage; client wiring lands when first interactive component needs it.
+- **@helpme2c/shared** *(workspace:\*)* — workspace dep for shared utilities (e.g. `toIsoUtc` per CLAUDE.md §2 datetime invariant).
+- **zod** *(^3.23.0)* — runtime validation; backbone of tRPC procedure input schemas.
+- **tailwindcss** *(^4.0.0)* — utility CSS. ADR-0014. v4 uses CSS-import + PostCSS plugin (no JS config file).
+- **@tailwindcss/postcss** *(^4.0.0)* — required PostCSS plugin for Tailwind v4 build pipeline.
+- **postcss** *(^8.5.0)* — peer of @tailwindcss/postcss; PostCSS engine that runs the Tailwind plugin.
+
+**Dev:**
+
+- **@types/react** *(^19.0.0)* — React 19 type definitions.
+- **@types/react-dom** *(^19.0.0)* — React DOM type definitions.
 
 ## apps/mobile
 
