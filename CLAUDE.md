@@ -16,12 +16,11 @@ Keep this file under 500 lines. Detail goes in `docs/decisions/` (ADRs), per-pac
 
 ### Repo structure
 
-Monorepo, pnpm workspaces. Final structure decided by `ADR-0001` (currently in queue).
+Monorepo, pnpm workspaces (per [ADR-0001](docs/decisions/0001-monorepo-tool.md)).
 
 ```
 apps/
-  web/        ← Next.js
-  api/        ← API server (decision pending: separate process vs Next.js API routes)
+  web/        ← Next.js — also hosts the tRPC server (per ADR-0015)
   mobile/     ← Expo / React Native (Phase 2; stub now, real work later)
 packages/
   shared/     ← cross-platform code (hooks, utils, types, schemas)
@@ -34,6 +33,8 @@ scripts/      ← project-level scripts (gates, hooks)
   commands/   ← Claude Code slash commands
 ```
 
+A separate `apps/api/` deployment is deferred per [ADR-0015](docs/decisions/0015-api-deployment-shape.md); extraction triggers and migration path are documented there.
+
 Each `apps/*` and `packages/*` has its own `CLAUDE.md` for package-specific rules. Root `CLAUDE.md` (this file) holds global rules.
 
 ---
@@ -42,7 +43,7 @@ Each `apps/*` and `packages/*` has its own `CLAUDE.md` for package-specific rule
 
 Things that MUST be true. Violations get reverted, not patched.
 
-- **Cross-package import direction.** `apps/web` imports from `packages/{shared,ui,ml}`. `apps/api` imports from `packages/{shared,ml}`. `apps/mobile` imports from `packages/{shared,ml}` and a separate `packages/mobile-ui` (NEVER `packages/ui` — web React ≠ React Native). No app imports from another app.
+- **Cross-package import direction.** `apps/web` imports from `packages/{shared,ui,ml}`. `apps/mobile` imports from `packages/{shared,ml}` and a separate `packages/mobile-ui` (NEVER `packages/ui` — web React ≠ React Native). No app imports from another app. (If `apps/api` is extracted later per [ADR-0015](docs/decisions/0015-api-deployment-shape.md), it imports from `packages/{shared,ml}`.)
 - **`packages/shared` is platform-agnostic.** No DOM APIs, no React Native APIs, no Node-specific APIs unless wrapped behind a platform-detection layer. If you need a platform-specific implementation, expose an interface from `shared` and implement it per-platform in the consuming app.
 - **`packages/ml` is the recommendation engine boundary.** It MUST be importable as a pure module from any caller. No coupling to Next.js, no coupling to a specific HTTP framework. This boundary exists so a future public API product can wrap the same module without rewriting (see PROJECT.md §revenue).
 - **API surface is internally tRPC.** The web app calls the API via tRPC for end-to-end type safety. (Confirmed in `ADR-0003`.) A future REST/GraphQL public API is layered on top, never replaces the internal tRPC layer.
