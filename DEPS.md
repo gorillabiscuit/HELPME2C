@@ -35,10 +35,6 @@ Group by package within the monorepo (root, then per-app, per-package).
 
 (populated as Phase 2 progresses)
 
-## apps/api
-
-(populated as Phase 2 progresses, if this package becomes real)
-
 ## apps/mobile
 
 (populated in Phase 2 mobile work)
@@ -52,10 +48,6 @@ Group by package within the monorepo (root, then per-app, per-package).
 (populated as Phase 2 progresses)
 
 ## packages/ml
-
-(populated as Phase 2 progresses)
-
-## packages/content
 
 (populated as Phase 2 progresses)
 
