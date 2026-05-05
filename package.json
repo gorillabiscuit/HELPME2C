@@ -10,7 +10,10 @@
   "scripts": {
     "dev": "pnpm -r --parallel dev",
     "typecheck": "pnpm -r typecheck",
-    "lint": "pnpm -r lint",
+    "lint": "eslint . --max-warnings=0",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "test": "pnpm -r test",
     "preflight": "pnpm typecheck && pnpm lint && pnpm test"
   },

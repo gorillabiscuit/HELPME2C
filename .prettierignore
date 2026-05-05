@@ -1,0 +1,15 @@
+node_modules/
+pnpm-lock.yaml
+.next/
+.turbo/
+dist/
+build/
+out/
+coverage/
+test-results/
+playwright-report/
+*.tsbuildinfo
+
+# Markdown is hand-tuned (CLAUDE.md, ADRs, PROJECT.md) — Prettier reflow can
+# lose intentional line breaks and table widths. Enforce style by review, not tool.
+*.md
