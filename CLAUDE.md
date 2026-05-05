@@ -218,40 +218,46 @@ Approach B is mandatory for anything in `packages/ml/*`. The recommendation engi
 
 ## 9. Commands (canonical)
 
-Run exactly these, with `pnpm` (or `npm` / `bun` if ADR-0001 picks differently):
+Run exactly these (pnpm per [ADR-0001](docs/decisions/0001-monorepo-tool.md)):
 
 ```bash
 # Install everything
 pnpm install
 
 # Dev — root invokes per-app
-pnpm dev                                  # all apps
+pnpm dev                                  # all apps in parallel
 pnpm dev --filter=@helpme2c/web           # just web
-pnpm dev --filter=@helpme2c/api           # just api
 
-# Type check
+# Type check (recursive across workspace packages)
 pnpm typecheck
 
-# Lint
+# Lint (single root flat config covers the whole monorepo)
 pnpm lint
-pnpm lint --fix
+pnpm lint:fix
 
-# Tests
-pnpm test                                 # all packages
-pnpm test --filter=@helpme2c/ml           # just ml package
-pnpm test:e2e                             # Playwright
+# Format (Prettier; markdown excluded per .prettierignore)
+pnpm format                               # write
+pnpm format:check                         # check only
+
+# Tests (single root vitest config covers all packages)
+pnpm test                                 # all tests
+pnpm test packages/ml                     # narrow to a path
 
 # All commit-stage gates at once
-pnpm preflight                            # typecheck + lint + test (defined in root package.json)
+pnpm preflight                            # typecheck + lint + test (definition in root package.json)
+```
 
-# Pre-push gates (AI-attribution scan)
-bash scripts/scan-ai-attribution.sh
+**Pre-push gates** run automatically via `.husky/pre-push` and don't normally need invoking by hand:
+
+```bash
+bash scripts/scan-ai-attribution.sh       # AI-attribution scan
+pnpm preflight                            # full preflight
 ```
 
 **One-time install per clone:**
 
 ```bash
-pnpm install                              # also runs `husky install` via `prepare` script
+pnpm install                              # runs the `prepare` script, which invokes `husky` (v9) to wire .husky/_/ → .husky/ hook files
 ```
 
 If any command fails on a clean checkout of `main`, that's a bug — file it.
