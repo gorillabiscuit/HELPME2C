@@ -1,20 +1,22 @@
-import { Mono } from '@helpme2c/ui';
+import { Show } from '@clerk/nextjs';
+import { currentUser } from '@clerk/nextjs/server';
 import { appRouter } from '@/server/router';
+import { DashboardHome } from '@/components/dashboard-home';
+import { MarketingHero } from '@/components/marketing-hero';
 
 export default async function HomePage() {
+  const user = await currentUser();
   const caller = appRouter.createCaller({});
   const { serverTime, mlStatus } = await caller.hello();
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-16">
-      <h1 className="text-3xl font-semibold tracking-tight">HelpME2C</h1>
-      <p className="mt-2 text-slate-600">Bootstrap placeholder.</p>
-      <p className="mt-4 text-sm text-slate-500">
-        Server time (via tRPC + <code>@helpme2c/shared</code>): <Mono>{serverTime}</Mono>
-      </p>
-      <p className="mt-2 text-sm text-slate-500">
-        ML module status (via tRPC + <code>@helpme2c/ml</code>): <Mono>{mlStatus}</Mono>
-      </p>
-    </main>
+    <>
+      <Show when="signed-out">
+        <MarketingHero />
+      </Show>
+      <Show when="signed-in">
+        <DashboardHome firstName={user?.firstName} serverTime={serverTime} mlStatus={mlStatus} />
+      </Show>
+    </>
   );
 }
