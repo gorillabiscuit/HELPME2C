@@ -226,7 +226,7 @@ pnpm install
 
 # Dev — root invokes per-app
 pnpm dev                                  # all apps in parallel
-pnpm dev --filter=@helpme2c/web           # just web
+pnpm --filter=@helpme2c/web dev           # just web
 
 # Type check (recursive across workspace packages)
 pnpm typecheck
