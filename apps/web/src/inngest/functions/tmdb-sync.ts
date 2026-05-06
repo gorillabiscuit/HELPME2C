@@ -123,7 +123,78 @@ async function upsertStreamingProviders(
   if (rows.length > 0) await db.insert(streamingAvailability).values(rows);
 }
 
+// Fetches and upserts a single TMDB TV show — title row, keyword tags, tag joins,
+// and streaming availability. Pure async function (no Inngest wrapping) so it can
+// be invoked directly for backfills, ad-hoc tests, or future admin tooling.
+// Returns the upserted title's UUID, or null if the upsert produced no row.
+export async function processTmdbTvShow(showId: number): Promise<string | null> {
+  const [detail, providers] = await Promise.all([
+    tmdbGet<TmdbTvDetail>(`/tv/${showId}?append_to_response=keywords&language=en-US`),
+    tmdbGet<TmdbWatchProviders>(`/tv/${showId}/watch/providers`),
+  ]);
+
+  const [upserted] = await db
+    .insert(titles)
+    .values({
+      externalId: String(detail.id),
+      source: 'tmdb',
+      mediaType: 'tv',
+      title: detail.name,
+      originalTitle: detail.original_name !== detail.name ? detail.original_name : null,
+      synopsis: detail.overview || null,
+      status: tmdbStatusToEnum(detail.status),
+      releaseYear: detail.first_air_date ? parseInt(detail.first_air_date.slice(0, 4)) : null,
+      endYear:
+        detail.last_air_date && detail.status === 'Ended'
+          ? parseInt(detail.last_air_date.slice(0, 4))
+          : null,
+      episodeCount: detail.number_of_episodes || null,
+      episodeDurationMinutes: detail.episode_run_time[0] ?? null,
+      posterUrl: detail.poster_path ? `${TMDB_IMAGE_BASE}${detail.poster_path}` : null,
+      backdropUrl: detail.backdrop_path ? `${TMDB_IMAGE_BASE}${detail.backdrop_path}` : null,
+      popularityScore: detail.popularity,
+    })
+    .onConflictDoUpdate({
+      target: [titles.externalId, titles.source],
+      set: {
+        title: detail.name,
+        synopsis: detail.overview || null,
+        status: tmdbStatusToEnum(detail.status),
+        episodeCount: detail.number_of_episodes || null,
+        popularityScore: detail.popularity,
+        updatedAt: new Date(),
+      },
+    })
+    .returning({ id: titles.id });
+
+  if (!upserted) return null;
+
+  const keywords = detail.keywords?.results ?? [];
+  const tagIdMap = await upsertTmdbKeywords(keywords);
+
+  const tagRows = keywords
+    .map((kw) => ({ titleId: upserted.id, tagId: tagIdMap.get(kw.id) }))
+    .filter((r): r is { titleId: string; tagId: string } => r.tagId !== undefined)
+    .map((r) => ({ ...r, weight: 100, isSpoiler: false }));
+
+  if (tagRows.length > 0) {
+    await db.insert(titleTags).values(tagRows).onConflictDoNothing();
+  }
+
+  await upsertStreamingProviders(upserted.id, providers);
+  return upserted.id;
+}
+
+// Fetches one page of popular TV shows from TMDB Discover.
+export async function fetchTmdbTvDiscoverPage(page: number): Promise<TmdbDiscoverPage> {
+  return tmdbGet<TmdbDiscoverPage>(
+    `/discover/tv?sort_by=popularity.desc&page=${page}&language=en-US`,
+  );
+}
+
 // Syncs one page of popular TV shows. Triggered per-page by tmdbSyncTvAll.
+// Wraps the pure helpers in step.run so Inngest can checkpoint per-show progress
+// and resume from the failed step on retry.
 export const tmdbSyncTvPage = inngest.createFunction(
   {
     id: 'tmdb-sync-tv-page',
@@ -134,67 +205,10 @@ export const tmdbSyncTvPage = inngest.createFunction(
   async ({ event, step }) => {
     const page: number = event.data.page ?? 1;
 
-    const discoverPage = await step.run('fetch-discover-page', () =>
-      tmdbGet<TmdbDiscoverPage>(`/discover/tv?sort_by=popularity.desc&page=${page}&language=en-US`),
-    );
+    const discoverPage = await step.run('fetch-discover-page', () => fetchTmdbTvDiscoverPage(page));
 
     for (const show of discoverPage.results) {
-      await step.run(`process-tv-${show.id}`, async () => {
-        const [detail, providers] = await Promise.all([
-          tmdbGet<TmdbTvDetail>(`/tv/${show.id}?append_to_response=keywords&language=en-US`),
-          tmdbGet<TmdbWatchProviders>(`/tv/${show.id}/watch/providers`),
-        ]);
-
-        const [upserted] = await db
-          .insert(titles)
-          .values({
-            externalId: String(detail.id),
-            source: 'tmdb',
-            mediaType: 'tv',
-            title: detail.name,
-            originalTitle: detail.original_name !== detail.name ? detail.original_name : null,
-            synopsis: detail.overview || null,
-            status: tmdbStatusToEnum(detail.status),
-            releaseYear: detail.first_air_date ? parseInt(detail.first_air_date.slice(0, 4)) : null,
-            endYear:
-              detail.last_air_date && detail.status === 'Ended'
-                ? parseInt(detail.last_air_date.slice(0, 4))
-                : null,
-            episodeCount: detail.number_of_episodes || null,
-            episodeDurationMinutes: detail.episode_run_time[0] ?? null,
-            posterUrl: detail.poster_path ? `${TMDB_IMAGE_BASE}${detail.poster_path}` : null,
-            backdropUrl: detail.backdrop_path ? `${TMDB_IMAGE_BASE}${detail.backdrop_path}` : null,
-            popularityScore: detail.popularity,
-          })
-          .onConflictDoUpdate({
-            target: [titles.externalId, titles.source],
-            set: {
-              title: detail.name,
-              synopsis: detail.overview || null,
-              status: tmdbStatusToEnum(detail.status),
-              episodeCount: detail.number_of_episodes || null,
-              popularityScore: detail.popularity,
-              updatedAt: new Date(),
-            },
-          })
-          .returning({ id: titles.id });
-
-        if (!upserted) return;
-
-        const keywords = detail.keywords?.results ?? [];
-        const tagIdMap = await upsertTmdbKeywords(keywords);
-
-        const tagRows = keywords
-          .map((kw) => ({ titleId: upserted.id, tagId: tagIdMap.get(kw.id) }))
-          .filter((r): r is { titleId: string; tagId: string } => r.tagId !== undefined)
-          .map((r) => ({ ...r, weight: 100, isSpoiler: false }));
-
-        if (tagRows.length > 0) {
-          await db.insert(titleTags).values(tagRows).onConflictDoNothing();
-        }
-
-        await upsertStreamingProviders(upserted.id, providers);
-      });
+      await step.run(`process-tv-${show.id}`, () => processTmdbTvShow(show.id));
     }
 
     return { page, processed: discoverPage.results.length, totalPages: discoverPage.total_pages };
