@@ -6,6 +6,7 @@ import { ConsentBanner } from '@/components/consent-banner';
 import { ConsentPreferencesDialog } from '@/components/consent-preferences-dialog';
 import { PostHogProvider } from '@/components/posthog-provider';
 import { SiteFooter } from '@/components/site-footer';
+import { TRPCProvider } from '@/components/trpc-provider';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -18,26 +19,28 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en">
       <body className="flex min-h-screen flex-col bg-white text-slate-900 antialiased">
         <ClerkProvider>
-          <ConsentProvider>
-            <PostHogProvider>
-              <header className="flex items-center justify-between border-b border-slate-200 px-6 py-3">
-                <span className="text-sm font-semibold tracking-tight">HelpME2C</span>
-                <div className="flex items-center gap-2">
-                  <Show when="signed-out">
-                    <SignInButton />
-                    <SignUpButton />
-                  </Show>
-                  <Show when="signed-in" treatPendingAsSignedOut={false}>
-                    <UserButton />
-                  </Show>
-                </div>
-              </header>
-              <div className="flex-1">{children}</div>
-              <SiteFooter />
-              <ConsentBanner />
-              <ConsentPreferencesDialog />
-            </PostHogProvider>
-          </ConsentProvider>
+          <TRPCProvider>
+            <ConsentProvider>
+              <PostHogProvider>
+                <header className="flex items-center justify-between border-b border-slate-200 px-6 py-3">
+                  <span className="text-sm font-semibold tracking-tight">HelpME2C</span>
+                  <div className="flex items-center gap-2">
+                    <Show when="signed-out">
+                      <SignInButton />
+                      <SignUpButton />
+                    </Show>
+                    <Show when="signed-in" treatPendingAsSignedOut={false}>
+                      <UserButton />
+                    </Show>
+                  </div>
+                </header>
+                <div className="flex-1">{children}</div>
+                <SiteFooter />
+                <ConsentBanner />
+                <ConsentPreferencesDialog />
+              </PostHogProvider>
+            </ConsentProvider>
+          </TRPCProvider>
         </ClerkProvider>
       </body>
     </html>
