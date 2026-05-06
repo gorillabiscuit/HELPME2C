@@ -65,8 +65,12 @@ Group by package within the monorepo (root, then per-app, per-package).
 - **@sentry/nextjs** *(^10.51.0)* — Sentry's Next.js SDK per ADR-0010. Configures three runtimes (browser via `instrumentation-client.ts`, Node server via `sentry.server.config.ts`, Edge middleware via `sentry.edge.config.ts`) with PII redaction per ADR-0012 §9 (`sendDefaultPii: false` + `beforeSend` belt-and-suspenders). No session replay (PostHog handles that per ADR-0010). Source map upload deferred to production deploy.
 - **posthog-js** *(^1.372.9)* — PostHog client-side SDK per ADR-0010 (product analytics + session replay). Initialized once with `opt_out_capturing_by_default: true`; the consent-aware `<PostHogProvider>` flips opt-in/opt-out and starts/stops session recording based on the GDPR banner toggles per ADR-0012 §4. Strict masking (`mask_all_text`, `maskAllInputs`) and `person_profiles: 'identified_only'` per ADR-0012 §9.
 
+- **drizzle-orm** *(^0.45.2)* — ORM. ADR-0019. TypeScript-native schema + query builder; no codegen step. Used with the Neon serverless adapter for all DB access from tRPC procedures.
+- **@neondatabase/serverless** *(^1.1.0)* — Neon's serverless Postgres driver. ADR-0019. Required adapter for Drizzle to connect to Neon without traditional TCP connection-pool issues in serverless/edge environments.
+
 **Dev:**
 
+- **drizzle-kit** *(^0.31.10)* — Drizzle CLI for schema introspection, migration generation (`drizzle-kit generate`), and migration application (`drizzle-kit migrate`). Dev-only; not shipped to production.
 - **@types/react** *(^19.0.0)* — React 19 type definitions.
 - **@types/react-dom** *(^19.0.0)* — React DOM type definitions.
 
