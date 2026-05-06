@@ -27,7 +27,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                     <SignInButton />
                     <SignUpButton />
                   </Show>
-                  <Show when="signed-in">
+                  <Show when="signed-in" treatPendingAsSignedOut={false}>
                     <UserButton />
                   </Show>
                 </div>
