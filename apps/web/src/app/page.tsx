@@ -17,6 +17,14 @@ export default async function HomePage() {
   }
 
   const caller = appRouter.createCaller(await createContext());
+
+  // Sync the Clerk → DB user row on every signed-in render. Idempotent upsert;
+  // cheap on the second call. This is our pre-webhook ensure path — when we add
+  // a Clerk webhook for user.created/user.updated, this becomes a fallback.
+  if (userId) {
+    await caller.me.ensure();
+  }
+
   const { serverTime, mlStatus } = await caller.hello();
 
   return (
