@@ -48,7 +48,10 @@ Group by package within the monorepo (root, then per-app, per-package).
 - **next** *(^16.0.0)* — framework. ADR-0002. Hosts both rendering and the tRPC server per ADR-0015.
 - **react** *(^19.0.0)* — required peer of Next 16. App Router uses Server Components by default per apps/web/CLAUDE.md.
 - **react-dom** *(^19.0.0)* — required peer of React 19.
-- **@trpc/server** *(^11.0.0)* — internal API. ADR-0003. Server-side only at this stage; client wiring lands when first interactive component needs it.
+- **@trpc/server** *(^11.0.0)* — internal API. ADR-0003. Server-side runtime + router definitions.
+- **@trpc/client** *(^11.0.0)* — typed tRPC client for browser code. ADR-0003. Required peer of `@trpc/react-query`.
+- **@trpc/react-query** *(^11.0.0)* — React Query bindings for tRPC. ADR-0003. Provides `useQuery`/`useMutation` hooks with full end-to-end type inference from `AppRouter`.
+- **@tanstack/react-query** *(^5.0.0)* — required peer of `@trpc/react-query`. Owns client-side caching, invalidation, and refetch lifecycle for tRPC calls.
 - **@helpme2c/ml** *(workspace:\*)* — workspace dep for the recommendation engine module (CLAUDE.md §2 invariant: "packages/ml is the recommendation engine boundary"). Imported by tRPC routers, never by client components.
 - **@helpme2c/shared** *(workspace:\*)* — workspace dep for shared utilities (e.g. `toIsoUtc` per CLAUDE.md §2 datetime invariant).
 - **@helpme2c/ui** *(workspace:\*)* — workspace dep for cross-app React primitives (currently `<Mono>`). Most app-specific UI lives in `apps/web/src/components/`; this package is reserved for things genuinely shared or with no good app-level home.
