@@ -81,10 +81,14 @@ Before doing any of these, pause and confirm with the human in the chat:
 - **Changing the public shape of any API procedure** (path, input schema, output schema).
 - **Changing the response semantics of an existing endpoint** in a way that could break a client, even if the shape looks identical. Announce as `BREAKING CHANGE vs <ticket>` and wait for confirmation.
 - **Adding a new top-level directory** (`apps/foo`, `packages/bar`, anything new at the root).
+- **Schema migrations that touch existing tables** — drop/rename/alter columns, change or add indexes on populated tables, change enum members, add constraints with retroactive effect. New tables and purely additive nullable columns are usually safe. Anything else needs a rollback plan, a sandbox dry-run (Neon branch), and confirmation. The 2026-05-06 UNIQUE-index bug was caught only because a real TMDB sync ran against the schema; column renames or splits on populated tables can land silently destructive.
 - **Touching auth, JWT handling, session management, or privacy-control code.**
+- **Changing consent, deletion, or privacy-control flows** — cookie/consent banner UX, `/api/account/delete`, `users.region` / `age_verified*` columns, PostHog opt-in/out wiring, any new cookie or persisted user preference, DSAR (Article 15/17/20) handling. The bullet above covers code surface; this one covers the *flows* — what we collect, when, how it's deleted. ADR-0012 is law here; wrong defaults are legally significant.
 - **Introducing a new cross-cutting pattern** (a shared base class, a middleware, a global state slice).
 - **Deleting or renaming anything in `docs/decisions/`.**
 - **Calling an external API from new code paths** (TMDB, AniList, etc) — confirm rate limits, caching, and error handling before adding.
+- **Adding new external ingress** — webhooks, OAuth callbacks, public POST/PUT routes outside `/api/trpc/*`. New ingress is new attack surface. Confirm: auth model (signing secret / HMAC / OAuth state), idempotency, rate-limit posture, and the failure mode if the endpoint is hit during an incident.
+- **Processing user data without an explicit user action** — nightly recompute jobs over user histories, behavioural-signal aggregation, ML training inputs, batch updates triggered by upstream webhooks. Read-on-request from a logged-in user is fine; background work over user data needs confirmation because the user isn't there to consent in the moment.
 - **Touching the recommendation engine boundary** (`packages/ml/*`). This is the prospective product moat (see PROJECT.md §revenue); changes need explicit go-ahead.
 - **Adding any kind of analytics / tracking pixel / third-party script.**
 
