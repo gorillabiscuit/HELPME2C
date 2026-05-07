@@ -74,6 +74,8 @@ Group by package within the monorepo (root, then per-app, per-package).
 **Dev:**
 
 - **drizzle-kit** *(^0.31.10)* — Drizzle CLI for schema introspection, migration generation (`drizzle-kit generate`), and migration application (`drizzle-kit migrate`). Dev-only; not shipped to production.
+- **pg** *(^8.20.0)* — `node-postgres` driver. Used by drizzle-kit only (so dev-only): the Neon serverless WebSocket driver hangs inside `drizzle-kit migrate`, so `pg` is the migration-time driver. Runtime app code still uses `@neondatabase/serverless` per ADR-0019.
+- **@types/pg** *(^8.20.0)* — TypeScript types for `pg`. Dev-only; required for typecheck.
 - **@types/react** *(^19.0.0)* — React 19 type definitions.
 - **@types/react-dom** *(^19.0.0)* — React DOM type definitions.
 

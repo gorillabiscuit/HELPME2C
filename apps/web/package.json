@@ -41,8 +41,10 @@
     "zod": "^3.23.0"
   },
   "devDependencies": {
+    "@types/pg": "^8.20.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "drizzle-kit": "^0.31.10"
+    "drizzle-kit": "^0.31.10",
+    "pg": "^8.20.0"
   }
 }
