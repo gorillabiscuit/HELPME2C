@@ -7,16 +7,35 @@ import { appRouter } from '@/server/router';
 import { createContext } from '@/server/trpc';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 
 interface PageProps {
-  searchParams: Promise<{ q?: string | string[] }>;
+  searchParams: Promise<{ q?: string | string[]; type?: string | string[] }>;
 }
 
-const MEDIA_TYPE_LABEL: Record<string, string> = {
+type MediaType = 'tv' | 'film' | 'anime';
+
+const MEDIA_TYPE_LABEL: Record<MediaType, string> = {
   tv: 'TV',
   film: 'Film',
   anime: 'Anime',
 };
+
+const MEDIA_TYPE_VALUES: readonly MediaType[] = ['tv', 'film', 'anime'] as const;
+
+function isMediaType(value: string | undefined): value is MediaType {
+  return value !== undefined && (MEDIA_TYPE_VALUES as readonly string[]).includes(value);
+}
+
+// Build the /search URL with q + (optional) type. Used by the filter
+// pills so clicking one preserves the current query.
+function searchHref(q: string, type: MediaType | undefined): string {
+  const params = new URLSearchParams();
+  if (q) params.set('q', q);
+  if (type) params.set('type', type);
+  const qs = params.toString();
+  return qs ? `/search?${qs}` : '/search';
+}
 
 export default async function SearchPage({ searchParams }: PageProps) {
   // Phase 1A: registered users only. Same redirect-to-home pattern as
@@ -29,6 +48,10 @@ export default async function SearchPage({ searchParams }: PageProps) {
   const sp = await searchParams;
   const rawQ = Array.isArray(sp.q) ? sp.q[0] : sp.q;
   const q = (rawQ ?? '').trim();
+  const rawType = Array.isArray(sp.type) ? sp.type[0] : sp.type;
+  // Silently drop invalid `type` values (e.g. /search?type=cartoon) rather
+  // than 400-ing — the filter is a UX nicety, not a contract.
+  const mediaType = isMediaType(rawType) ? rawType : undefined;
 
   // Branch on query state so the server component renders the right
   // empty/loading/results UI without needing client-side state.
@@ -51,17 +74,21 @@ export default async function SearchPage({ searchParams }: PageProps) {
     // page and any future client autocomplete share the same shape +
     // wildcard escaping + popularity ordering.
     const caller = appRouter.createCaller(await createContext());
-    const results = await caller.titles.search({ q });
+    const results = await caller.titles.search({ q, mediaType });
 
     if (results.length === 0) {
       resultsBlock = (
-        <p className="mt-8 text-sm text-slate-600">No titles match &ldquo;{q}&rdquo;.</p>
+        <p className="mt-8 text-sm text-slate-600">
+          No {mediaType ? `${MEDIA_TYPE_LABEL[mediaType].toLowerCase()} ` : ''}titles match &ldquo;
+          {q}&rdquo;
+          {mediaType ? ' — try a different filter' : ''}.
+        </p>
       );
     } else {
       resultsBlock = (
         <ul className="mt-8 grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
           {results.map((title) => {
-            const mediaTypeLabel = MEDIA_TYPE_LABEL[title.mediaType] ?? title.mediaType;
+            const mediaTypeLabel = MEDIA_TYPE_LABEL[title.mediaType];
             return (
               <li key={title.id}>
                 <Link href={`/titles/${title.id}`} className="group block">
@@ -95,14 +122,23 @@ export default async function SearchPage({ searchParams }: PageProps) {
     }
   }
 
+  // Filter-pill button helper — server-rendered link, active state set by
+  // comparing to the resolved `mediaType`.
+  const filterPillClass = (active: boolean) =>
+    cn(
+      'inline-flex items-center rounded-full px-3 py-1 text-sm font-medium transition',
+      active ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200',
+    );
+
   return (
     <main className="mx-auto max-w-5xl px-6 py-12">
       <h1 className="text-3xl font-semibold tracking-tight">Search</h1>
 
-      {/* Plain HTML form, method=GET. Submits the query as ?q=<input>, which
-          renders this same page server-side with the new param. No JS
-          dependency for the basic flow. Client-side debounced autocomplete
-          would be a separate component overlaid on this. */}
+      {/* Plain HTML form, method=GET. Submits the query as ?q=<input> +
+          ?type=<hidden>, which renders this same page server-side with
+          the new params. The hidden input preserves the active filter
+          across query submissions; clicking a filter pill is its own
+          link-based navigation that preserves the current q. */}
       <form action="/search" method="get" className="mt-6 flex gap-2">
         <Input
           name="q"
@@ -112,8 +148,24 @@ export default async function SearchPage({ searchParams }: PageProps) {
           autoFocus
           className="max-w-md"
         />
+        {mediaType ? <input type="hidden" name="type" value={mediaType} /> : null}
         <Button type="submit">Search</Button>
       </form>
+
+      <nav aria-label="Filter by media type" className="mt-4 flex flex-wrap gap-2">
+        <Link href={searchHref(q, undefined)} className={filterPillClass(!mediaType)}>
+          All
+        </Link>
+        {MEDIA_TYPE_VALUES.map((type) => (
+          <Link
+            key={type}
+            href={searchHref(q, type)}
+            className={filterPillClass(mediaType === type)}
+          >
+            {MEDIA_TYPE_LABEL[type]}
+          </Link>
+        ))}
+      </nav>
 
       {resultsBlock}
     </main>
