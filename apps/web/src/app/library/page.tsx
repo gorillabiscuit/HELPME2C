@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import { auth } from '@clerk/nextjs/server';
 import { appRouter } from '@/server/router';
 import { createContext } from '@/server/trpc';
+import { LibraryEditDialog } from '@/components/library-edit-dialog';
 import { LibraryRemoveButton } from '@/components/library-remove-button';
 
 const STATUS_LABEL: Record<string, string> = {
@@ -94,12 +95,29 @@ export default async function LibraryPage() {
                   </p>
                 </div>
 
-                <div className="flex flex-none items-center gap-3 text-xs">
+                <div className="flex flex-none items-center gap-2 text-xs">
                   {entry.rating !== null ? (
                     <span className="font-medium text-slate-700">{entry.rating}/10</span>
                   ) : (
                     <span className="text-slate-400">—</span>
                   )}
+                  {/* Edit only on tracking entries — editing an anchor would
+                      implicitly graduate it (kind=anchor + status=set is not
+                      a meaningful state) and that promotion should be
+                      explicit, not a side-effect of clicking Edit. */}
+                  {entry.kind === 'tracking' ? (
+                    <LibraryEditDialog
+                      titleId={title.id}
+                      titleText={title.title}
+                      hasEpisodes={title.mediaType !== 'film'}
+                      initialEntry={{
+                        status: entry.status,
+                        currentEpisode: entry.currentEpisode,
+                        rating: entry.rating,
+                        notes: entry.notes,
+                      }}
+                    />
+                  ) : null}
                   <LibraryRemoveButton titleId={title.id} titleText={title.title} />
                 </div>
               </li>
