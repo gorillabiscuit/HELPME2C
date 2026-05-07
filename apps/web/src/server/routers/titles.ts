@@ -29,6 +29,41 @@ export const titlesRouter = router({
   // (public), but gating prevents trivial scraping of our derived
   // taxonomy/popularity. Promote to public if/when a pre-signup
   // marketing-page search lands.
+  // Top-N titles by popularity. Backs the M3 Path A onboarding "quick picks"
+  // grid (cold-start anchor capture) and any future "popular right now"
+  // surface. Eventually this is where the M3 mapping-session "70%
+  // demographic-weighted + 30% wildcards, varied per visit" logic lands;
+  // v1 is just `popularity_score DESC` with no personalisation. The 70/30
+  // mix needs the user's region / demographic priors in the predicate,
+  // which we'll add in M4 alongside the rec engine.
+  popular: protectedProcedure
+    .input(
+      z
+        .object({
+          limit: z.number().int().min(1).max(50).optional().default(16),
+          mediaType: mediaTypeSchema.optional(),
+        })
+        .optional(),
+    )
+    .query(async ({ ctx, input }) => {
+      const where = input?.mediaType ? eq(titles.mediaType, input.mediaType) : undefined;
+
+      return ctx.db
+        .select({
+          id: titles.id,
+          title: titles.title,
+          originalTitle: titles.originalTitle,
+          mediaType: titles.mediaType,
+          releaseYear: titles.releaseYear,
+          posterUrl: titles.posterUrl,
+          popularityScore: titles.popularityScore,
+        })
+        .from(titles)
+        .where(where)
+        .orderBy(sql`${titles.popularityScore} DESC NULLS LAST, ${titles.title} ASC`)
+        .limit(input?.limit ?? 16);
+    }),
+
   search: protectedProcedure
     .input(
       z.object({
