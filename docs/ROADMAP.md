@@ -1,7 +1,7 @@
 # HelpME2C — Phase 1A roadmap
 
 **Status:** living document, refined as we learn
-**Last updated:** 2026-05-05
+**Last updated:** 2026-05-07
 
 This is the sequenced milestone view of [Phase 1A scope](../PROJECT.md). It captures the build order and dependencies — **not the scope itself**. PROJECT.md remains the cut-line contract: anything outside the IN-scope list there requires explicit negotiation per [CLAUDE.md §4](../CLAUDE.md).
 
@@ -33,29 +33,54 @@ Each milestone is meant to **ship to alpha testers** as it lands — not "comple
 **Outcome:** titles are discoverable. Foundation for everything user-facing.
 **Note:** largest single milestone; ships in slices (TMDB-only first, small dataset, then expand).
 
-### M3 — Manual tracking
+### M3 — Signal gathering (merged: onboarding + manual tracking)
+
+The user produces taste signal. Both intake paths write to the same underlying
+data — onboarding is the cold-start bootstrap so the rec engine has something
+to work with; manual tracking is the ongoing deepening. A new user with zero
+tracked items has no recs, so onboarding-as-data-gathering must precede
+"track your watchlist" framing — not follow it.
+
+**Path A — onboarding (cold-start bootstrap, ~3 minutes)**
+Captured in detail during the mapping session.
+- Demographics (region required, age + gender optional as soft priors)
+- Anchor capture: rich search + thumbnail autocomplete + 16-card "Quick picks" grid (70% demographic-weighted + 30% wildcards, varied per visit)
+- Multi-bar per-dimension confidence meter (the user sees their taste vector forming)
+- Cross-cluster prompt after 3 anchors share a tight theme signature
+- Genre disambiguation step — three-bucket selector (no thanks / sure / love); skipped if anchors are theme-diverse
+- "Refine your taste" swipe mode persists as a voluntary post-onboarding entry point
+
+**Path B — manual tracking (ongoing)**
 - Add title → list
 - Status (Watching / Completed / On Hold / Dropped / Plan to Watch)
 - Per-episode progress
 - 1-10 rating
 - Free-text notes
 - Title detail page
+
+**Shared substrate**
+- Both paths persist to the same `(user, title, signal_type, value)` schema, so
+  the rec engine consumes them uniformly
 - Privacy per list per title (public / friends-only / private)
+- Title detail page is the read surface used by both flows
 
-**Outcome:** user can use HelpME2C as a basic tracker. Validates M2's title data is real.
+**Outcome:** new user gets a usable taste vector in ~3 minutes via Path A; can
+deepen it indefinitely via Path B. M2's title data is validated by both paths
+producing real reads + writes.
 
-### M4 — Onboarding (anchor flow)
-Captured in detail during the mapping session.
-- Demographics (region required, age, gender optional as soft prior)
-- Anchor capture: rich search + thumbnail autocomplete + 16-card "Quick picks" grid (70% demographic-weighted + 30% wildcards, varied per visit)
-- Multi-bar per-dimension confidence meter
-- Cross-cluster prompt after 3 anchors share a tight theme signature
-- Genre disambiguation step (skip if anchors are theme-diverse): three-bucket selector (no thanks / sure / love)
-- "Refine your taste" swipe mode lives post-onboarding as voluntary entry point
+**Why these were merged:** the previous split treated onboarding as something
+that happens after manual tracking. Cold-start users have zero tracked items,
+so the rec engine has nothing to score. Onboarding-as-signal-gathering is the
+only way to produce a usable taste vector in v1; manual tracking is the
+familiar follow-on framing. Splitting them led to a sequencing problem
+(reviewer feedback, 2026-05-07); merging keeps the surface focused on "user
+produces taste signal" regardless of mode.
 
-**Outcome:** new user gets first taste vector in ~3 minutes.
+**Note:** largest user-facing milestone in Phase 1A; ships in slices —
+Path A first (gets the rec engine fed), Path B layered on once the data
+schema is proven.
 
-### M5 — Personal recommendations (theme-based)
+### M4 — Personal recommendations (theme-based)
 - Tag-overlap scoring blended with user ratings (per [ADR-0008](decisions/0008-ml-inference-approach.md))
 - Pre-computed nightly via Inngest
 - Cached in Postgres (per [ADR-0013](decisions/0013-recommendation-cache-backend.md))
@@ -63,7 +88,7 @@ Captured in detail during the mapping session.
 
 **Outcome:** home page shows ranked personal recs. First piece of the moat is validated.
 
-### M6 — Streaming availability surface
+### M5 — Streaming availability surface
 - TMDB watch-providers data integrated into title schema
 - "Where to watch" panel on title pages
 - User-connected subscriptions (manual checkboxes; no auto-detect)
@@ -71,9 +96,9 @@ Captured in detail during the mapping session.
 - Architecture accommodates affiliate URL building per [PROJECT.md](../PROJECT.md) revenue model (impl deferred to Phase 1B)
 
 **Outcome:** recs are actionable, not dead ends. Ships before users start showing the app to others.
-**Parallelism:** can run partially in parallel with M5.
+**Parallelism:** can run partially in parallel with M4.
 
-### M7 — Feedback loop
+### M6 — Feedback loop
 - Title rating (1-10) → drives taste vector
 - Rec rating (terrible / bad / ok / good / terrific) → drives algorithm tuning
 - In-app popup on revisit when there's an unrated recently-completed title
@@ -82,20 +107,20 @@ Captured in detail during the mapping session.
 **Outcome:** the system starts learning per user. Foundation for the "system is getting smarter" narrative.
 **Note:** email triggers + push notifications explicitly deferred to Phase 1B/2.
 
-### M8 — Group recommendations
+### M7 — Group recommendations
 The differentiator. Captured in detail during the mapping session.
 - Group creation UI + invite-by-link flow
 - Persistent groups, multi-group support, named, editable membership
 - Hard line on unregistered partner; honest copy "ghost profiles coming next phase"
 - Minimal in-group privacy: members see group recs + display name/avatar only
-- Group rec algorithm: weighted average with floor constraint (algorithm details pinned during this milestone)
+- Group rec algorithm: strategy + offline eval harness pinned on paper before any code lands (per reviewer's 2026-05-07 feedback — group recs are a research-grade problem that ships badly when treated as engineering). UX transparency layer ("recommended for both because…") in scope alongside whichever algorithm is chosen.
 - Per-member breakdown view (desktop) + collapsed mobile-responsive view
 - Streaming intersection across members
-- Group satisfaction aggregation from M7 feedback signals
+- Group satisfaction aggregation from M6 feedback signals
 
 **Outcome:** the differentiator ships. Couples can validate it.
 
-### M9 — Import from MAL/AniList
+### M8 — Import from MAL/AniList
 - MAL XML import
 - AniList GraphQL import
 - Dedup against local title DB
@@ -104,7 +129,7 @@ The differentiator. Captured in detail during the mapping session.
 
 **Outcome:** power-user archetype can migrate. Tertiary archetype per PROJECT.md, but blocking for that segment.
 
-### M10 — Privacy + GDPR hardening (final pass)
+### M9 — Privacy + GDPR hardening (final pass)
 - Data export endpoint (real, working)
 - Data deletion endpoint (genuinely deletes within 30 days per [ADR-0012](decisions/0012-privacy-compliance.md))
 - Privacy controls per list/title finalized
@@ -113,7 +138,7 @@ The differentiator. Captured in detail during the mapping session.
 
 **Outcome:** GDPR-compliant before any non-friends-tester user lands.
 
-### M11 — Launch readiness
+### M10 — Launch readiness
 - Performance budgets met per [PROJECT.md](../PROJECT.md) (<800ms title page p95, <500ms personal recs p95, <2s group recs p95)
 - Accessibility audit (WCAG 2.1 AA)
 - Error states polished
@@ -127,10 +152,11 @@ The differentiator. Captured in detail during the mapping session.
 ## Parallelism + dependency notes
 
 - **M1** and **M2** can land mostly in parallel after the first day or two — content DB sync is its own backend stream.
-- **M4** onboarding can be built with stub data while **M2** is still ramping up its full sync.
-- **M6** streaming can start as soon as **M2** has TMDB watch-providers data; doesn't need to wait for **M5**.
-- **M9** import is independent of M5-M8 once **M3** schema is stable.
-- **M10** privacy hardening runs as a continuous track from **M1** onwards, finalized before launch.
+- **M3 Path A** (onboarding) can be built with stub data while **M2** is still ramping up its full sync; Path B (tracking) layers on once schema is proven.
+- **M5** streaming can start as soon as **M2** has TMDB watch-providers data; doesn't need to wait for **M4**.
+- **M8** import is independent of M4-M7 once **M3** schema is stable.
+- **M9** privacy hardening runs as a continuous track from **M1** onwards, finalized before launch.
+- **Cross-medium taxonomy mapping** (the editorial work in **M2**) runs in parallel with all engineering milestones; the schema is necessary scaffolding but the mapping IS the moat.
 
 ---
 
@@ -140,7 +166,7 @@ Per [PROJECT.md](../PROJECT.md) cut-line, confirmed during the mapping session:
 
 - Ghost profiles for unregistered group members → 1B
 - Mood / context layer on recommendations → 1B
-- Daily comparative pairs (on roadmap; needs M5+M7 live first) → 1B
+- Daily comparative pairs (on roadmap; needs M4+M6 live first) → 1B
 - Behavioral mental-state inference → speculative, Phase 2+ at earliest, may never ship
 - Email feedback trigger + transactional email infrastructure → 1B
 - React Native mobile app → 2
@@ -160,4 +186,4 @@ Per [PROJECT.md](../PROJECT.md) cut-line, confirmed during the mapping session:
 - Refine this file as scope is learned, but PROJECT.md remains the contract.
 - When a milestone completes, mark it ✅ and link the relevant Linear cycle.
 - When a deferred item moves into 1A, update both this file AND PROJECT.md (per [CLAUDE.md §4](../CLAUDE.md) stop-and-ask).
-- Mapping-session details for M4 onboarding and M8 groups are captured inline above; future similar sessions go inline too unless they grow large enough to warrant their own design doc.
+- Mapping-session details for M3 onboarding and M7 groups are captured inline above; future similar sessions go inline too unless they grow large enough to warrant their own design doc.
