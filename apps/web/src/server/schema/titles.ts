@@ -8,6 +8,7 @@ import {
   real,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 
@@ -45,8 +46,10 @@ export const titles = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    // Composite unique: same external ID can exist in both TMDB and AniList.
-    index('titles_external_id_source_idx').on(t.externalId, t.source),
+    // Composite unique: same external ID can exist in both TMDB and AniList,
+    // but not twice within the same source. Required as a UNIQUE index because
+    // the TMDB sync upsert uses ON CONFLICT (external_id, source).
+    uniqueIndex('titles_external_id_source_idx').on(t.externalId, t.source),
     index('titles_media_type_idx').on(t.mediaType),
     index('titles_release_year_idx').on(t.releaseYear),
   ],
