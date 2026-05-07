@@ -19,22 +19,19 @@ export default async function HomePage() {
   const caller = appRouter.createCaller(await createContext());
 
   // Primary path is the Clerk user.created/user.updated webhook, which sets
-  // publicMetadata.dbSynced after upserting the row. The session-token
-  // customisation in Clerk Dashboard projects the whole public_metadata
-  // object as a `publicMetadata` claim — Clerk's shortcode resolver only
-  // supports top-level paths, so we read the nested field through the
-  // projected object rather than as a flat claim.
-  //
-  // Fallback: if dbSynced is missing/false (race window after first signup
-  // before the webhook lands, or webhook delivery failure), me.ensure runs
-  // and produces the same result idempotently. Once the JWT refreshes (~60s
-  // after the webhook fires) the claim flips and this fallback is skipped
-  // on subsequent renders.
+  // publicMetadata.dbSynced after upserting the row. Fallback runs me.ensure
+  // when the JWT claim is missing — see commit 3e99816 for the full
+  // explanation of the projection contract.
   if (userId && sessionClaims?.publicMetadata?.dbSynced !== true) {
     await caller.me.ensure();
   }
 
-  const { serverTime, mlStatus } = await caller.hello();
+  // Pre-computed personal recs from the nightly Inngest job (commit 4a133cd)
+  // via the recommendations.list reader (commit 959ef37). Empty array means
+  // either the user has no taste signal yet (cold-start, no anchors) or the
+  // cron hasn't run for them yet — DashboardHome shows the same empty state
+  // either way, with a CTA pointing at /onboarding.
+  const recs = userId ? await caller.recommendations.list({ limit: 20 }) : { items: [] };
 
   return (
     <>
@@ -42,7 +39,7 @@ export default async function HomePage() {
         <MarketingHero />
       </Show>
       <Show when="signed-in">
-        <DashboardHome firstName={user?.firstName} serverTime={serverTime} mlStatus={mlStatus} />
+        <DashboardHome firstName={user?.firstName} recs={recs.items} />
       </Show>
     </>
   );

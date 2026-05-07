@@ -1,36 +1,99 @@
-import { Mono } from '@helpme2c/ui';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import Image from 'next/image';
+import Link from 'next/link';
+
+type MediaType = 'tv' | 'film' | 'anime';
+
+const MEDIA_TYPE_LABEL: Record<MediaType, string> = {
+  tv: 'TV',
+  film: 'Film',
+  anime: 'Anime',
+};
+
+interface RecItem {
+  id: string;
+  title: string;
+  mediaType: MediaType;
+  releaseYear: number | null;
+  posterUrl: string | null;
+}
 
 interface DashboardHomeProps {
   firstName: string | null | undefined;
-  serverTime: string;
-  mlStatus: string;
+  recs: ReadonlyArray<RecItem>;
 }
 
-export function DashboardHome({ firstName, serverTime, mlStatus }: DashboardHomeProps) {
-  const greeting = firstName ? `Hello, ${firstName}` : 'Welcome back';
+export function DashboardHome({ firstName, recs }: DashboardHomeProps) {
+  const greeting = firstName ? `Welcome back, ${firstName}` : 'Welcome back';
+
+  if (recs.length === 0) {
+    // Either the user hasn't picked anchors yet, or the cron hasn't computed
+    // recs for them yet. Single message covers both cases — the link to
+    // /onboarding is the right action either way (a user who already
+    // anchored will see "Update your picks").
+    return (
+      <main className="mx-auto max-w-2xl px-6 py-16">
+        <h1 className="text-3xl font-semibold tracking-tight">{greeting}</h1>
+        <div className="mt-8 rounded-lg border border-dashed border-slate-300 px-6 py-12 text-center">
+          <h2 className="text-xl font-semibold tracking-tight text-slate-900">
+            No recommendations yet
+          </h2>
+          <p className="mx-auto mt-2 max-w-md text-sm text-slate-600">
+            Pick a few titles that represent your taste — anything you&apos;d recommend to a friend.
+            We&apos;ll use them to start your personal recommendations.
+          </p>
+          <Link
+            href="/onboarding"
+            className="mt-4 inline-flex items-center rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+          >
+            Get started
+          </Link>
+        </div>
+      </main>
+    );
+  }
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-16">
-      <h1 className="text-3xl font-semibold tracking-tight">{greeting}</h1>
-      <p className="mt-2 text-slate-600">
-        Personalized recommendations are coming soon. For now — system status:
-      </p>
+    <main className="mx-auto max-w-5xl px-6 py-12">
+      <header className="mb-8">
+        <h1 className="text-3xl font-semibold tracking-tight">{greeting}</h1>
+        <p className="mt-2 text-sm text-slate-600">
+          Based on your taste — top {recs.length}{' '}
+          {recs.length === 1 ? 'recommendation' : 'recommendations'}.
+        </p>
+      </header>
 
-      <Card className="mt-8">
-        <CardHeader>
-          <CardTitle>System status</CardTitle>
-          <CardDescription>End-to-end smoke test of cross-package wiring.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm text-slate-600">
-          <p>
-            Server time (via tRPC + <code>@helpme2c/shared</code>): <Mono>{serverTime}</Mono>
-          </p>
-          <p>
-            ML module status (via tRPC + <code>@helpme2c/ml</code>): <Mono>{mlStatus}</Mono>
-          </p>
-        </CardContent>
-      </Card>
+      <ul className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
+        {recs.map((rec) => {
+          const mediaTypeLabel = MEDIA_TYPE_LABEL[rec.mediaType];
+          return (
+            <li key={rec.id}>
+              <Link href={`/titles/${rec.id}`} className="group block">
+                {rec.posterUrl ? (
+                  <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-slate-200 bg-slate-100 transition group-hover:border-slate-400">
+                    <Image
+                      src={rec.posterUrl}
+                      alt=""
+                      fill
+                      sizes="(min-width: 1024px) 220px, (min-width: 640px) 33vw, 50vw"
+                      className="object-cover"
+                    />
+                  </div>
+                ) : (
+                  <div className="aspect-[2/3] rounded-lg border border-slate-200 bg-slate-100" />
+                )}
+                <h3 className="mt-2 truncate text-sm font-medium text-slate-900 group-hover:underline">
+                  {rec.title}
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {[mediaTypeLabel, rec.releaseYear?.toString()]
+                    .filter((s): s is string => Boolean(s))
+                    .join(' · ')}
+                </p>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
     </main>
   );
 }
