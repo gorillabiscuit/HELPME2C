@@ -76,17 +76,22 @@ async function upsertTmdbKeywords(
 ): Promise<Map<number, string>> {
   const tagIdMap = new Map<number, string>();
   for (const kw of keywords) {
-    const existing = await db.query.tags.findFirst({ where: eq(tags.name, kw.name) });
-    if (existing) {
-      tagIdMap.set(kw.id, existing.id);
-    } else {
-      const [inserted] = await db
-        .insert(tags)
-        .values({ name: kw.name, source: 'tmdb' })
-        .onConflictDoNothing()
-        .returning({ id: tags.id });
-      if (inserted) tagIdMap.set(kw.id, inserted.id);
-    }
+    // Single-statement upsert: ON CONFLICT DO UPDATE always returns the row,
+    // including for the loser of a concurrent insert race. The earlier
+    // find-then-insert pattern lost title→tag joins under concurrency because
+    // ON CONFLICT DO NOTHING returns no row to whichever inserter lost.
+    // The `set` is a self-update on `name` — Drizzle requires a non-empty set
+    // and tags has no updated_at column, so updating name to its own value
+    // is the minimal write that still triggers RETURNING.
+    const [row] = await db
+      .insert(tags)
+      .values({ name: kw.name, source: 'tmdb' })
+      .onConflictDoUpdate({
+        target: tags.name,
+        set: { name: kw.name },
+      })
+      .returning({ id: tags.id });
+    if (row) tagIdMap.set(kw.id, row.id);
   }
   return tagIdMap;
 }
