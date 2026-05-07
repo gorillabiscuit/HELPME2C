@@ -49,6 +49,7 @@ When the world changes:
 | 0018 | Project tracker (Linear, team HM2C) | Accepted | 2026-05-05 |
 | 0019 | ORM (Drizzle) | Accepted | 2026-05-06 |
 | 0020 | Group recommendation strategy | Proposed | 2026-05-07 |
+| 0021 | Streaming availability — ranking vs filter | Proposed | 2026-05-07 |
 
 (More to be filled in as Phase 1 progresses. See `QUEUE.md` for pending decisions.)
 
