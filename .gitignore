@@ -54,3 +54,4 @@ android/.gradle/
 # Misc
 *.tsbuildinfo
 .eslintcache
+.vercel
