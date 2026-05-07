@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
 import { currentUser } from '@clerk/nextjs/server';
 import { users } from '../schema';
+import { ensureUserFromClerk } from '../lib/ensure-user';
 import { router, protectedProcedure } from '../trpc';
 
 export const meRouter = router({
@@ -10,44 +11,22 @@ export const meRouter = router({
     return rows[0] ?? null;
   }),
 
-  // Upserts the current user's DB row from Clerk's source-of-truth data.
-  // Idempotent (ON CONFLICT updates), safe to call on every signed-in render.
-  // Pulls from currentUser() rather than accepting input so the client can't
-  // forge displayName/region/ageVerified state.
-  ensure: protectedProcedure.mutation(async ({ ctx }) => {
+  // Fallback path: upserts the current user's DB row from Clerk's source-of-truth.
+  // The Clerk user.created/user.updated webhook is the primary path (sets the
+  // dbSynced session-token claim after upsert so this fallback is skipped on
+  // subsequent renders). This mutation still exists for the brief window after
+  // first signup before the webhook lands, and as a safety net if webhook
+  // delivery ever fails.
+  ensure: protectedProcedure.mutation(async () => {
     const clerkUser = await currentUser();
     if (!clerkUser) {
       throw new TRPCError({ code: 'UNAUTHORIZED' });
     }
-
-    const displayName = [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(' ') || null;
-    const region = clerkUser.publicMetadata.region ?? 'eu';
-    const ageVerified = clerkUser.publicMetadata.ageVerified ?? false;
-    const ageVerifiedAt = clerkUser.publicMetadata.ageVerifiedAt
-      ? new Date(clerkUser.publicMetadata.ageVerifiedAt)
-      : null;
-
-    const [row] = await ctx.db
-      .insert(users)
-      .values({
-        clerkId: ctx.userId,
-        displayName,
-        region,
-        ageVerified,
-        ageVerifiedAt,
-      })
-      .onConflictDoUpdate({
-        target: users.clerkId,
-        set: {
-          displayName,
-          region,
-          ageVerified,
-          ageVerifiedAt,
-          updatedAt: new Date(),
-        },
-      })
-      .returning();
-
-    return row;
+    return ensureUserFromClerk({
+      id: clerkUser.id,
+      firstName: clerkUser.firstName,
+      lastName: clerkUser.lastName,
+      publicMetadata: clerkUser.publicMetadata,
+    });
   }),
 });
