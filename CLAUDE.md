@@ -306,8 +306,10 @@ No emoji. No AI-attribution.
 | `apps/*/CLAUDE.md` | Package-specific rules; inherits this file | Team + AI |
 | `packages/*/CLAUDE.md` | Package-specific rules; inherits this file | Team + AI |
 | `docs/decisions/` | ADRs (architecture decision records), numbered, chronological | Team |
+| `docs/runbooks/` | One-page-per-vendor incident references — what breaks, manual fallback, status pages, key rotation | Team |
 | `DEPS.md` | One-line justification per npm dependency | Team |
 | `PROJECT.md` | Product brief; what we're building, MVP scope | Team |
+| `LEARNED.md` | Sharp edges, gotchas, non-obvious behaviour — append when something costs >15 min to diagnose; the "what to do next time" file | Team + AI |
 | `README.md` | How to set up + run | Anyone |
 | `.personal/` *(gitignored)* | Human's private notes, scratch | Human only |
 
