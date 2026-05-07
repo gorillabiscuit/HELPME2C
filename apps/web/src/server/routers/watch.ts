@@ -4,11 +4,11 @@ import { z } from 'zod';
 import {
   privacyLevelEnum,
   titles,
-  users,
   watchEntries,
   watchEntryKindEnum,
   watchStatusEnum,
 } from '../schema';
+import { resolveInternalUserId } from '../lib/resolve-user';
 import { protectedProcedure, router } from '../trpc';
 
 // Zod schemas auto-synced with the Drizzle pgEnum values — single source of
@@ -20,24 +20,6 @@ const statusSchema = z.enum(watchStatusEnum.enumValues);
 const privacySchema = z.enum(privacyLevelEnum.enumValues);
 
 const titleIdSchema = z.string().uuid();
-
-// Resolves the Clerk session userId → users.id (internal uuid) once per
-// procedure call. The watch_entries FK is on users.id, not clerk_id, so
-// every procedure that touches watch_entries needs this hop. Putting it
-// in the protectedProcedure middleware would shave one query per call but
-// would add it for procedures that don't need it (e.g. me.get) — net wash
-// at this scale, so keep it inline.
-async function resolveInternalUserId(
-  db: typeof import('../db').db,
-  clerkId: string,
-): Promise<string | null> {
-  const [user] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.clerkId, clerkId))
-    .limit(1);
-  return user?.id ?? null;
-}
 
 export const watchRouter = router({
   // List the current user's watch entries, optionally filtered by status.
