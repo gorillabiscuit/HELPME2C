@@ -11,7 +11,6 @@ interface ClerkUserEventData {
   first_name: string | null;
   last_name: string | null;
   public_metadata: UserPublicMetadata;
-  private_metadata: UserPrivateMetadata;
 }
 
 interface ClerkWebhookEvent {
@@ -83,10 +82,15 @@ export async function POST(req: Request) {
     // subsequent renders. The session-token JWT picks up the new claim on
     // its next refresh (~60s), so there's a brief window where renders
     // still hit the fallback — fine, fallback is idempotent.
+    //
+    // Lives in public_metadata (not private) because Clerk's session-token
+    // customisation only supports projecting whole metadata objects, not
+    // nested fields. Anything projected into the JWT is client-readable
+    // anyway, so "private" would be misleading. dbSynced is not sensitive.
     const clerk = await clerkClient();
     await clerk.users.updateUser(evt.data.id, {
-      privateMetadata: {
-        ...evt.data.private_metadata,
+      publicMetadata: {
+        ...evt.data.public_metadata,
         dbSynced: true,
       },
     });

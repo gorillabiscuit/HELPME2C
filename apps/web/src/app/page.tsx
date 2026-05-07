@@ -19,15 +19,18 @@ export default async function HomePage() {
   const caller = appRouter.createCaller(await createContext());
 
   // Primary path is the Clerk user.created/user.updated webhook, which sets
-  // privateMetadata.dbSynced after upserting the row. The dbSynced session-token
-  // claim (configured in Clerk Dashboard → Sessions) projects that to the JWT
-  // so we can short-circuit here without an extra Clerk API call or DB write.
-  // Fallback: if the claim is missing/false (race window after first signup
-  // before the webhook lands, or webhook delivery failure), me.ensure runs and
-  // produces the same result idempotently. Once the JWT refreshes (~60s after
-  // the webhook fires) the claim flips and this fallback is skipped on
-  // subsequent renders.
-  if (userId && sessionClaims?.dbSynced !== true) {
+  // publicMetadata.dbSynced after upserting the row. The session-token
+  // customisation in Clerk Dashboard projects the whole public_metadata
+  // object as a `publicMetadata` claim — Clerk's shortcode resolver only
+  // supports top-level paths, so we read the nested field through the
+  // projected object rather than as a flat claim.
+  //
+  // Fallback: if dbSynced is missing/false (race window after first signup
+  // before the webhook lands, or webhook delivery failure), me.ensure runs
+  // and produces the same result idempotently. Once the JWT refreshes (~60s
+  // after the webhook fires) the claim flips and this fallback is skipped
+  // on subsequent renders.
+  if (userId && sessionClaims?.publicMetadata?.dbSynced !== true) {
     await caller.me.ensure();
   }
 

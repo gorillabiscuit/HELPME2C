@@ -7,22 +7,25 @@ declare global {
     ageVerified?: boolean;
     ageVerifiedAt?: string; // ISO-8601 UTC
     region?: 'eu' | 'row';
-  }
-
-  // Server-only: written by the Clerk user.created/user.updated webhook handler
-  // after a successful upsert into the `users` table. Read by the home page's
-  // server component via the `dbSynced` session-token claim (configured in Clerk
-  // Dashboard → Sessions → Customize session token) to short-circuit the
-  // me.ensure fallback once the DB row is known to be in sync.
-  // Not exposed to the client — `private_metadata` is server-only by design.
-  interface UserPrivateMetadata {
+    // Written by the Clerk user.created/user.updated webhook handler after a
+    // successful upsert into the `users` table. Read by the home page via the
+    // `publicMetadata` session-token claim to short-circuit the me.ensure
+    // fallback once the DB row is known to be in sync.
+    //
+    // Lives in public_metadata (not private_metadata) because Clerk's
+    // session-token customisation projects whole metadata objects into the JWT,
+    // and anything projected into the JWT is client-readable. "private" was
+    // misleading once that projection happens; dbSynced is not sensitive.
     dbSynced?: boolean;
   }
 
-  // Custom JWT claims projected from `private_metadata` via the Clerk Dashboard
-  // session-token customisation. Read via `auth().sessionClaims?.dbSynced`.
+  // Custom JWT claims projected from the Clerk Dashboard session-token
+  // customisation. The mapping `{ "publicMetadata": "{{user.public_metadata}}" }`
+  // copies the whole public_metadata object into the session token. Clerk's
+  // shortcode resolver only supports top-level paths, hence projecting the
+  // whole object instead of individual fields like `dbSynced`.
   interface CustomJwtSessionClaims {
-    dbSynced?: boolean;
+    publicMetadata?: UserPublicMetadata;
   }
 }
 
