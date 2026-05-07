@@ -1,6 +1,11 @@
 # apps/mobile — package-specific CLAUDE.md
 
-> **Phase 2 stub.** No mobile work in Phase 1A. This directory exists so the monorepo structure is correct from day 1, but **do not write code here until Phase 2 is officially opened.**
+> **FROZEN — Phase 2 stub.** No mobile work in Phase 1A. The shape described
+> below is **provisional** — it was written without a real Expo / RN consumer
+> to validate against, and per reviewer feedback (2026-05-07) is likely to
+> change once one exists. Treat it as a hypothesis, not a contract. **Do not
+> write code here until Phase 2 is officially opened.** See
+> [README.md](./README.md) for the freeze rationale.
 
 ---
 

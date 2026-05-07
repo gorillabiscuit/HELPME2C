@@ -1,6 +1,13 @@
 # packages/mobile-ui — package-specific CLAUDE.md
 
-> **Phase 2 stub.** No code in Phase 1A. This directory exists so `apps/mobile/CLAUDE.md` and the cross-package import-direction invariant in root [CLAUDE.md §2](../../CLAUDE.md) have something to point at, but **do not write code here until Phase 2 mobile work is officially opened.**
+> **FROZEN — Phase 2 stub.** No code in Phase 1A. The "separate package from
+> `packages/ui`" decision is **provisional** — written without a real RN
+> consumer. Per reviewer feedback (2026-05-07): "wait for the second real
+> consumer before extracting." When Phase 2 opens, re-evaluate against a real
+> RN screen; if there's no clear win, fold this back into the consuming app
+> rather than preserving the package out of inertia. **Do not write code here
+> until Phase 2 mobile work is officially opened.** See
+> [README.md](./README.md) for the freeze rationale.
 
 ---
 
