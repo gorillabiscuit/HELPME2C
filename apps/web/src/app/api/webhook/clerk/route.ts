@@ -1,6 +1,7 @@
 import { Webhook } from 'svix';
 import { headers } from 'next/headers';
 import { clerkClient } from '@clerk/nextjs/server';
+import * as Sentry from '@sentry/nextjs';
 import { ensureUserFromClerk } from '@/server/lib/ensure-user';
 
 // Subset of Clerk's UserJSON we actually consume. Clerk's webhook payload uses
@@ -88,12 +89,33 @@ export async function POST(req: Request) {
     // nested fields. Anything projected into the JWT is client-readable
     // anyway, so "private" would be misleading. dbSynced is not sensitive.
     const clerk = await clerkClient();
-    await clerk.users.updateUser(evt.data.id, {
-      publicMetadata: {
-        ...evt.data.public_metadata,
-        dbSynced: true,
-      },
-    });
+    try {
+      await clerk.users.updateUser(evt.data.id, {
+        publicMetadata: {
+          ...evt.data.public_metadata,
+          dbSynced: true,
+        },
+      });
+    } catch (err) {
+      // Synthetic test events from Clerk Dashboard → Webhooks → "Send Example"
+      // use fake user IDs that don't exist in the live Clerk instance. The
+      // metadata write 404s. The DB upsert already succeeded, and there's no
+      // real user to keep dbSynced for, so log + continue rather than failing
+      // the webhook. Re-throw anything else so genuine API outages still page.
+      const isClerkNotFound =
+        err !== null &&
+        typeof err === 'object' &&
+        'status' in err &&
+        err.status === 404 &&
+        'clerkError' in err;
+      if (!isClerkNotFound) {
+        throw err;
+      }
+      Sentry.captureMessage(
+        `Clerk user ${evt.data.id} not found during webhook metadata write — likely a synthetic test event`,
+        'info',
+      );
+    }
   }
 
   // Unhandled event types (session.*, organization.*, etc.) get a 200 so
