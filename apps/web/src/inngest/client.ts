@@ -16,4 +16,12 @@ export const anilistSyncAnimeAllEvent = eventType('anilist/sync.anime.all', {
   schema: staticSchema<Record<string, never>>(),
 });
 
+export const recommendUserEvent = eventType('recommend/user.recompute', {
+  schema: staticSchema<{ userId: string }>(),
+});
+
+export const recommendAllUsersEvent = eventType('recommend/all-users.recompute', {
+  schema: staticSchema<Record<string, never>>(),
+});
+
 export const inngest = new Inngest({ id: 'helpme2c' });

@@ -1,6 +1,15 @@
 import { jsonb, pgTable, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { users } from './users';
 
+// Shape of the JSONB payload column. Bumping schemaVersion lets the reader
+// detect old payloads and trigger a recompute without a column migration.
+// Validated at the application layer (the Inngest job writer + the tRPC
+// reader); Drizzle's $type<> annotation surfaces this shape at the TS level.
+export interface RecommendationsPayload {
+  readonly schemaVersion: 1;
+  readonly items: ReadonlyArray<{ readonly titleId: string; readonly score: number }>;
+}
+
 // Pre-computed personal recommendations cache per ADR-0013.
 //
 // Single row per user, keyed by users.id (the internal uuid, NOT clerk_id —
@@ -32,7 +41,7 @@ export const userRecommendations = pgTable('user_recommendations', {
     .primaryKey()
     .references(() => users.id, { onDelete: 'cascade' }),
 
-  payload: jsonb('payload').notNull(),
+  payload: jsonb('payload').$type<RecommendationsPayload>().notNull(),
 
   // When the Inngest compute job last wrote this row. Used by the read
   // path to decide whether to recommend on stale data ("computed Xh ago")

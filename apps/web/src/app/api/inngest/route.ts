@@ -3,11 +3,20 @@ import { inngest } from '@/inngest/client';
 import {
   anilistSyncAnimeAll,
   anilistSyncAnimePage,
+  recommendAllUsers,
+  recommendUser,
   tmdbSyncTvAll,
   tmdbSyncTvPage,
 } from '@/inngest/functions';
 
 export const { GET, POST, PUT } = serve({
   client: inngest,
-  functions: [tmdbSyncTvPage, tmdbSyncTvAll, anilistSyncAnimePage, anilistSyncAnimeAll],
+  functions: [
+    tmdbSyncTvPage,
+    tmdbSyncTvAll,
+    anilistSyncAnimePage,
+    anilistSyncAnimeAll,
+    recommendUser,
+    recommendAllUsers,
+  ],
 });
