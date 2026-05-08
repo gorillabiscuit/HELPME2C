@@ -1,10 +1,12 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import {
+  recFeedback,
   streamingAvailability,
   titles,
   userRecommendations,
   userStreamingProviders,
+  watchEntries,
 } from '../schema';
 import { resolveInternalUserId } from '../lib/resolve-user';
 import { protectedProcedure, router } from '../trpc';
@@ -115,9 +117,29 @@ export const recommendationsRouter = router({
         allowedTitleIds = new Set(matchingRows.map((r) => r.titleId));
       }
 
-      const filteredItems = allowedTitleIds
+      // Read-time exclusion: titles dismissed via rec_feedback OR already
+      // in the user's library since the last recompute. Both are user
+      // actions that should remove the item from their dashboard
+      // immediately, not wait for the nightly cron.
+      const [dismissedRows, libraryRows] = await Promise.all([
+        ctx.db
+          .select({ titleId: recFeedback.titleId })
+          .from(recFeedback)
+          .where(and(eq(recFeedback.userId, internalUserId), eq(recFeedback.dismissed, true))),
+        ctx.db
+          .select({ titleId: watchEntries.titleId })
+          .from(watchEntries)
+          .where(eq(watchEntries.userId, internalUserId)),
+      ]);
+      const excludedTitleIds = new Set<string>([
+        ...dismissedRows.map((r) => r.titleId),
+        ...libraryRows.map((r) => r.titleId),
+      ]);
+
+      const streamingFiltered = allowedTitleIds
         ? payload.items.filter((i) => allowedTitleIds!.has(i.titleId))
         : payload.items;
+      const filteredItems = streamingFiltered.filter((i) => !excludedTitleIds.has(i.titleId));
       const hiddenCount = payload.items.length - filteredItems.length;
 
       // Fetch provider display metadata only when the filter is active.
