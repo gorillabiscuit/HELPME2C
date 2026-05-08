@@ -127,7 +127,7 @@ export default async function SearchPage({ searchParams }: PageProps) {
   const filterPillClass = (active: boolean) =>
     cn(
       'inline-flex items-center rounded-full px-3 py-1 text-sm font-medium transition',
-      active ? 'bg-primary text-white' : 'bg-muted text-foreground hover:bg-muted',
+      active ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground hover:bg-muted',
     );
 
   return (

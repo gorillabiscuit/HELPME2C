@@ -53,7 +53,7 @@ export function GroupMemberList({ groupId, members, isOwner }: GroupMemberListPr
                 {m.displayName ?? `Member ${m.userId.slice(0, 6)}`}
               </span>
               {m.role === 'owner' ? (
-                <span className="rounded bg-primary px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white">
+                <span className="rounded bg-primary px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-primary-foreground">
                   Owner
                 </span>
               ) : null}

@@ -68,7 +68,7 @@ export function RecCardActions({ titleId }: RecCardActionsProps) {
         type="button"
         onClick={onSeenIt}
         disabled={isPending}
-        className="rounded-md border border-border px-2 py-1 text-text-body transition-colors hover:border-input hover:bg-muted hover:text-foreground disabled:opacity-50"
+        className="rounded-md border border-border px-3 py-1.5 text-text-body transition-colors hover:border-input hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-50"
       >
         Seen it
       </button>
@@ -76,7 +76,7 @@ export function RecCardActions({ titleId }: RecCardActionsProps) {
         type="button"
         onClick={onNotInterested}
         disabled={isPending}
-        className="rounded-md border border-border px-2 py-1 text-text-body transition-colors hover:border-input hover:bg-muted hover:text-foreground disabled:opacity-50"
+        className="rounded-md border border-border px-3 py-1.5 text-text-body transition-colors hover:border-input hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-50"
       >
         Hide
       </button>
@@ -90,7 +90,7 @@ export function RecCardActions({ titleId }: RecCardActionsProps) {
           aria-label="Rate this recommendation"
           onClick={() => setRatePopoverOpen((v) => !v)}
           disabled={isPending}
-          className="rounded-md border border-border px-2 py-1 text-text-body transition-colors hover:border-input hover:bg-muted hover:text-foreground disabled:opacity-50"
+          className="rounded-md border border-border px-3 py-1.5 text-text-body transition-colors hover:border-input hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-50"
         >
           Rate
         </button>

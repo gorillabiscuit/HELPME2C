@@ -57,7 +57,7 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
           </p>
           <Link
             href="/onboarding"
-            className="mt-4 inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-white transition hover:bg-primary/90"
+            className="mt-4 inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
           >
             Get started
           </Link>
@@ -78,19 +78,28 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
             </p>
           </div>
           <div className="flex flex-col items-end gap-1 text-sm">
-            <Link href="/groups" className="text-muted-foreground hover:text-foreground">
+            <Link
+              href="/groups"
+              className="rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+            >
               Groups →
             </Link>
             <Link
               href="/settings/providers"
-              className="text-muted-foreground hover:text-foreground"
+              className="rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
             >
               Manage services →
             </Link>
-            <Link href="/settings/import" className="text-muted-foreground hover:text-foreground">
+            <Link
+              href="/settings/import"
+              className="rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+            >
               Import list →
             </Link>
-            <Link href="/settings/account" className="text-muted-foreground hover:text-foreground">
+            <Link
+              href="/settings/account"
+              className="rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+            >
               Account &amp; privacy →
             </Link>
           </div>
@@ -125,14 +134,23 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
         ) : null}
       </header>
 
+      {/* Visually-hidden landmark for screen readers — the rec grid is the
+          page's main content but had no semantic boundary between the
+          h1 greeting and the per-card h3 titles. sr-only keeps the
+          visual hierarchy unchanged. */}
+      <h2 className="sr-only">Recommendations</h2>
+
       <ul className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
-        {recs.map((rec) => {
+        {recs.map((rec, i) => {
           const mediaTypeLabel = MEDIA_TYPE_LABEL[rec.mediaType];
           return (
             <li key={rec.id}>
               {/* Poster + meta link to title page; the per-rec action row
                   below sits OUTSIDE the link so its buttons don't navigate. */}
-              <Link href={`/titles/${rec.id}`} className="group block">
+              <Link
+                href={`/titles/${rec.id}`}
+                className="group block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+              >
                 {rec.posterUrl ? (
                   <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-border bg-muted transition group-hover:border-input">
                     <Image
@@ -141,6 +159,9 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
                       fill
                       sizes="(min-width: 1024px) 220px, (min-width: 640px) 33vw, 50vw"
                       className="object-cover"
+                      // First row (4 cards on lg, 3 on sm, 2 on mobile) is
+                      // above the fold on most viewports — preload for LCP.
+                      priority={i < 4}
                     />
                   </div>
                 ) : (

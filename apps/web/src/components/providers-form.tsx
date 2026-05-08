@@ -71,7 +71,7 @@ export function ProvidersForm({ providers, initialSelected }: ProvidersFormProps
               className={
                 'inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm transition-colors ' +
                 (isSelected
-                  ? 'border-foreground bg-primary text-white hover:bg-primary/90'
+                  ? 'border-foreground bg-primary text-primary-foreground hover:bg-primary/90'
                   : 'border-border bg-white text-foreground hover:border-input hover:bg-muted')
               }
               title={`${p.providerName} (${p.titleCount} titles)`}

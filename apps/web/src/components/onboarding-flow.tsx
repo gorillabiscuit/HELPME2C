@@ -143,7 +143,7 @@ export function OnboardingFlow({ initialPopular, initialAnchorIds }: OnboardingF
                       />
                     ) : null}
                     {isPicked ? (
-                      <span className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary text-sm font-bold text-white">
+                      <span className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
                         ✓
                       </span>
                     ) : null}
