@@ -1,4 +1,5 @@
-import { jsonb, pgTable, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { boolean, jsonb, pgEnum, pgTable, primaryKey, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { titles } from './titles';
 import { users } from './users';
 
 // Shape of the JSONB payload column. Bumping schemaVersion lets the reader
@@ -50,3 +51,46 @@ export const userRecommendations = pgTable('user_recommendations', {
   // user-event-driven recompute already ran).
   computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Per-rec user feedback (M6.2). Two independent signals merged into one
+// row per (user, title):
+//
+//   rating    — 5-level coarse-scale "did the recommender do well?".
+//               Collected for future algorithm tuning per ROADMAP.md M6.
+//               No current consumer; the rec engine stays purely
+//               taste-vector driven (per packages/ml/CLAUDE.md the moat
+//               boundary stays clean — no scoring change here).
+//   dismissed — "stop showing me this rec." Excluded by
+//               recommendations.list at read time. Drives the
+//               "Not interested" / "Seen it" quick-actions on dashboard
+//               rec cards.
+//
+// Either field can be set independently. Upsert pattern: ON CONFLICT
+// DO UPDATE on the (user_id, title_id) PK. Removed via account-deletion
+// cascade per ADR-0012 §account-deletion.
+export const recFeedbackRatingEnum = pgEnum('rec_feedback_rating', [
+  'terrible',
+  'bad',
+  'ok',
+  'good',
+  'terrific',
+]);
+
+export const recFeedback = pgTable(
+  'rec_feedback',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    titleId: uuid('title_id')
+      .notNull()
+      .references(() => titles.id, { onDelete: 'cascade' }),
+    rating: recFeedbackRatingEnum('rating'),
+    dismissed: boolean('dismissed').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.titleId] })],
+);
+
+export type RecFeedbackRating = (typeof recFeedbackRatingEnum.enumValues)[number];

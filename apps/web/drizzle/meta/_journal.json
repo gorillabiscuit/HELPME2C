@@ -50,6 +50,13 @@
       "when": 1778216696901,
       "tag": "0006_swift_maria_hill",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1778219908558,
+      "tag": "0007_wakeful_black_bolt",
+      "breakpoints": true
     }
   ]
 }
