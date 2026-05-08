@@ -38,6 +38,9 @@ export function GroupInviteShare({ groupId, initialUrl }: GroupInviteShareProps)
     } catch {
       // Clipboard API can fail under non-https or restricted contexts.
       // Fall back to selecting the input so the user can copy manually.
+      // `as HTMLInputElement | null` because getElementById's return type
+      // is the broader `HTMLElement | null` — we know our id targets an
+      // <input>, but TS can't see the JSX → DOM correspondence.
       const input = document.getElementById('group-invite-url') as HTMLInputElement | null;
       input?.select();
     }
@@ -54,6 +57,8 @@ export function GroupInviteShare({ groupId, initialUrl }: GroupInviteShareProps)
           readOnly
           value={url}
           className="flex-1 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700 outline-none"
+          // `as HTMLInputElement` — onClick's `e.target` is typed as
+          // EventTarget; we know it's the <input> we attached to.
           onClick={(e) => (e.target as HTMLInputElement).select()}
         />
         <Button type="button" variant="outline" onClick={onCopy}>

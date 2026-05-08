@@ -109,11 +109,30 @@ export const listImportRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'user row missing' });
       }
 
-      const res = await fetch(ANILIST_API, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ query: MEDIA_LIST_QUERY, variables: { name: input.username } }),
-      });
+      // 15s timeout — AniList is occasionally slow on very large lists,
+      // but a hung request would tie up the tRPC worker indefinitely.
+      // AbortSignal.timeout is the standard ergonomic; the catch below
+      // distinguishes the AbortError so we can surface a clean message.
+      let res: Response;
+      try {
+        res = await fetch(ANILIST_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ query: MEDIA_LIST_QUERY, variables: { name: input.username } }),
+          signal: AbortSignal.timeout(15000),
+        });
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'TimeoutError') {
+          throw new TRPCError({
+            code: 'TIMEOUT',
+            message: 'AniList took too long to respond. Try again in a moment.',
+          });
+        }
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to reach AniList',
+        });
+      }
       if (!res.ok) {
         // 404 = unknown username; surface that as a clear client message.
         if (res.status === 404) {

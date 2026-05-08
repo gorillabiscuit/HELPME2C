@@ -49,9 +49,18 @@ export default async function GroupDetailPage({ params }: PageProps) {
 
   // Build the absolute join URL on the server using the request host so
   // it works in dev, preview, and prod without env-var coupling.
+  //
+  // Proto comes from x-forwarded-proto (Vercel sets this on every prod
+  // request) so we don't have to second-guess. Falls back to host-based
+  // detection for non-Vercel deploys: localhost / 127.* / 0.0.0.0 → http,
+  // anything else → https. Without that fallback, custom-domain dev
+  // setups would generate broken https:// links.
   const requestHeaders = await headers();
   const host = requestHeaders.get('host') ?? 'localhost:3000';
-  const proto = host.startsWith('localhost') ? 'http' : 'https';
+  const forwardedProto = requestHeaders.get('x-forwarded-proto');
+  const isLocalHost =
+    host.startsWith('localhost') || host.startsWith('127.') || host.startsWith('0.0.0.0');
+  const proto = forwardedProto ?? (isLocalHost ? 'http' : 'https');
   const inviteUrl = group.inviteToken
     ? `${proto}://${host}/groups/join/${group.inviteToken}`
     : null;
