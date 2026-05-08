@@ -6,9 +6,10 @@
 //      Build a (tagId → aggregate weight) map from a user's anchor picks
 //      and rated tracking entries plus the tag data for those titles.
 //
-//   2. recommendForUser(taste, candidates, limit) → Recommendation[]
+//   2. recommendForUser(taste, candidates, limit, themeMembership?) → Recommendation[]
 //      Score every candidate by tag-overlap against the taste vector,
-//      return the top-N ranked descending.
+//      plus optional cross-medium theme-overlap when membership data is
+//      provided. Return the top-N ranked descending.
 //
 // The caller (apps/web's Inngest job — M4 commit 4) fetches the data from
 // Postgres, drives both functions, and writes the result to the
@@ -46,6 +47,19 @@ export interface TitleTagSet {
 
 /** Aggregate per-tag weight contribution from a user's history. */
 export type UserTasteVector = ReadonlyMap<string, number>;
+
+/**
+ * One row in the cross-medium tag→theme bridge — see
+ * apps/web/src/server/schema/themes.ts for the editorial rationale.
+ *
+ * `strength` is 0–100 (mirrors the DB column). 100 = full match, lower =
+ * narrower / broader / loose-association membership.
+ */
+export interface TagThemeMembership {
+  readonly tagId: string;
+  readonly themeId: string;
+  readonly strength: number;
+}
 
 /** A single scored recommendation. Score units are tag-weight²; only ranking matters. */
 export interface Recommendation {
@@ -120,18 +134,45 @@ export function extractTasteVector(
  * Score candidate titles against a user's taste vector and return the
  * top-N ranked descending by score.
  *
- * Score formula:
+ * Two-part formula:
  *
- *   score(c) = Σ taste[tagId] × c.tag_weight   for tagId ∈ c.tags ∩ taste
+ *   tagScore(c)   = Σ taste[tagId] × c.tag_weight
+ *                     for tagId ∈ c.tags ∩ taste     (direct tag-overlap)
  *
- * Tie-breaking: titleId ASC. This makes the output deterministic given
- * fixed inputs — important for tests, debugging, and reproducible eval
- * runs against the same fixture data.
+ *   themeScore(c) = Σ tasteTheme[themeId] × c.tag_weight × strength/100
+ *                     for c-tags NOT in taste, summed over their themes
+ *                                                     (cross-medium bridge)
+ *
+ *   score(c)      = tagScore(c) + themeScore(c)
+ *
+ * Where `tasteTheme[themeId]` is built once at the top of this call by
+ * walking the user's taste vector through `themeMembership` and
+ * accumulating `taste[tagId] × strength/100` per theme.
+ *
+ * The cross-medium-only rule (theme score skipped when the candidate's
+ * tag is already in the user's taste vector) is what makes themes a
+ * BRIDGE rather than a multiplier. A user anchored on `tmdb:tragedy`
+ * gets a theme boost on anime tagged `anilist:Tragedy` (different tag
+ * row, same theme) but NOT on more TMDB shows tagged `tmdb:tragedy`
+ * (those score via direct tag-overlap, no double-count). This is what
+ * makes cross-medium recommendations actually emerge — see
+ * apps/web/src/server/schema/themes.ts and packages/ml/src/themes/
+ * mappings.ts for the editorial substrate.
+ *
+ * Backward compatibility: `themeMembership` defaults to empty. With
+ * empty membership the function reduces exactly to the previous
+ * tag-overlap-only formula — no behavior change for callers that
+ * haven't started passing theme data. Existing tests pass unchanged.
+ *
+ * Tie-breaking: titleId ASC. Makes output deterministic given fixed
+ * inputs — important for tests, debugging, and reproducible eval runs.
  *
  * Caller responsibilities:
  *   - Exclude titles already in the user's library from `candidates`
  *     (we don't want to recommend things they've already added)
  *   - Pre-fetch tag data for the candidate set
+ *   - Pre-fetch tag→theme membership data if cross-medium is wanted;
+ *     otherwise omit the param
  *   - Decide what to do with an empty taste vector (cold-start case) —
  *     this function will compute zero scores for everything and return a
  *     deterministic-but-meaningless ordering, so the caller should
@@ -141,14 +182,55 @@ export function recommendForUser(
   taste: UserTasteVector,
   candidates: ReadonlyArray<TitleTagSet>,
   limit: number = DEFAULT_LIMIT,
+  themeMembership: ReadonlyArray<TagThemeMembership> = [],
 ): Recommendation[] {
+  // Index theme membership by tagId for O(1) lookup at score time.
+  const tagThemes = new Map<string, Array<{ themeId: string; strength: number }>>();
+  for (const m of themeMembership) {
+    let memberships = tagThemes.get(m.tagId);
+    if (!memberships) {
+      memberships = [];
+      tagThemes.set(m.tagId, memberships);
+    }
+    memberships.push({ themeId: m.themeId, strength: m.strength });
+  }
+
+  // Project the user's tag-level taste onto the theme axis. For each
+  // tag in their taste, accumulate weighted credit to every theme that
+  // tag belongs to. This is the user's "theme taste" — what cross-medium
+  // bridges they're likely to value.
+  const tasteTheme = new Map<string, number>();
+  for (const [tagId, tasteWeight] of taste) {
+    const memberships = tagThemes.get(tagId);
+    if (!memberships) continue;
+    for (const m of memberships) {
+      tasteTheme.set(
+        m.themeId,
+        (tasteTheme.get(m.themeId) ?? 0) + tasteWeight * (m.strength / 100),
+      );
+    }
+  }
+
   const scored: Recommendation[] = [];
   for (const candidate of candidates) {
     let score = 0;
     for (const tag of candidate.tags) {
       const tasteWeight = taste.get(tag.tagId);
-      if (tasteWeight === undefined) continue;
-      score += tasteWeight * tag.weight;
+      if (tasteWeight !== undefined) {
+        // Direct tag match — score via tag-overlap, skip theme dimension
+        // for this tag (cross-medium-only rule).
+        score += tasteWeight * tag.weight;
+        continue;
+      }
+      // No direct match — check if this tag bridges to a theme the user
+      // has signal in. Sums across themes if the tag is multi-membered.
+      const memberships = tagThemes.get(tag.tagId);
+      if (!memberships) continue;
+      for (const m of memberships) {
+        const themeWeight = tasteTheme.get(m.themeId);
+        if (themeWeight === undefined) continue;
+        score += themeWeight * tag.weight * (m.strength / 100);
+      }
     }
     scored.push({ titleId: candidate.titleId, score });
   }

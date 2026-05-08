@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   extractTasteVector,
   recommendForUser,
+  type TagThemeMembership,
   type TitleTagSet,
   type UserHistory,
   type UserTasteVector,
@@ -335,5 +336,298 @@ describe('recommendForUser', () => {
 
     expect(result[0]?.score).toBe(result[1]?.score);
     expect(result.map((r) => r.titleId)).toEqual(['sharedOnly', 'sharedPlusNoise']);
+  });
+});
+
+describe('recommendForUser — theme-overlap dimension', () => {
+  // Fixture conventions for this block:
+  //   - Tag IDs are namespaced by source where it matters for the cross-medium
+  //     story (e.g. `tmdb:tragedy` vs `anilist:Tragedy`) so the bridge
+  //     intent is legible. Other tags keep the short style of the block above.
+  //   - Theme IDs use kebab-case slugs to mirror the editorial schema in
+  //     apps/web/src/server/schema/themes.ts.
+  //   - Asserts target rankings; absolute scores are only checked where the
+  //     contract pins a zero (e.g. no contribution at all).
+
+  it('produces identical output to the no-themes call when themeMembership is omitted vs explicitly empty', () => {
+    // Defensive backward-compat lock: the explicit-empty form must be a
+    // perfect synonym for the omitted form. Same fixture as the existing
+    // base-case tests, run twice with two argument shapes.
+    const taste: UserTasteVector = new Map<string, number>([
+      ['actionT', 100],
+      ['mechaT', 80],
+    ]);
+    const candidates: TitleTagSet[] = [
+      {
+        titleId: 'mostlyOverlap',
+        tags: [
+          { tagId: 'actionT', weight: 70 },
+          { tagId: 'mechaT', weight: 60 },
+        ],
+      },
+      {
+        titleId: 'someOverlap',
+        tags: [{ tagId: 'actionT', weight: 50 }],
+      },
+      {
+        titleId: 'noOverlap',
+        tags: [{ tagId: 'romanceT', weight: 90 }],
+      },
+    ];
+
+    const omitted = recommendForUser(taste, candidates);
+    const explicitEmpty = recommendForUser(taste, candidates, undefined, []);
+
+    expect(explicitEmpty).toEqual(omitted);
+  });
+
+  it('places a candidate that bridges via theme above one with no overlap at all', () => {
+    // The headline cross-medium scenario from the JSDoc: user's taste is
+    // anchored on a TMDB tragedy tag; one candidate carries the AniList
+    // tragedy tag (different tagId, NOT in taste) and bridges through the
+    // shared `tragedy` theme; another candidate is unrelated. Bridge wins.
+    const taste: UserTasteVector = new Map<string, number>([['tmdb:tragedy', 100]]);
+    const themeMembership: TagThemeMembership[] = [
+      { tagId: 'tmdb:tragedy', themeId: 'tragedy', strength: 100 },
+      { tagId: 'anilist:Tragedy', themeId: 'tragedy', strength: 100 },
+    ];
+    const candidates: TitleTagSet[] = [
+      {
+        titleId: 'crossMediumBridge',
+        tags: [{ tagId: 'anilist:Tragedy', weight: 80 }],
+      },
+      {
+        titleId: 'unrelatedAnime',
+        tags: [{ tagId: 'anilist:CookingShow', weight: 80 }],
+      },
+    ];
+
+    const result = recommendForUser(taste, candidates, undefined, themeMembership);
+
+    expect(result[0]?.titleId).toBe('crossMediumBridge');
+    expect(result[1]?.titleId).toBe('unrelatedAnime');
+    expect(result[1]?.score).toBe(0);
+  });
+
+  it('does NOT add theme contribution for a candidate tag that the user already has in taste', () => {
+    // Cross-medium-only rule, part 1: when the candidate's tag IS in the
+    // user's taste, that tag scores via direct tag-overlap only. The theme
+    // dimension does NOT fire for it. We assert this by comparing the
+    // direct-only tally to the theme-call tally — they must be equal.
+    //
+    // Setup: user's only taste signal is `tmdb:tragedy`. The candidate's
+    // only tag is also `tmdb:tragedy`. Theme membership maps tmdb:tragedy
+    // into a `tragedy` theme. If the implementation double-counted, the
+    // theme call would yield a higher score; the rule forbids that.
+    const taste: UserTasteVector = new Map<string, number>([['tmdb:tragedy', 100]]);
+    const themeMembership: TagThemeMembership[] = [
+      { tagId: 'tmdb:tragedy', themeId: 'tragedy', strength: 100 },
+    ];
+    const candidates: TitleTagSet[] = [
+      {
+        titleId: 'sameMediumSameTag',
+        tags: [{ tagId: 'tmdb:tragedy', weight: 60 }],
+      },
+    ];
+
+    const withoutThemes = recommendForUser(taste, candidates);
+    const withThemes = recommendForUser(taste, candidates, undefined, themeMembership);
+
+    expect(withThemes[0]?.score).toBe(withoutThemes[0]?.score);
+  });
+
+  it('keeps ranking unchanged with themeMembership when every candidate tag is already in the user taste', () => {
+    // Cross-medium-only rule, part 2: with every candidate tag directly in
+    // taste, the theme dimension contributes nothing for any of them, so
+    // the ranking with themeMembership === the ranking without it.
+    const taste: UserTasteVector = new Map<string, number>([
+      ['actionT', 100],
+      ['mechaT', 80],
+      ['dramaT', 30],
+    ]);
+    const themeMembership: TagThemeMembership[] = [
+      { tagId: 'actionT', themeId: 'high-stakes-action', strength: 100 },
+      { tagId: 'mechaT', themeId: 'high-stakes-action', strength: 100 },
+      { tagId: 'dramaT', themeId: 'human-drama', strength: 100 },
+    ];
+    const candidates: TitleTagSet[] = [
+      {
+        titleId: 'allOverlap',
+        tags: [
+          { tagId: 'actionT', weight: 80 },
+          { tagId: 'mechaT', weight: 70 },
+          { tagId: 'dramaT', weight: 40 },
+        ],
+      },
+      {
+        titleId: 'partialOverlap',
+        tags: [{ tagId: 'dramaT', weight: 80 }],
+      },
+    ];
+
+    const withoutThemes = recommendForUser(taste, candidates).map((r) => r.titleId);
+    const withThemes = recommendForUser(taste, candidates, undefined, themeMembership).map(
+      (r) => r.titleId,
+    );
+
+    expect(withThemes).toEqual(withoutThemes);
+  });
+
+  it('lets a tag in user taste that is NOT in any theme still score via direct tag-overlap on candidates', () => {
+    // A tag with no theme membership is still a first-class taste signal —
+    // it just contributes via the tag-overlap dimension only. The candidate
+    // sharing it must rank above one that doesn't.
+    const taste: UserTasteVector = new Map<string, number>([['orphanT', 100]]);
+    // Theme map covers OTHER tags; orphanT is intentionally absent.
+    const themeMembership: TagThemeMembership[] = [
+      { tagId: 'someOtherT', themeId: 'whatever', strength: 100 },
+    ];
+    const candidates: TitleTagSet[] = [
+      {
+        titleId: 'sharesOrphan',
+        tags: [{ tagId: 'orphanT', weight: 60 }],
+      },
+      {
+        titleId: 'sharesNothing',
+        tags: [{ tagId: 'unrelatedT', weight: 90 }],
+      },
+    ];
+
+    const result = recommendForUser(taste, candidates, undefined, themeMembership);
+
+    expect(result[0]?.titleId).toBe('sharesOrphan');
+    expect(result[1]?.titleId).toBe('sharesNothing');
+    expect(result[1]?.score).toBe(0);
+  });
+
+  it('ranks a strength-100 bridge candidate above a strength-50 bridge candidate, all else equal', () => {
+    // Strength scaling: holding everything else constant — same taste, same
+    // candidate-tag-weight, same theme — the candidate whose bridge tag has
+    // strength 100 to the theme should outrank the one with strength 50.
+    //
+    // Note: strength applies on BOTH sides per the JSDoc (taste→theme AND
+    // theme→candidate). To isolate the candidate-side scaling cleanly, the
+    // user-side anchor uses a single strength-100 mapping; only the
+    // candidate-side strengths differ between the two bridge tags.
+    const taste: UserTasteVector = new Map<string, number>([['tmdb:tragedy', 100]]);
+    const themeMembership: TagThemeMembership[] = [
+      { tagId: 'tmdb:tragedy', themeId: 'tragedy', strength: 100 },
+      { tagId: 'anilist:FullTragedy', themeId: 'tragedy', strength: 100 },
+      { tagId: 'anilist:HalfTragedy', themeId: 'tragedy', strength: 50 },
+    ];
+    const candidates: TitleTagSet[] = [
+      {
+        titleId: 'halfStrengthBridge',
+        tags: [{ tagId: 'anilist:HalfTragedy', weight: 80 }],
+      },
+      {
+        titleId: 'fullStrengthBridge',
+        tags: [{ tagId: 'anilist:FullTragedy', weight: 80 }],
+      },
+    ];
+
+    const result = recommendForUser(taste, candidates, undefined, themeMembership);
+
+    expect(result[0]?.titleId).toBe('fullStrengthBridge');
+    expect(result[1]?.titleId).toBe('halfStrengthBridge');
+  });
+
+  it('accumulates contribution from a multi-theme tag across all themes that have user signal', () => {
+    // The user has signal in TWO different themes via two different anchor
+    // tags. One candidate's bridge tag belongs to BOTH themes; the other
+    // candidate's bridge tag belongs to only ONE of them, with everything
+    // else (taste weight on the user side, candidate tag weight, strengths)
+    // matched. The double-themed candidate must rank higher.
+    const taste: UserTasteVector = new Map<string, number>([
+      ['tmdb:tragedy', 100],
+      ['tmdb:antihero', 100],
+    ]);
+    const themeMembership: TagThemeMembership[] = [
+      // User-side anchors → themes.
+      { tagId: 'tmdb:tragedy', themeId: 'tragedy', strength: 100 },
+      { tagId: 'tmdb:antihero', themeId: 'antihero', strength: 100 },
+      // Candidate-side bridge tag in BOTH themes.
+      { tagId: 'anilist:DoubleBridge', themeId: 'tragedy', strength: 100 },
+      { tagId: 'anilist:DoubleBridge', themeId: 'antihero', strength: 100 },
+      // Candidate-side bridge tag in ONLY ONE theme.
+      { tagId: 'anilist:SingleBridge', themeId: 'tragedy', strength: 100 },
+    ];
+    const candidates: TitleTagSet[] = [
+      {
+        titleId: 'singleThemeBridge',
+        tags: [{ tagId: 'anilist:SingleBridge', weight: 80 }],
+      },
+      {
+        titleId: 'doubleThemeBridge',
+        tags: [{ tagId: 'anilist:DoubleBridge', weight: 80 }],
+      },
+    ];
+
+    const result = recommendForUser(taste, candidates, undefined, themeMembership);
+
+    expect(result[0]?.titleId).toBe('doubleThemeBridge');
+    expect(result[1]?.titleId).toBe('singleThemeBridge');
+  });
+
+  it('contributes zero from a theme whose candidate-side strength is 0, even when user has signal in that theme', () => {
+    // A strength-0 mapping is unusual but the math should treat it as
+    // "this tag does not really belong to this theme". One candidate
+    // bridges via a strength-0 link to a theme the user cares about; an
+    // identical candidate carries an unrelated tag. The two should TIE
+    // (both score 0 from theme dimension and 0 from tag-overlap), then
+    // tie-break by titleId ASC.
+    const taste: UserTasteVector = new Map<string, number>([['tmdb:tragedy', 100]]);
+    const themeMembership: TagThemeMembership[] = [
+      { tagId: 'tmdb:tragedy', themeId: 'tragedy', strength: 100 },
+      // Candidate-side bridge with strength=0 → contributes nothing.
+      { tagId: 'anilist:ZeroBridge', themeId: 'tragedy', strength: 0 },
+    ];
+    const candidates: TitleTagSet[] = [
+      {
+        titleId: 'zStrengthZeroBridge',
+        tags: [{ tagId: 'anilist:ZeroBridge', weight: 80 }],
+      },
+      {
+        titleId: 'aUnrelated',
+        tags: [{ tagId: 'anilist:CookingShow', weight: 80 }],
+      },
+    ];
+
+    const result = recommendForUser(taste, candidates, undefined, themeMembership);
+
+    expect(result[0]?.score).toBe(0);
+    expect(result[1]?.score).toBe(0);
+    // Tie-break by titleId ASC; 'a...' precedes 'z...'.
+    expect(result.map((r) => r.titleId)).toEqual(['aUnrelated', 'zStrengthZeroBridge']);
+  });
+
+  it('contributes zero from the theme dimension when the taste vector is empty', () => {
+    // Cold-start with theme membership: no taste signal means tasteTheme
+    // is empty for every theme, so no candidate gets a positive score via
+    // the bridge — everything ties at 0 and orders by titleId ASC.
+    const emptyTaste: UserTasteVector = new Map<string, number>();
+    const themeMembership: TagThemeMembership[] = [
+      { tagId: 'tmdb:tragedy', themeId: 'tragedy', strength: 100 },
+      { tagId: 'anilist:Tragedy', themeId: 'tragedy', strength: 100 },
+    ];
+    const candidates: TitleTagSet[] = [
+      {
+        titleId: 'gamma',
+        tags: [{ tagId: 'anilist:Tragedy', weight: 80 }],
+      },
+      {
+        titleId: 'alpha',
+        tags: [{ tagId: 'anilist:Tragedy', weight: 80 }],
+      },
+      {
+        titleId: 'beta',
+        tags: [{ tagId: 'anilist:CookingShow', weight: 80 }],
+      },
+    ];
+
+    const result = recommendForUser(emptyTaste, candidates, undefined, themeMembership);
+
+    expect(result.every((r) => r.score === 0)).toBe(true);
+    expect(result.map((r) => r.titleId)).toEqual(['alpha', 'beta', 'gamma']);
   });
 });
