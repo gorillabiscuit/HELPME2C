@@ -180,3 +180,41 @@ without prepending one.
 or just open the file in an editor. Easy to forget; cheap to fix once
 you spot the symptoms (env var appears unset, neighbouring var also
 mysteriously gone).
+
+---
+
+## 2026-05-08 — Inngest: nightly crons silently never fired in production
+
+**What bit us:** ~3 days between first deploy and 2026-05-08, the
+deployed app had `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` unset in
+Vercel production. The Inngest SDK's `serve()` registers functions
+when Inngest cloud calls in to introspect — without a signing key,
+that introspection rejects, so cloud has no functions registered, so no
+crons fire. The local dev workflow (with `INNGEST_DEV=1` and the
+`inngest-cli dev` server) routes events through localhost:8288 and
+works fine, completely masking the production gap.
+
+**Symptoms that misled:** TMDB had 1,952 titles and AniList had 50 in
+the DB, looking like "TMDB sync works, AniList sync is broken." The
+real cause: TMDB and AniList syncs were both run *manually via the
+local dev server* against the prod DB; the prod cron never ran for
+either. The 50 AniList anime came from a one-off page-1 trigger, not a
+fan-out — also a manual local action. Easy to misread as "AniList
+fan-out has a bug."
+
+**How to spot it next time:**
+- `vercel env ls production | grep INNGEST` — if `INNGEST_EVENT_KEY`
+  and `INNGEST_SIGNING_KEY` aren't both there, prod is dead.
+- Inngest dashboard → Functions list — if it's empty in production
+  environment, the deployed app hasn't registered. Confirm the keys
+  are set in Vercel and redeploy.
+- `INNGEST_DEV=1` must NEVER appear in Vercel envs. Local-only flag.
+
+**What to do:** before assuming a sync bug, verify the cron actually
+fired by checking Inngest dashboard → Runs (Production) for the
+expected schedule. If the dashboard shows zero runs ever, the
+infrastructure isn't wired — code-side debugging won't help.
+
+The runbook at `docs/runbooks/inngest.md` already documented the
+required env vars and key-rotation procedure, but didn't flag "if these
+are unset the symptom is silent" — addressed by this LEARNED entry.
