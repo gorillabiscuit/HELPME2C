@@ -52,7 +52,12 @@ export function RecCardActions({ titleId }: RecCardActionsProps) {
   };
 
   const onRate = (rating: RecRating) => {
-    recFeedbackUpsert.mutate({ titleId, rating });
+    // Rating implies the user has expressed an opinion on this rec, so
+    // dismiss it from the dashboard alongside storing the rating. The
+    // rating signal still lands in rec_feedback.rating for future
+    // algorithm tuning per ROADMAP.md M6 — only the on-screen card
+    // disappears.
+    recFeedbackUpsert.mutate({ titleId, rating, dismissed: true });
   };
 
   const isPending = watchUpsert.isPending || recFeedbackUpsert.isPending;
