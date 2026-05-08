@@ -87,6 +87,9 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
             <Link href="/settings/import" className="text-slate-500 hover:text-slate-900">
               Import list →
             </Link>
+            <Link href="/settings/account" className="text-slate-500 hover:text-slate-900">
+              Account &amp; privacy →
+            </Link>
           </div>
         </div>
 
