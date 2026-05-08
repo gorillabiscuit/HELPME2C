@@ -140,7 +140,14 @@ export const recommendationsRouter = router({
         ? payload.items.filter((i) => allowedTitleIds!.has(i.titleId))
         : payload.items;
       const filteredItems = streamingFiltered.filter((i) => !excludedTitleIds.has(i.titleId));
-      const hiddenCount = payload.items.length - filteredItems.length;
+      // hiddenCount is intentionally scoped to the STREAMING filter only,
+      // not dismissed/library exclusions. The dashboard renders this under
+      // the "Filtering by [provider chips]" row — implying that this is
+      // what the providers are hiding. Mixing in dismissed/library would
+      // be misleading: a user with 0 providers selected but 50 library
+      // items would otherwise see "50 hidden by my services" without
+      // having selected any.
+      const hiddenCount = allowedTitleIds ? payload.items.length - streamingFiltered.length : 0;
 
       // Fetch provider display metadata only when the filter is active.
       // Pulled from streaming_availability (any country, any type) since
