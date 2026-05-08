@@ -36,6 +36,13 @@
       "when": 1778201390217,
       "tag": "0004_majestic_stone_men",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1778215601245,
+      "tag": "0005_unique_stranger",
+      "breakpoints": true
     }
   ]
 }

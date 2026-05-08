@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "streaming_title_provider_country_type_unique" ON "streaming_availability" USING btree ("title_id","provider_id","country_code","type");

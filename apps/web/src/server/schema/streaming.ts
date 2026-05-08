@@ -1,4 +1,4 @@
-import { index, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { index, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { titles } from './titles';
 
 export const streamingTypeEnum = pgEnum('streaming_type', ['streaming', 'rent', 'buy', 'free']);
@@ -25,5 +25,17 @@ export const streamingAvailability = pgTable(
   (t) => [
     index('streaming_title_country_idx').on(t.titleId, t.countryCode),
     index('streaming_provider_idx').on(t.providerId),
+    // Upsert target for the per-title sync — one row per
+    // (title × provider × country × type). TMDB sometimes lists the
+    // same provider under multiple types (e.g. Apple TV streams *and*
+    // rents in the same region) so all four columns are required to
+    // disambiguate. Per LEARNED.md 2026-05-06: use uniqueIndex, not
+    // index() with a "should be unique" comment, or ON CONFLICT lies.
+    uniqueIndex('streaming_title_provider_country_type_unique').on(
+      t.titleId,
+      t.providerId,
+      t.countryCode,
+      t.type,
+    ),
   ],
 );
