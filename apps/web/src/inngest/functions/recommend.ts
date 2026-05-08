@@ -6,7 +6,6 @@ import {
   type AnchorPick,
   type RatedTitle,
   type TagThemeMembership,
-  type TitleTagSet,
 } from '@helpme2c/ml';
 import { db } from '@/server/db';
 import {
@@ -17,6 +16,7 @@ import {
   users,
   watchEntries,
 } from '@/server/schema';
+import { groupTagsIntoTitleSets } from '../lib/group-tags';
 import { inngest, recommendAllUsersEvent, recommendUserEvent } from '../client';
 
 // Top-N cap matches the M4 plan agreed 2026-05-08.
@@ -125,27 +125,6 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
     });
 
   return { recCount: recs.length };
-}
-
-// Group flat (titleId, tagId, weight) rows into TitleTagSet[] for the ML
-// functions. A title with N tags appears as N rows in the input; output is
-// one TitleTagSet per distinct titleId.
-function groupTagsIntoTitleSets(
-  rows: ReadonlyArray<{ titleId: string; tagId: string; weight: number }>,
-): TitleTagSet[] {
-  const byTitle = new Map<
-    string,
-    { titleId: string; tags: Array<{ tagId: string; weight: number }> }
-  >();
-  for (const row of rows) {
-    let entry = byTitle.get(row.titleId);
-    if (!entry) {
-      entry = { titleId: row.titleId, tags: [] };
-      byTitle.set(row.titleId, entry);
-    }
-    entry.tags.push({ tagId: row.tagId, weight: row.weight });
-  }
-  return Array.from(byTitle.values());
 }
 
 // Per-user recompute — triggered by the all-users fan-out below or by a
