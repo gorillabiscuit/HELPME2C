@@ -1,6 +1,11 @@
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
-import { titles, userRecommendations } from '../schema';
+import {
+  streamingAvailability,
+  titles,
+  userRecommendations,
+  userStreamingProviders,
+} from '../schema';
 import { resolveInternalUserId } from '../lib/resolve-user';
 import { protectedProcedure, router } from '../trpc';
 
@@ -27,14 +32,19 @@ export const recommendationsRouter = router({
       z
         .object({
           limit: z.number().int().min(1).max(200).optional().default(20),
+          country: z
+            .string()
+            .regex(/^[A-Z]{2}$/i, 'expected ISO 3166-1 alpha-2')
+            .optional(),
         })
         .optional(),
     )
     .query(async ({ ctx, input }) => {
       const limit = input?.limit ?? 20;
+      const country = input?.country?.toUpperCase() ?? 'US';
 
       const internalUserId = await resolveInternalUserId(ctx.db, ctx.userId);
-      if (!internalUserId) return { items: [], computedAt: null };
+      if (!internalUserId) return { items: [], computedAt: null, filtered: false };
 
       const [row] = await ctx.db
         .select()
@@ -42,7 +52,7 @@ export const recommendationsRouter = router({
         .where(eq(userRecommendations.userId, internalUserId))
         .limit(1);
 
-      if (!row) return { items: [], computedAt: null };
+      if (!row) return { items: [], computedAt: null, filtered: false };
 
       const { payload } = row;
       // Schema-version guard. v1 is the current shape; anything else means
@@ -50,15 +60,51 @@ export const recommendationsRouter = router({
       // [] makes the home page render the "computing" state until the next
       // cron writes a v1-compatible payload.
       if (payload.schemaVersion !== 1) {
-        return { items: [], computedAt: row.computedAt };
+        return { items: [], computedAt: row.computedAt, filtered: false };
       }
 
-      // Slice to top-N first, then resolve title metadata. Fetching titles
-      // for the full 200-item payload would waste a JOIN since the home
-      // page only renders ~20 cards.
-      const topItems = payload.items.slice(0, limit);
+      // Connected-providers filter per ADR-0021: post-ranking, country-strict,
+      // never a ranking signal. If the user has 0 providers selected,
+      // skip the filter entirely (their selection is "I don't care, show
+      // everything"). With 1+ selected, restrict to titles that have a
+      // streaming_availability row in the request country with one of those
+      // provider_ids — counts both type='streaming' and type='free' as
+      // available; rent/buy don't qualify since the user pays per title.
+      const connectedRows = await ctx.db
+        .select({ providerId: userStreamingProviders.providerId })
+        .from(userStreamingProviders)
+        .where(eq(userStreamingProviders.userId, internalUserId));
+      const connectedProviderIds = connectedRows.map((r) => r.providerId);
+      const filterActive = connectedProviderIds.length > 0;
+
+      // Filter the FULL 200-item payload before slicing — otherwise top-20
+      // could exclude all available titles and the user would see fewer
+      // recs than they should. The full-payload streaming join is a single
+      // IN-list query, ~200 ids, fast.
+      let allowedTitleIds: Set<string> | null = null;
+      if (filterActive && payload.items.length > 0) {
+        const allItemIds = payload.items.map((i) => i.titleId);
+        const matchingRows = await ctx.db
+          .selectDistinct({ titleId: streamingAvailability.titleId })
+          .from(streamingAvailability)
+          .where(
+            and(
+              inArray(streamingAvailability.titleId, allItemIds),
+              eq(streamingAvailability.countryCode, country),
+              inArray(streamingAvailability.type, ['streaming', 'free']),
+              inArray(streamingAvailability.providerId, connectedProviderIds),
+            ),
+          );
+        allowedTitleIds = new Set(matchingRows.map((r) => r.titleId));
+      }
+
+      const filteredItems = allowedTitleIds
+        ? payload.items.filter((i) => allowedTitleIds!.has(i.titleId))
+        : payload.items;
+
+      const topItems = filteredItems.slice(0, limit);
       if (topItems.length === 0) {
-        return { items: [], computedAt: row.computedAt };
+        return { items: [], computedAt: row.computedAt, filtered: filterActive };
       }
 
       const titleIds = topItems.map((item) => item.titleId);
@@ -87,6 +133,7 @@ export const recommendationsRouter = router({
       return {
         items,
         computedAt: row.computedAt,
+        filtered: filterActive,
       };
     }),
 });

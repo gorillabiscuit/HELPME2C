@@ -1,5 +1,6 @@
 import { Show } from '@clerk/nextjs';
 import { auth, currentUser } from '@clerk/nextjs/server';
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { appRouter } from '@/server/router';
 import { createContext } from '@/server/trpc';
@@ -31,7 +32,15 @@ export default async function HomePage() {
   // either the user has no taste signal yet (cold-start, no anchors) or the
   // cron hasn't run for them yet — DashboardHome shows the same empty state
   // either way, with a CTA pointing at /onboarding.
-  const recs = userId ? await caller.recommendations.list({ limit: 20 }) : { items: [] };
+  //
+  // Country comes from Vercel's geo header so the streaming-availability
+  // filter (M5.4 per ADR-0021) is country-strict. Falls back to US when
+  // the header is absent (local dev).
+  const requestHeaders = await headers();
+  const country = (requestHeaders.get('x-vercel-ip-country') ?? 'US').toUpperCase();
+  const recs = userId
+    ? await caller.recommendations.list({ limit: 20, country })
+    : { items: [], filtered: false };
 
   return (
     <>
@@ -39,7 +48,7 @@ export default async function HomePage() {
         <MarketingHero />
       </Show>
       <Show when="signed-in">
-        <DashboardHome firstName={user?.firstName} recs={recs.items} />
+        <DashboardHome firstName={user?.firstName} recs={recs.items} recsFiltered={recs.filtered} />
       </Show>
     </>
   );

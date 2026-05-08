@@ -20,9 +20,10 @@ interface RecItem {
 interface DashboardHomeProps {
   firstName: string | null | undefined;
   recs: ReadonlyArray<RecItem>;
+  recsFiltered: boolean;
 }
 
-export function DashboardHome({ firstName, recs }: DashboardHomeProps) {
+export function DashboardHome({ firstName, recs, recsFiltered }: DashboardHomeProps) {
   const greeting = firstName ? `Welcome back, ${firstName}` : 'Welcome back';
 
   if (recs.length === 0) {
@@ -54,12 +55,18 @@ export function DashboardHome({ firstName, recs }: DashboardHomeProps) {
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-12">
-      <header className="mb-8">
-        <h1 className="text-3xl font-semibold tracking-tight">{greeting}</h1>
-        <p className="mt-2 text-sm text-slate-600">
-          Based on your taste — top {recs.length}{' '}
-          {recs.length === 1 ? 'recommendation' : 'recommendations'}.
-        </p>
+      <header className="mb-8 flex flex-wrap items-baseline justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">{greeting}</h1>
+          <p className="mt-2 text-sm text-slate-600">
+            Based on your taste — top {recs.length}{' '}
+            {recs.length === 1 ? 'recommendation' : 'recommendations'}
+            {recsFiltered ? ', filtered to your services' : ''}.
+          </p>
+        </div>
+        <Link href="/settings/providers" className="text-sm text-slate-500 hover:text-slate-900">
+          Manage services →
+        </Link>
       </header>
 
       <ul className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
