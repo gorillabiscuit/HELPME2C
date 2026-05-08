@@ -3,3 +3,4 @@ export * from './titles';
 export * from './streaming';
 export * from './watch';
 export * from './recommendations';
+export * from './themes';
