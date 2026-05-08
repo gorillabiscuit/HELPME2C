@@ -1,5 +1,6 @@
 import Image from 'next/image';
 import Link from 'next/link';
+import { RecCardActions } from '@/components/rec-card-actions';
 
 type MediaType = 'tv' | 'film' | 'anime';
 
@@ -115,6 +116,8 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
           const mediaTypeLabel = MEDIA_TYPE_LABEL[rec.mediaType];
           return (
             <li key={rec.id}>
+              {/* Poster + meta link to title page; the per-rec action row
+                  below sits OUTSIDE the link so its buttons don't navigate. */}
               <Link href={`/titles/${rec.id}`} className="group block">
                 {rec.posterUrl ? (
                   <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-slate-200 bg-slate-100 transition group-hover:border-slate-400">
@@ -138,6 +141,7 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
                     .join(' · ')}
                 </p>
               </Link>
+              <RecCardActions titleId={rec.id} />
             </li>
           );
         })}
