@@ -1,5 +1,15 @@
-import { index, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import {
+  index,
+  pgEnum,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 import { titles } from './titles';
+import { users } from './users';
 
 export const streamingTypeEnum = pgEnum('streaming_type', ['streaming', 'rent', 'buy', 'free']);
 
@@ -38,4 +48,24 @@ export const streamingAvailability = pgTable(
       t.type,
     ),
   ],
+);
+
+// User's "I subscribe to these" set, used by the dashboard's post-ranking
+// filter per ADR-0021 ("filter, never a ranking input"). Stored as a join
+// table rather than an array column so on-delete cascades clean up cleanly
+// per ADR-0012 §account-deletion.
+//
+// We store provider_id only — name and logo are looked up at render time
+// from streaming_availability rows, so the canonical source of provider
+// metadata stays the TMDB sync, not this table.
+export const userStreamingProviders = pgTable(
+  'user_streaming_providers',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    providerId: text('provider_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.providerId] })],
 );
