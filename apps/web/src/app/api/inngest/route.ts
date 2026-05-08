@@ -3,6 +3,7 @@ import { inngest } from '@/inngest/client';
 import {
   anilistSyncAnimeAll,
   anilistSyncAnimePage,
+  applyThemes,
   recommendAllUsers,
   recommendUser,
   tmdbSyncTvAll,
@@ -18,5 +19,6 @@ export const { GET, POST, PUT } = serve({
     anilistSyncAnimeAll,
     recommendUser,
     recommendAllUsers,
+    applyThemes,
   ],
 });
