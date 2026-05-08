@@ -82,7 +82,7 @@ export function OnboardingFlow({ initialPopular, initialAnchorIds }: OnboardingF
     <main className="mx-auto max-w-5xl px-6 pt-12 pb-32">
       <header className="mb-8 max-w-2xl">
         <h1 className="text-3xl font-semibold tracking-tight">Tell us what you love</h1>
-        <p className="mt-3 text-slate-600">
+        <p className="mt-3 text-text-body">
           Pick a few titles that represent your taste — anything you&apos;d recommend to a friend.
           We&apos;ll use these as <em>anchors</em> for your personal recommendations. Five or six is
           plenty; you can always add more later.
@@ -99,7 +99,7 @@ export function OnboardingFlow({ initialPopular, initialAnchorIds }: OnboardingF
         />
       </div>
 
-      <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-slate-500">
+      <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
         {showingSearchResults
           ? isLoadingResults
             ? 'Searching…'
@@ -127,10 +127,10 @@ export function OnboardingFlow({ initialPopular, initialAnchorIds }: OnboardingF
                 >
                   <div
                     className={cn(
-                      'relative aspect-[2/3] overflow-hidden rounded-lg border-2 bg-slate-100 transition',
+                      'relative aspect-[2/3] overflow-hidden rounded-lg border-2 bg-muted transition',
                       isPicked
-                        ? 'border-slate-900 shadow-md'
-                        : 'border-transparent group-hover:border-slate-400',
+                        ? 'border-foreground shadow-md'
+                        : 'border-transparent group-hover:border-input',
                     )}
                   >
                     {title.posterUrl ? (
@@ -143,15 +143,15 @@ export function OnboardingFlow({ initialPopular, initialAnchorIds }: OnboardingF
                       />
                     ) : null}
                     {isPicked ? (
-                      <span className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-sm font-bold text-white">
+                      <span className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary text-sm font-bold text-white">
                         ✓
                       </span>
                     ) : null}
                   </div>
-                  <h3 className="mt-2 truncate text-sm font-medium text-slate-900">
+                  <h3 className="mt-2 truncate text-sm font-medium text-foreground">
                     {title.title}
                   </h3>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-muted-foreground">
                     {[mediaTypeLabel, title.releaseYear?.toString()]
                       .filter((s): s is string => Boolean(s))
                       .join(' · ')}
@@ -166,10 +166,10 @@ export function OnboardingFlow({ initialPopular, initialAnchorIds }: OnboardingF
       {/* Sticky bottom bar — picked count + Continue. Always available;
           no minimum-anchor gate so users who want to skip can. They can
           return to /onboarding later if they want to add more. */}
-      <div className="fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white/95 backdrop-blur">
+      <div className="fixed inset-x-0 bottom-0 border-t border-border bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
-          <p className="text-sm text-slate-600">
-            <span className="font-semibold text-slate-900">{picked.size}</span>{' '}
+          <p className="text-sm text-text-body">
+            <span className="font-semibold text-foreground">{picked.size}</span>{' '}
             {picked.size === 1 ? 'anchor' : 'anchors'} picked
           </p>
           <Button onClick={() => router.push('/')}>

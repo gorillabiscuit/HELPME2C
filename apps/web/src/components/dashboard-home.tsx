@@ -47,17 +47,17 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
     return (
       <main className="mx-auto max-w-2xl px-6 py-16">
         <h1 className="text-3xl font-semibold tracking-tight">{greeting}</h1>
-        <div className="mt-8 rounded-lg border border-dashed border-slate-300 px-6 py-12 text-center">
-          <h2 className="text-xl font-semibold tracking-tight text-slate-900">
+        <div className="mt-8 rounded-lg border border-dashed border-border px-6 py-12 text-center">
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">
             No recommendations yet
           </h2>
-          <p className="mx-auto mt-2 max-w-md text-sm text-slate-600">
+          <p className="mx-auto mt-2 max-w-md text-sm text-text-body">
             Pick a few titles that represent your taste — anything you&apos;d recommend to a friend.
             We&apos;ll use them to start your personal recommendations.
           </p>
           <Link
             href="/onboarding"
-            className="mt-4 inline-flex items-center rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+            className="mt-4 inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-white transition hover:bg-primary/90"
           >
             Get started
           </Link>
@@ -72,34 +72,37 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
         <div className="flex flex-wrap items-baseline justify-between gap-4">
           <div>
             <h1 className="text-3xl font-semibold tracking-tight">{greeting}</h1>
-            <p className="mt-2 text-sm text-slate-600">
+            <p className="mt-2 text-sm text-text-body">
               Based on your taste — top {recs.length}{' '}
               {recs.length === 1 ? 'recommendation' : 'recommendations'}.
             </p>
           </div>
           <div className="flex flex-col items-end gap-1 text-sm">
-            <Link href="/groups" className="text-slate-500 hover:text-slate-900">
+            <Link href="/groups" className="text-muted-foreground hover:text-foreground">
               Groups →
             </Link>
-            <Link href="/settings/providers" className="text-slate-500 hover:text-slate-900">
+            <Link
+              href="/settings/providers"
+              className="text-muted-foreground hover:text-foreground"
+            >
               Manage services →
             </Link>
-            <Link href="/settings/import" className="text-slate-500 hover:text-slate-900">
+            <Link href="/settings/import" className="text-muted-foreground hover:text-foreground">
               Import list →
             </Link>
-            <Link href="/settings/account" className="text-slate-500 hover:text-slate-900">
+            <Link href="/settings/account" className="text-muted-foreground hover:text-foreground">
               Account &amp; privacy →
             </Link>
           </div>
         </div>
 
         {filter.active ? (
-          <div className="mt-4 flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-            <span className="font-medium text-slate-700">Filtering by:</span>
+          <div className="mt-4 flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted px-3 py-2 text-xs text-text-body">
+            <span className="font-medium text-foreground">Filtering by:</span>
             {filter.providers.map((p) => (
               <span
                 key={p.providerId}
-                className="inline-flex items-center gap-1.5 rounded-md bg-white px-2 py-1 ring-1 ring-slate-200"
+                className="inline-flex items-center gap-1.5 rounded-md bg-white px-2 py-1 ring-1 ring-border"
               >
                 {p.providerLogoUrl ? (
                   <Image
@@ -110,11 +113,11 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
                     className="rounded-sm bg-white"
                   />
                 ) : null}
-                <span className="text-slate-700">{p.providerName}</span>
+                <span className="text-foreground">{p.providerName}</span>
               </span>
             ))}
             {filter.hiddenCount > 0 ? (
-              <span className="text-slate-500">
+              <span className="text-muted-foreground">
                 · {filter.hiddenCount} {filter.hiddenCount === 1 ? 'rec' : 'recs'} hidden
               </span>
             ) : null}
@@ -131,7 +134,7 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
                   below sits OUTSIDE the link so its buttons don't navigate. */}
               <Link href={`/titles/${rec.id}`} className="group block">
                 {rec.posterUrl ? (
-                  <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-slate-200 bg-slate-100 transition group-hover:border-slate-400">
+                  <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-border bg-muted transition group-hover:border-input">
                     <Image
                       src={rec.posterUrl}
                       alt=""
@@ -141,12 +144,12 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
                     />
                   </div>
                 ) : (
-                  <div className="aspect-[2/3] rounded-lg border border-slate-200 bg-slate-100" />
+                  <div className="aspect-[2/3] rounded-lg border border-border bg-muted" />
                 )}
-                <h3 className="mt-2 truncate text-sm font-medium text-slate-900 group-hover:underline">
+                <h3 className="mt-2 truncate text-sm font-medium text-foreground group-hover:underline">
                   {rec.title}
                 </h3>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-muted-foreground">
                   {[mediaTypeLabel, rec.releaseYear?.toString()]
                     .filter((s): s is string => Boolean(s))
                     .join(' · ')}

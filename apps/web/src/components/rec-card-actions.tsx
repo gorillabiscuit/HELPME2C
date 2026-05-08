@@ -68,7 +68,7 @@ export function RecCardActions({ titleId }: RecCardActionsProps) {
         type="button"
         onClick={onSeenIt}
         disabled={isPending}
-        className="rounded-md border border-slate-200 px-2 py-1 text-slate-600 transition-colors hover:border-slate-400 hover:bg-slate-50 hover:text-slate-900 disabled:opacity-50"
+        className="rounded-md border border-border px-2 py-1 text-text-body transition-colors hover:border-input hover:bg-muted hover:text-foreground disabled:opacity-50"
       >
         Seen it
       </button>
@@ -76,7 +76,7 @@ export function RecCardActions({ titleId }: RecCardActionsProps) {
         type="button"
         onClick={onNotInterested}
         disabled={isPending}
-        className="rounded-md border border-slate-200 px-2 py-1 text-slate-600 transition-colors hover:border-slate-400 hover:bg-slate-50 hover:text-slate-900 disabled:opacity-50"
+        className="rounded-md border border-border px-2 py-1 text-text-body transition-colors hover:border-input hover:bg-muted hover:text-foreground disabled:opacity-50"
       >
         Hide
       </button>
@@ -90,19 +90,19 @@ export function RecCardActions({ titleId }: RecCardActionsProps) {
           aria-label="Rate this recommendation"
           onClick={() => setRatePopoverOpen((v) => !v)}
           disabled={isPending}
-          className="rounded-md border border-slate-200 px-2 py-1 text-slate-600 transition-colors hover:border-slate-400 hover:bg-slate-50 hover:text-slate-900 disabled:opacity-50"
+          className="rounded-md border border-border px-2 py-1 text-text-body transition-colors hover:border-input hover:bg-muted hover:text-foreground disabled:opacity-50"
         >
           Rate
         </button>
         {ratePopoverOpen ? (
-          <div className="absolute left-0 top-full z-10 mt-1 flex flex-col rounded-md border border-slate-200 bg-white p-1 shadow-lg">
+          <div className="absolute left-0 top-full z-10 mt-1 flex flex-col rounded-md border border-border bg-white p-1 shadow-lg">
             {RATING_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
                 type="button"
                 onClick={() => onRate(opt.value)}
                 disabled={isPending}
-                className="rounded px-3 py-1 text-left text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-50"
+                className="rounded px-3 py-1 text-left text-foreground transition-colors hover:bg-muted disabled:opacity-50"
               >
                 {opt.label}
               </button>

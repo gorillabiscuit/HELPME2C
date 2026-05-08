@@ -46,19 +46,19 @@ export function GroupMemberList({ groupId, members, isOwner }: GroupMemberListPr
         return (
           <li
             key={m.userId}
-            className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2"
+            className="flex items-center justify-between rounded-md border border-border bg-white px-3 py-2"
           >
             <div className="flex items-baseline gap-2">
-              <span className="text-sm font-medium text-slate-900">
+              <span className="text-sm font-medium text-foreground">
                 {m.displayName ?? `Member ${m.userId.slice(0, 6)}`}
               </span>
               {m.role === 'owner' ? (
-                <span className="rounded bg-slate-900 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white">
+                <span className="rounded bg-primary px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white">
                   Owner
                 </span>
               ) : null}
               {m.isYou ? (
-                <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-600">
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-text-body">
                   You
                 </span>
               ) : null}

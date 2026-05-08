@@ -69,7 +69,7 @@ export function TitleDetailAddButton({
   // Anchor management lives on /onboarding.
   if (initialEntry.kind === 'anchor') {
     return (
-      <span className="inline-flex items-center rounded-md border border-slate-300 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-700">
+      <span className="inline-flex items-center rounded-md border border-border bg-muted px-3 py-1.5 text-sm font-medium text-foreground">
         On your list · Anchor pick
       </span>
     );
@@ -82,10 +82,10 @@ export function TitleDetailAddButton({
   const statusLabel = (initialEntry.status && STATUS_LABEL[initialEntry.status]) || 'On your list';
   return (
     <div className="inline-flex items-center gap-2">
-      <span className="inline-flex items-center rounded-md border border-slate-300 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-700">
+      <span className="inline-flex items-center rounded-md border border-border bg-muted px-3 py-1.5 text-sm font-medium text-foreground">
         On your list · {statusLabel}
         {initialEntry.rating !== null ? (
-          <span className="ml-2 text-slate-500">· {initialEntry.rating}/10</span>
+          <span className="ml-2 text-muted-foreground">· {initialEntry.rating}/10</span>
         ) : null}
       </span>
       <LibraryEditDialog

@@ -42,7 +42,7 @@ export default async function GroupJoinPage({ params }: PageProps) {
           <CardTitle>Join {group.name}?</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-sm text-slate-600">
+          <p className="text-sm text-text-body">
             By joining, the other members of <span className="font-medium">{group.name}</span> will
             see your display name in the group. They won&apos;t see your library, ratings, or
             anchors — only the group&apos;s shared recommendations.
@@ -51,7 +51,7 @@ export default async function GroupJoinPage({ params }: PageProps) {
             <GroupJoinButton token={token} />
             <Link
               href="/groups"
-              className="inline-flex items-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="inline-flex items-center rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted"
             >
               Cancel
             </Link>

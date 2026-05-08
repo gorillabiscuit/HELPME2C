@@ -48,7 +48,9 @@ export function ConsentPreferencesDialog() {
               <Label htmlFor="essential" className="font-medium">
                 Strictly necessary
               </Label>
-              <p className="text-sm text-slate-500">Auth, security, and session. Always on.</p>
+              <p className="text-sm text-muted-foreground">
+                Auth, security, and session. Always on.
+              </p>
             </div>
             <Switch id="essential" checked disabled />
           </div>
@@ -58,7 +60,7 @@ export function ConsentPreferencesDialog() {
               <Label htmlFor="analytics" className="font-medium">
                 Product analytics
               </Label>
-              <p className="text-sm text-slate-500">
+              <p className="text-sm text-muted-foreground">
                 Page views and event tracking so we can understand how the product is used.
               </p>
             </div>
@@ -70,7 +72,7 @@ export function ConsentPreferencesDialog() {
               <Label htmlFor="session-replay" className="font-medium">
                 Session replay
               </Label>
-              <p className="text-sm text-slate-500">
+              <p className="text-sm text-muted-foreground">
                 Recordings of UI interactions (input fields are masked). More invasive than plain
                 analytics; held as a separate toggle.
               </p>

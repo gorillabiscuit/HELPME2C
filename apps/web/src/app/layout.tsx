@@ -18,22 +18,22 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body className="flex min-h-screen flex-col bg-white text-slate-900 antialiased">
+      <body className="flex min-h-screen flex-col bg-white text-foreground antialiased">
         <ClerkProvider>
           <TRPCProvider>
             <ConsentProvider>
               <PostHogProvider>
-                <header className="flex items-center justify-between border-b border-slate-200 px-6 py-3">
+                <header className="flex items-center justify-between border-b border-border px-6 py-3">
                   <div className="flex items-center gap-6">
                     <Link href="/" className="text-sm font-semibold tracking-tight">
                       HelpME2C
                     </Link>
                     <Show when="signed-in">
-                      <nav className="flex items-center gap-4 text-sm text-slate-600">
-                        <Link href="/search" className="hover:text-slate-900">
+                      <nav className="flex items-center gap-4 text-sm text-text-body">
+                        <Link href="/search" className="hover:text-foreground">
                           Search
                         </Link>
-                        <Link href="/library" className="hover:text-slate-900">
+                        <Link href="/library" className="hover:text-foreground">
                           Library
                         </Link>
                       </nav>
