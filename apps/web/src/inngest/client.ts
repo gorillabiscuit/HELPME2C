@@ -28,4 +28,12 @@ export const applyThemesEvent = eventType('themes/apply', {
   schema: staticSchema<Record<string, never>>(),
 });
 
+export const recommendGroupEvent = eventType('recommend/group.recompute', {
+  schema: staticSchema<{ groupId: string }>(),
+});
+
+export const recommendAllGroupsEvent = eventType('recommend/all-groups.recompute', {
+  schema: staticSchema<Record<string, never>>(),
+});
+
 export const inngest = new Inngest({ id: 'helpme2c' });

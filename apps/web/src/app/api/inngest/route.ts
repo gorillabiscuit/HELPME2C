@@ -4,7 +4,9 @@ import {
   anilistSyncAnimeAll,
   anilistSyncAnimePage,
   applyThemes,
+  recommendAllGroups,
   recommendAllUsers,
+  recommendGroup,
   recommendUser,
   tmdbSyncTvAll,
   tmdbSyncTvPage,
@@ -20,5 +22,7 @@ export const { GET, POST, PUT } = serve({
     recommendUser,
     recommendAllUsers,
     applyThemes,
+    recommendGroup,
+    recommendAllGroups,
   ],
 });
