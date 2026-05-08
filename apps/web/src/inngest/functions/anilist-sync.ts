@@ -289,10 +289,17 @@ export async function fetchAnilistAnimePage(
   return { media: data.Page.media, pageInfo: data.Page.pageInfo };
 }
 
+// Anime-batch size inside a single step.run. Mirrors the TMDB sync —
+// see SHOW_BATCH_SIZE in tmdb-sync.ts for the rationale (Inngest free
+// tier ~1k step runs/day; per-anime step.runs would burn ~2550/cron).
+// Batching 10 anime per step.run drops the budget to ~300/cron.
+const ANIME_BATCH_SIZE = 10;
+
 // Per-page sync. Triggered by the fan-out function below or manually.
 // Wraps the pure helpers in step.run so Inngest can checkpoint progress
-// per anime (50 step.runs per page is the same shape as TMDB's per-page
-// fan-out — see LEARNED.md and the Inngest free-tier note in the runbook).
+// per BATCH (10 anime each) and resume from the failed batch on retry.
+// Per-anime errors are caught and surfaced in the batch return so one
+// bad row doesn't gate the rest of the batch.
 export const anilistSyncAnimePage = inngest.createFunction(
   {
     id: 'anilist-sync-anime-page',
@@ -305,13 +312,36 @@ export const anilistSyncAnimePage = inngest.createFunction(
 
     const { media, pageInfo } = await step.run('fetch-page', () => fetchAnilistAnimePage(page));
 
-    for (const m of media) {
-      await step.run(`process-anime-${m.id}`, () => processAnilistMedia(m));
+    let processed = 0;
+    let failed = 0;
+    for (let i = 0; i < media.length; i += ANIME_BATCH_SIZE) {
+      const batch = media.slice(i, i + ANIME_BATCH_SIZE);
+      const result = await step.run(`process-batch-${page}-${i}`, async () => {
+        let batchOk = 0;
+        let batchFail = 0;
+        const errors: Array<{ id: number; message: string }> = [];
+        for (const m of batch) {
+          try {
+            await processAnilistMedia(m);
+            batchOk += 1;
+          } catch (e) {
+            batchFail += 1;
+            errors.push({
+              id: m.id,
+              message: e instanceof Error ? e.message : String(e),
+            });
+          }
+        }
+        return { processed: batchOk, failed: batchFail, errors };
+      });
+      processed += result.processed;
+      failed += result.failed;
     }
 
     return {
       page,
-      processed: media.length,
+      processed,
+      failed,
       hasNextPage: pageInfo.hasNextPage,
       total: pageInfo.total,
       lastPage: pageInfo.lastPage,

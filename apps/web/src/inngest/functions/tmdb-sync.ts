@@ -197,9 +197,21 @@ export async function fetchTmdbTvDiscoverPage(page: number): Promise<TmdbDiscove
   );
 }
 
+// Show-batch size inside a single step.run. Per docs/runbooks/inngest.md
+// the Inngest free tier caps step runs at ~1k/day; 1-step-per-show would
+// burn 2000 step runs per nightly cron and silently truncate. Batching
+// 10 shows per step.run drops the budget to ~300 step runs/cron — well
+// under cap. Tradeoff: a transient failure inside a batch retries the
+// whole batch (the per-show try/catch below scopes blast radius to one
+// show). 10 is the sweet spot; lower means more step.runs, higher means
+// bigger retry blast radius if a batch hits a transient TMDB error.
+const SHOW_BATCH_SIZE = 10;
+
 // Syncs one page of popular TV shows. Triggered per-page by tmdbSyncTvAll.
-// Wraps the pure helpers in step.run so Inngest can checkpoint per-show progress
-// and resume from the failed step on retry.
+// Wraps the pure helpers in step.run so Inngest can checkpoint progress
+// per BATCH and resume from the failed batch on retry. Per-show errors
+// are caught and surfaced in the batch return — Inngest still treats the
+// batch as successful, so one bad show doesn't gate the rest.
 export const tmdbSyncTvPage = inngest.createFunction(
   {
     id: 'tmdb-sync-tv-page',
@@ -212,11 +224,38 @@ export const tmdbSyncTvPage = inngest.createFunction(
 
     const discoverPage = await step.run('fetch-discover-page', () => fetchTmdbTvDiscoverPage(page));
 
-    for (const show of discoverPage.results) {
-      await step.run(`process-tv-${show.id}`, () => processTmdbTvShow(show.id));
+    let processed = 0;
+    let failed = 0;
+    for (let i = 0; i < discoverPage.results.length; i += SHOW_BATCH_SIZE) {
+      const batch = discoverPage.results.slice(i, i + SHOW_BATCH_SIZE);
+      const result = await step.run(`process-batch-${page}-${i}`, async () => {
+        let batchOk = 0;
+        let batchFail = 0;
+        const errors: Array<{ id: number; message: string }> = [];
+        for (const show of batch) {
+          try {
+            await processTmdbTvShow(show.id);
+            batchOk += 1;
+          } catch (e) {
+            batchFail += 1;
+            errors.push({
+              id: show.id,
+              message: e instanceof Error ? e.message : String(e),
+            });
+          }
+        }
+        return { processed: batchOk, failed: batchFail, errors };
+      });
+      processed += result.processed;
+      failed += result.failed;
     }
 
-    return { page, processed: discoverPage.results.length, totalPages: discoverPage.total_pages };
+    return {
+      page,
+      processed,
+      failed,
+      totalPages: discoverPage.total_pages,
+    };
   },
 );
 

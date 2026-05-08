@@ -53,13 +53,18 @@ is on a non-default port (default is 8288).
 ## Cost signals
 
 - Free plan: 50k function runs/month, 1k step runs/day, 50 concurrent
-  steps. **Most likely to hit step-runs limit first** because the TMDB
-  page function uses one `step.run` per show — 100 pages × 20 shows =
-  2,000 step runs per nightly cron. Two cron runs/day = 4,000 step
-  runs/day, 4× the free limit.
-- Reviewer flagged this in 2026-05-07 review. Watch: Inngest Dashboard →
-  Usage. Mitigation when it bites: refactor to fewer `step.run` calls per
-  function (e.g. batch shows in groups of 10).
+  steps.
+- **Step-run budget per nightly cron** (post 2026-05-08 batching refactor):
+  - TMDB sync: 100 pages × (1 fetch + 2 batches of 10) = ~300 step runs
+  - AniList sync: 50 pages × (1 fetch + 5 batches of 10) = ~300 step runs
+  - Recommendations: 1 fan-out + 1 per user (~3 today)
+  - **Combined: ~600 step runs/day**, comfortably within 1k/day free tier.
+- The earlier per-show `step.run` shape burned ~4,500 step runs/cron (4×
+  the free cap) and silently truncated each night — see LEARNED.md
+  2026-05-08 entry on why this masquerades as a sync code bug.
+- Watch: Inngest Dashboard → Usage. If a batch fails wholesale (rare —
+  per-item errors are caught inside the batch), only that batch retries,
+  not the whole page.
 - Paid: starts at $20/mo for 200k function runs.
 - Hard budget alerts: not yet wired up. Should be wired before alpha launch.
 
