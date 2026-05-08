@@ -178,92 +178,9 @@ export function extractTasteVector(
  *     deterministic-but-meaningless ordering, so the caller should
  *     normally short-circuit before calling
  */
-/** Internal: tagId → list of (themeId, strength) memberships. Built once
- * per scoring call so per-candidate iteration is O(1) per tag. */
-type TagThemeIndex = ReadonlyMap<string, ReadonlyArray<{ themeId: string; strength: number }>>;
-
-/** Internal: themeId → aggregate user weight (taste vector projected
- * onto the theme axis). Built per-user, used at score time to credit
- * cross-medium bridges. */
-type TasteThemeVector = ReadonlyMap<string, number>;
-
-/**
- * Internal — index theme membership rows for O(1) lookup at score time.
- * Shared between recommendForUser and recommendForGroup so the
- * cross-medium rule stays consistent across the two surfaces.
- */
-function buildTagThemeIndex(themeMembership: ReadonlyArray<TagThemeMembership>): TagThemeIndex {
-  const index = new Map<string, Array<{ themeId: string; strength: number }>>();
-  for (const m of themeMembership) {
-    let memberships = index.get(m.tagId);
-    if (!memberships) {
-      memberships = [];
-      index.set(m.tagId, memberships);
-    }
-    memberships.push({ themeId: m.themeId, strength: m.strength });
-  }
-  return index;
-}
-
-/**
- * Internal — project a user's tag-level taste onto the theme axis. For
- * each tag in their taste, accumulate weighted credit to every theme
- * that tag belongs to. The result is the user's "theme taste" — which
- * cross-medium bridges they're likely to value.
- */
-function buildTasteTheme(taste: UserTasteVector, tagThemes: TagThemeIndex): TasteThemeVector {
-  const tasteTheme = new Map<string, number>();
-  for (const [tagId, tasteWeight] of taste) {
-    const memberships = tagThemes.get(tagId);
-    if (!memberships) continue;
-    for (const m of memberships) {
-      tasteTheme.set(
-        m.themeId,
-        (tasteTheme.get(m.themeId) ?? 0) + tasteWeight * (m.strength / 100),
-      );
-    }
-  }
-  return tasteTheme;
-}
-
-/**
- * Internal — score one candidate against one user's taste. Combines
- * direct tag-overlap with the cross-medium-only theme bridge (a tag
- * the user has direct signal in scores via tag-overlap ONLY; the theme
- * dimension fires only for tags absent from taste — see the JSDoc on
- * recommendForUser for the full rule).
- *
- * This is the shared kernel: recommendForUser calls it once per
- * candidate; recommendForGroup calls it once per (member × candidate).
- * Lifting it to a helper keeps the two surfaces from drifting apart.
- */
-function scoreCandidate(
-  taste: UserTasteVector,
-  candidate: TitleTagSet,
-  tagThemes: TagThemeIndex,
-  tasteTheme: TasteThemeVector,
-): number {
-  let score = 0;
-  for (const tag of candidate.tags) {
-    const tasteWeight = taste.get(tag.tagId);
-    if (tasteWeight !== undefined) {
-      // Direct tag match — score via tag-overlap, skip theme dimension
-      // for this tag (cross-medium-only rule).
-      score += tasteWeight * tag.weight;
-      continue;
-    }
-    // No direct match — check if this tag bridges to a theme the user
-    // has signal in. Sums across themes if the tag is multi-membered.
-    const memberships = tagThemes.get(tag.tagId);
-    if (!memberships) continue;
-    for (const m of memberships) {
-      const themeWeight = tasteTheme.get(m.themeId);
-      if (themeWeight === undefined) continue;
-      score += themeWeight * tag.weight * (m.strength / 100);
-    }
-  }
-  return score;
-}
+// Scoring kernel lives in ./scoring (single source of truth shared
+// between recommendForUser, recommendForGroup, and explainGroupRecommendation).
+import { buildTagThemeIndex, buildTasteTheme, scoreCandidate } from './scoring';
 
 export function recommendForUser(
   taste: UserTasteVector,
