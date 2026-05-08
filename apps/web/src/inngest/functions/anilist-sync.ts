@@ -24,6 +24,10 @@ interface AniListPageInfo {
 
 interface AniListMedia {
   id: number;
+  /** MAL anime id, when AniList knows of one. Stored on titles.id_mal so
+   * MAL imports (M8) can match by MAL anime id without a separate
+   * mapping table. */
+  idMal: number | null;
   title: {
     romaji: string | null;
     english: string | null;
@@ -69,6 +73,7 @@ const PAGE_QUERY = /* GraphQL */ `
       }
       media(type: ANIME, sort: POPULARITY_DESC) {
         id
+        idMal
         title {
           romaji
           english
@@ -232,6 +237,7 @@ export async function processAnilistMedia(media: AniListMedia): Promise<string |
       posterUrl: media.coverImage.extraLarge || media.coverImage.large,
       backdropUrl: media.bannerImage,
       popularityScore: media.popularity,
+      idMal: media.idMal,
     })
     .onConflictDoUpdate({
       target: [titles.externalId, titles.source],
@@ -241,6 +247,7 @@ export async function processAnilistMedia(media: AniListMedia): Promise<string |
         status,
         episodeCount: media.episodes,
         popularityScore: media.popularity,
+        idMal: media.idMal,
         updatedAt: new Date(),
       },
     })

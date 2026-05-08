@@ -42,6 +42,10 @@ export const titles = pgTable(
     backdropUrl: text('backdrop_url'),
     // Raw popularity score from the source API; used for cold-start ranking.
     popularityScore: real('popularity_score'),
+    // MAL ID for AniList rows (AniList exposes idMal on every Media object).
+    // Lets MAL imports (M8) match by MAL anime id without a separate
+    // mapping table. Null on TMDB rows. Indexed for the lookup.
+    idMal: integer('id_mal'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -52,6 +56,9 @@ export const titles = pgTable(
     uniqueIndex('titles_external_id_source_idx').on(t.externalId, t.source),
     index('titles_media_type_idx').on(t.mediaType),
     index('titles_release_year_idx').on(t.releaseYear),
+    // MAL-id lookup index for the M8 import path. Partial-style coverage —
+    // only AniList rows have idMal populated.
+    index('titles_id_mal_idx').on(t.idMal),
   ],
 );
 
