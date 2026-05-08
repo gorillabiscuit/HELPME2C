@@ -3,13 +3,18 @@ import { withSentryConfig } from '@sentry/nextjs';
 
 const nextConfig: NextConfig = {
   images: {
-    // Allowlist for next/image remote sources. TMDB serves all our poster
-    // and backdrop URLs; without this, next/image refuses to optimise them
-    // and the title detail page renders broken thumbnails.
+    // Allowlist for next/image remote sources. Without an entry here,
+    // next/image refuses to optimise the URL and renders a broken
+    // thumbnail. TMDB serves TV posters; AniList serves anime posters
+    // and banner images.
     remotePatterns: [
       {
         protocol: 'https',
         hostname: 'image.tmdb.org',
+      },
+      {
+        protocol: 'https',
+        hostname: 's4.anilist.co',
       },
     ],
   },
