@@ -1,5 +1,6 @@
 import { router } from './trpc';
 import { groupsRouter } from './routers/groups';
+import { listImportRouter } from './routers/list-import';
 import { meRouter } from './routers/me';
 import { recFeedbackRouter } from './routers/rec-feedback';
 import { recommendationsRouter } from './routers/recommendations';
@@ -15,6 +16,7 @@ export const appRouter = router({
   streaming: streamingRouter,
   recFeedback: recFeedbackRouter,
   groups: groupsRouter,
+  listImport: listImportRouter,
 });
 
 export type AppRouter = typeof appRouter;
