@@ -77,9 +77,14 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
               {recs.length === 1 ? 'recommendation' : 'recommendations'}.
             </p>
           </div>
-          <Link href="/settings/providers" className="text-sm text-slate-500 hover:text-slate-900">
-            Manage services →
-          </Link>
+          <div className="flex flex-col items-end gap-1 text-sm">
+            <Link href="/groups" className="text-slate-500 hover:text-slate-900">
+              Groups →
+            </Link>
+            <Link href="/settings/providers" className="text-slate-500 hover:text-slate-900">
+              Manage services →
+            </Link>
+          </div>
         </div>
 
         {filter.active ? (
