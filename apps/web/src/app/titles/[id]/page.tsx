@@ -1,4 +1,5 @@
 import { and, eq, desc } from 'drizzle-orm';
+import { headers } from 'next/headers';
 import Image from 'next/image';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
@@ -34,6 +35,31 @@ const MEDIA_TYPE_LABEL: Record<string, string> = {
   film: 'Film',
   anime: 'Anime',
 };
+
+// Order matters — drives display order on the title page.
+const STREAMING_TYPE_LABEL: Record<'streaming' | 'rent' | 'buy' | 'free', string> = {
+  streaming: 'Streaming',
+  free: 'Free with ads',
+  rent: 'Rent',
+  buy: 'Buy',
+};
+const STREAMING_TYPE_ORDER: ReadonlyArray<'streaming' | 'rent' | 'buy' | 'free'> = [
+  'streaming',
+  'free',
+  'rent',
+  'buy',
+];
+
+function formatRelativeTime(date: Date): string {
+  const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
 
 export default async function TitleDetailPage({ params }: PageProps) {
   const { id } = await params;
@@ -73,21 +99,66 @@ export default async function TitleDetailPage({ params }: PageProps) {
     .orderBy(desc(titleTags.weight))
     .limit(24);
 
-  // Streaming summary only — count distinct providers + countries.
-  // Per-region "where to watch" rendering lands in M5 (streaming surface)
-  // alongside the user's connected-providers filter.
+  // Streaming providers per ADR-0021: surface as a post-ranking filter,
+  // never as a ranking signal. UX prioritises the user's region, with a
+  // count of "other regions" so they know data exists if they roam.
   const streamingRows = await db
     .select({
       providerId: streamingAvailability.providerId,
       providerName: streamingAvailability.providerName,
+      providerLogoUrl: streamingAvailability.providerLogoUrl,
       countryCode: streamingAvailability.countryCode,
       type: streamingAvailability.type,
+      sourceUrl: streamingAvailability.sourceUrl,
+      updatedAt: streamingAvailability.updatedAt,
     })
     .from(streamingAvailability)
     .where(eq(streamingAvailability.titleId, id));
 
-  const distinctProviders = new Set(streamingRows.map((r) => r.providerName));
-  const distinctCountries = new Set(streamingRows.map((r) => r.countryCode));
+  // Region default: Vercel injects `x-vercel-ip-country` based on geolocation
+  // — gives us a useful default without asking. Falls back to US when the
+  // header is missing (local dev, non-Vercel deploys). Proper user-set
+  // country comes with the M5.3 connected-providers settings page; until
+  // then `users.region` is too coarse (eu / row) for TMDB's per-country
+  // provider data.
+  const requestHeaders = await headers();
+  const primaryCountry = (requestHeaders.get('x-vercel-ip-country') ?? 'US').toUpperCase();
+
+  const primaryRegionRows = streamingRows.filter((r) => r.countryCode === primaryCountry);
+  const otherCountries = new Set(
+    streamingRows.filter((r) => r.countryCode !== primaryCountry).map((r) => r.countryCode),
+  );
+
+  // Deduplicate providers within a (country, type) group — TMDB occasionally
+  // returns the same provider twice for the same country/type combo across
+  // sub-regions (rare but happens). Group key = type → sorted unique providers.
+  const primaryByType = new Map<
+    'streaming' | 'rent' | 'buy' | 'free',
+    Array<{ providerId: string; providerName: string; providerLogoUrl: string | null }>
+  >();
+  for (const row of primaryRegionRows) {
+    let bucket = primaryByType.get(row.type);
+    if (!bucket) {
+      bucket = [];
+      primaryByType.set(row.type, bucket);
+    }
+    if (!bucket.some((p) => p.providerId === row.providerId)) {
+      bucket.push({
+        providerId: row.providerId,
+        providerName: row.providerName,
+        providerLogoUrl: row.providerLogoUrl,
+      });
+    }
+  }
+
+  const primarySourceUrl = primaryRegionRows.find((r) => r.sourceUrl)?.sourceUrl ?? null;
+  const lastVerified =
+    streamingRows.length === 0
+      ? null
+      : streamingRows.reduce(
+          (max, r) => (r.updatedAt > max ? r.updatedAt : max),
+          streamingRows[0]!.updatedAt,
+        );
 
   // The current user's existing watch_entry for this title, if any.
   // Joined via users.clerk_id since watch_entries.user_id is the internal
@@ -183,21 +254,84 @@ export default async function TitleDetailPage({ params }: PageProps) {
       ) : null}
 
       <Card className="mt-6">
-        <CardHeader>
+        <CardHeader className="flex flex-row items-baseline justify-between">
           <CardTitle>Where to watch</CardTitle>
+          {lastVerified ? (
+            <span className="text-xs font-normal text-slate-400">
+              Last verified {formatRelativeTime(lastVerified)}
+            </span>
+          ) : null}
         </CardHeader>
         <CardContent className="text-sm text-slate-600">
           {streamingRows.length === 0 ? (
             <p>No streaming availability data for this title yet.</p>
-          ) : (
+          ) : primaryByType.size === 0 ? (
             <p>
-              Available on {distinctProviders.size}{' '}
-              {distinctProviders.size === 1 ? 'provider' : 'providers'} across{' '}
-              {distinctCountries.size} {distinctCountries.size === 1 ? 'country' : 'countries'}.{' '}
-              <span className="text-slate-400">
-                Per-region details land in M5 alongside the user-subscriptions filter.
-              </span>
+              Not currently available in {primaryCountry}.
+              {otherCountries.size > 0 ? (
+                <>
+                  {' '}
+                  Available in {otherCountries.size}{' '}
+                  {otherCountries.size === 1 ? 'other region' : 'other regions'}.
+                </>
+              ) : null}
             </p>
+          ) : (
+            <div className="space-y-4">
+              {STREAMING_TYPE_ORDER.map((type) => {
+                const providers = primaryByType.get(type);
+                if (!providers || providers.length === 0) return null;
+                return (
+                  <div key={type}>
+                    <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+                      {STREAMING_TYPE_LABEL[type]}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-3">
+                      {providers.map((p) => (
+                        <span
+                          key={p.providerId}
+                          className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5"
+                          title={p.providerName}
+                        >
+                          {p.providerLogoUrl ? (
+                            <Image
+                              src={p.providerLogoUrl}
+                              alt=""
+                              width={20}
+                              height={20}
+                              className="rounded-sm"
+                            />
+                          ) : null}
+                          <span className="text-sm text-slate-700">{p.providerName}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="flex items-baseline justify-between border-t border-slate-100 pt-3 text-xs text-slate-400">
+                <span>
+                  Showing {primaryCountry}.
+                  {otherCountries.size > 0 ? (
+                    <>
+                      {' '}
+                      Available in {otherCountries.size}{' '}
+                      {otherCountries.size === 1 ? 'other region' : 'other regions'}.
+                    </>
+                  ) : null}
+                </span>
+                {primarySourceUrl ? (
+                  <a
+                    href={primarySourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-slate-500 hover:text-slate-900"
+                  >
+                    More details ↗
+                  </a>
+                ) : null}
+              </div>
+            </div>
           )}
         </CardContent>
       </Card>
