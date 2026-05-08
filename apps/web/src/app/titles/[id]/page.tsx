@@ -163,10 +163,15 @@ export default async function TitleDetailPage({ params }: PageProps) {
   // The current user's existing watch_entry for this title, if any.
   // Joined via users.clerk_id since watch_entries.user_id is the internal
   // uuid. Returns at most one row by the (user_id, title_id) UNIQUE index.
+  // Pulls the full editable shape (rating, currentEpisode, notes) so the
+  // LibraryEditDialog can prefill its form without a second round-trip.
   const [userEntryRow] = await db
     .select({
       kind: watchEntries.kind,
       status: watchEntries.status,
+      rating: watchEntries.rating,
+      currentEpisode: watchEntries.currentEpisode,
+      notes: watchEntries.notes,
     })
     .from(watchEntries)
     .innerJoin(users, eq(watchEntries.userId, users.id))
@@ -225,8 +230,18 @@ export default async function TitleDetailPage({ params }: PageProps) {
           <div className="mt-6">
             <TitleDetailAddButton
               titleId={title.id}
+              titleText={title.title}
+              hasEpisodes={title.mediaType !== 'film'}
               initialEntry={
-                userEntryRow ? { kind: userEntryRow.kind, status: userEntryRow.status } : null
+                userEntryRow
+                  ? {
+                      kind: userEntryRow.kind,
+                      status: userEntryRow.status,
+                      rating: userEntryRow.rating,
+                      currentEpisode: userEntryRow.currentEpisode,
+                      notes: userEntryRow.notes,
+                    }
+                  : null
               }
             />
           </div>

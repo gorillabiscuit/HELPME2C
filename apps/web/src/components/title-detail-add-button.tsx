@@ -3,21 +3,29 @@
 import { useRouter } from 'next/navigation';
 import { trpc } from '@/lib/trpc';
 import { Button } from '@/components/ui/button';
+import { LibraryEditDialog } from '@/components/library-edit-dialog';
 
-// Minimal shape — declared inline rather than imported from @/server/* so the
-// client bundle doesn't pull in server-side schema modules. The prop is the
-// only field the button cares about for display.
+// Minimal shape — declared inline rather than imported from @/server/* so
+// the client bundle doesn't pull in server-side schema modules.
+type WatchKind = 'anchor' | 'tracking';
+type WatchStatus = 'watching' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_watch';
+
 interface InitialEntry {
-  kind: 'anchor' | 'tracking';
-  status: 'watching' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_watch' | null;
+  kind: WatchKind;
+  status: WatchStatus | null;
+  rating: number | null;
+  currentEpisode: number | null;
+  notes: string | null;
 }
 
 interface TitleDetailAddButtonProps {
   titleId: string;
+  titleText: string;
+  hasEpisodes: boolean;
   initialEntry: InitialEntry | null;
 }
 
-const STATUS_LABEL: Record<NonNullable<InitialEntry['status']>, string> = {
+const STATUS_LABEL: Record<WatchStatus, string> = {
   watching: 'Watching',
   completed: 'Completed',
   on_hold: 'On hold',
@@ -25,7 +33,12 @@ const STATUS_LABEL: Record<NonNullable<InitialEntry['status']>, string> = {
   plan_to_watch: 'Plan to watch',
 };
 
-export function TitleDetailAddButton({ titleId, initialEntry }: TitleDetailAddButtonProps) {
+export function TitleDetailAddButton({
+  titleId,
+  titleText,
+  hasEpisodes,
+  initialEntry,
+}: TitleDetailAddButtonProps) {
   const router = useRouter();
 
   const upsertMutation = trpc.watch.upsert.useMutation({
@@ -35,24 +48,57 @@ export function TitleDetailAddButton({ titleId, initialEntry }: TitleDetailAddBu
     onSuccess: () => router.refresh(),
   });
 
-  if (initialEntry) {
-    const label =
-      initialEntry.kind === 'anchor'
-        ? 'Anchor pick'
-        : (initialEntry.status && STATUS_LABEL[initialEntry.status]) || 'On your list';
+  // Path A: not on the user's list → "Add to list" creates a tracking row
+  // with status=plan_to_watch. The user can then upgrade status / set rating
+  // via the LibraryEditDialog that this component renders on the next visit.
+  if (!initialEntry) {
+    return (
+      <Button
+        onClick={() =>
+          upsertMutation.mutate({ titleId, kind: 'tracking', status: 'plan_to_watch' })
+        }
+        disabled={upsertMutation.isPending}
+      >
+        {upsertMutation.isPending ? 'Adding…' : 'Add to list'}
+      </Button>
+    );
+  }
+
+  // Path B: anchor pick → static badge. Anchors aren't statuses you change,
+  // they're pinned taste picks; the edit-status / rating flow doesn't apply.
+  // Anchor management lives on /onboarding.
+  if (initialEntry.kind === 'anchor') {
     return (
       <span className="inline-flex items-center rounded-md border border-slate-300 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-700">
-        On your list · {label}
+        On your list · Anchor pick
       </span>
     );
   }
 
+  // Path C: tracking entry → status badge plus a LibraryEditDialog trigger
+  // (its own "Edit" button). Click opens the dialog with the entry's
+  // current rating, status, episode progress, and notes pre-filled. Saving
+  // routes through watch.upsert (same path as the library list edit).
+  const statusLabel = (initialEntry.status && STATUS_LABEL[initialEntry.status]) || 'On your list';
   return (
-    <Button
-      onClick={() => upsertMutation.mutate({ titleId, kind: 'tracking', status: 'plan_to_watch' })}
-      disabled={upsertMutation.isPending}
-    >
-      {upsertMutation.isPending ? 'Adding…' : 'Add to list'}
-    </Button>
+    <div className="inline-flex items-center gap-2">
+      <span className="inline-flex items-center rounded-md border border-slate-300 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-700">
+        On your list · {statusLabel}
+        {initialEntry.rating !== null ? (
+          <span className="ml-2 text-slate-500">· {initialEntry.rating}/10</span>
+        ) : null}
+      </span>
+      <LibraryEditDialog
+        titleId={titleId}
+        titleText={titleText}
+        hasEpisodes={hasEpisodes}
+        initialEntry={{
+          status: initialEntry.status,
+          rating: initialEntry.rating,
+          currentEpisode: initialEntry.currentEpisode,
+          notes: initialEntry.notes,
+        }}
+      />
+    </div>
   );
 }
