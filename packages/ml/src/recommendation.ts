@@ -178,27 +178,40 @@ export function extractTasteVector(
  *     deterministic-but-meaningless ordering, so the caller should
  *     normally short-circuit before calling
  */
-export function recommendForUser(
-  taste: UserTasteVector,
-  candidates: ReadonlyArray<TitleTagSet>,
-  limit: number = DEFAULT_LIMIT,
-  themeMembership: ReadonlyArray<TagThemeMembership> = [],
-): Recommendation[] {
-  // Index theme membership by tagId for O(1) lookup at score time.
-  const tagThemes = new Map<string, Array<{ themeId: string; strength: number }>>();
+/** Internal: tagId → list of (themeId, strength) memberships. Built once
+ * per scoring call so per-candidate iteration is O(1) per tag. */
+type TagThemeIndex = ReadonlyMap<string, ReadonlyArray<{ themeId: string; strength: number }>>;
+
+/** Internal: themeId → aggregate user weight (taste vector projected
+ * onto the theme axis). Built per-user, used at score time to credit
+ * cross-medium bridges. */
+type TasteThemeVector = ReadonlyMap<string, number>;
+
+/**
+ * Internal — index theme membership rows for O(1) lookup at score time.
+ * Shared between recommendForUser and recommendForGroup so the
+ * cross-medium rule stays consistent across the two surfaces.
+ */
+function buildTagThemeIndex(themeMembership: ReadonlyArray<TagThemeMembership>): TagThemeIndex {
+  const index = new Map<string, Array<{ themeId: string; strength: number }>>();
   for (const m of themeMembership) {
-    let memberships = tagThemes.get(m.tagId);
+    let memberships = index.get(m.tagId);
     if (!memberships) {
       memberships = [];
-      tagThemes.set(m.tagId, memberships);
+      index.set(m.tagId, memberships);
     }
     memberships.push({ themeId: m.themeId, strength: m.strength });
   }
+  return index;
+}
 
-  // Project the user's tag-level taste onto the theme axis. For each
-  // tag in their taste, accumulate weighted credit to every theme that
-  // tag belongs to. This is the user's "theme taste" — what cross-medium
-  // bridges they're likely to value.
+/**
+ * Internal — project a user's tag-level taste onto the theme axis. For
+ * each tag in their taste, accumulate weighted credit to every theme
+ * that tag belongs to. The result is the user's "theme taste" — which
+ * cross-medium bridges they're likely to value.
+ */
+function buildTasteTheme(taste: UserTasteVector, tagThemes: TagThemeIndex): TasteThemeVector {
   const tasteTheme = new Map<string, number>();
   for (const [tagId, tasteWeight] of taste) {
     const memberships = tagThemes.get(tagId);
@@ -210,33 +223,240 @@ export function recommendForUser(
       );
     }
   }
+  return tasteTheme;
+}
+
+/**
+ * Internal — score one candidate against one user's taste. Combines
+ * direct tag-overlap with the cross-medium-only theme bridge (a tag
+ * the user has direct signal in scores via tag-overlap ONLY; the theme
+ * dimension fires only for tags absent from taste — see the JSDoc on
+ * recommendForUser for the full rule).
+ *
+ * This is the shared kernel: recommendForUser calls it once per
+ * candidate; recommendForGroup calls it once per (member × candidate).
+ * Lifting it to a helper keeps the two surfaces from drifting apart.
+ */
+function scoreCandidate(
+  taste: UserTasteVector,
+  candidate: TitleTagSet,
+  tagThemes: TagThemeIndex,
+  tasteTheme: TasteThemeVector,
+): number {
+  let score = 0;
+  for (const tag of candidate.tags) {
+    const tasteWeight = taste.get(tag.tagId);
+    if (tasteWeight !== undefined) {
+      // Direct tag match — score via tag-overlap, skip theme dimension
+      // for this tag (cross-medium-only rule).
+      score += tasteWeight * tag.weight;
+      continue;
+    }
+    // No direct match — check if this tag bridges to a theme the user
+    // has signal in. Sums across themes if the tag is multi-membered.
+    const memberships = tagThemes.get(tag.tagId);
+    if (!memberships) continue;
+    for (const m of memberships) {
+      const themeWeight = tasteTheme.get(m.themeId);
+      if (themeWeight === undefined) continue;
+      score += themeWeight * tag.weight * (m.strength / 100);
+    }
+  }
+  return score;
+}
+
+export function recommendForUser(
+  taste: UserTasteVector,
+  candidates: ReadonlyArray<TitleTagSet>,
+  limit: number = DEFAULT_LIMIT,
+  themeMembership: ReadonlyArray<TagThemeMembership> = [],
+): Recommendation[] {
+  const tagThemes = buildTagThemeIndex(themeMembership);
+  const tasteTheme = buildTasteTheme(taste, tagThemes);
 
   const scored: Recommendation[] = [];
   for (const candidate of candidates) {
-    let score = 0;
-    for (const tag of candidate.tags) {
-      const tasteWeight = taste.get(tag.tagId);
-      if (tasteWeight !== undefined) {
-        // Direct tag match — score via tag-overlap, skip theme dimension
-        // for this tag (cross-medium-only rule).
-        score += tasteWeight * tag.weight;
-        continue;
-      }
-      // No direct match — check if this tag bridges to a theme the user
-      // has signal in. Sums across themes if the tag is multi-membered.
-      const memberships = tagThemes.get(tag.tagId);
-      if (!memberships) continue;
-      for (const m of memberships) {
-        const themeWeight = tasteTheme.get(m.themeId);
-        if (themeWeight === undefined) continue;
-        score += themeWeight * tag.weight * (m.strength / 100);
-      }
-    }
-    scored.push({ titleId: candidate.titleId, score });
+    scored.push({
+      titleId: candidate.titleId,
+      score: scoreCandidate(taste, candidate, tagThemes, tasteTheme),
+    });
   }
 
   scored.sort((a, b) => {
     if (a.score !== b.score) return b.score - a.score;
+    return a.titleId.localeCompare(b.titleId);
+  });
+
+  return scored.slice(0, Math.max(0, limit));
+}
+
+// ---------------------------------------------------------------------------
+// Group recommendations — per ADR-0020 (Average Without Misery + soft
+// disagreement penalty + transparency layer). The algorithm:
+//
+//   For each candidate c, for each member m:
+//     raw_m   = scoreCandidate(m.taste, c, ...)   // shared kernel
+//     norm_m  = raw_m / max_over_candidates(raw_m)  // per-user 0..1 scale
+//
+//   if any norm_m < vetoThreshold:
+//     excluded
+//   else:
+//     groupScore(c) = mean(norm) - lambda × stddev(norm)
+//
+// Per-user normalisation makes vetoThreshold interpretable (e.g. "0.5
+// = exclude if any member's score is below half their personal best
+// across this candidate set"). ADR-0020 spec'd `veto_threshold = 5/10`
+// — a 0..1 scale matches that intent.
+//
+// Defaults from ADR-0020: vetoThreshold = 0.5, lambda = 0.5. These
+// will be calibrated against the offline eval harness in the next chunk
+// per the ADR's "required before any group-rec code lands" gate.
+// ---------------------------------------------------------------------------
+
+/** A user participating in a group rec session. Carries a userId so the
+ * caller can correlate per-user scores back to display data. */
+export interface GroupMember {
+  readonly userId: string;
+  readonly taste: UserTasteVector;
+}
+
+/** Tunable parameters for group scoring. See ADR-0020 §what-we-chose. */
+export interface GroupScoreParams {
+  /** 0..1, per-user-normalised score floor. If any member's normalised
+   * score for a candidate is strictly below this, the candidate is
+   * excluded. Default 0.5 per ADR-0020. */
+  readonly vetoThreshold: number;
+  /** Disagreement penalty coefficient. 0 = pure mean (utilitarian).
+   * Higher = penalise divergence between members. Default 0.5 per
+   * ADR-0020. */
+  readonly lambda: number;
+}
+
+/** A scored group recommendation. `perUserScores` is normalised 0..1
+ * per member so the caller can render the transparency layer
+ * ("recommended for both because [member A: 0.82, member B: 0.71]"). */
+export interface GroupRecommendation {
+  readonly titleId: string;
+  readonly groupScore: number;
+  readonly perUserScores: ReadonlyMap<string, number>;
+}
+
+const DEFAULT_GROUP_PARAMS: GroupScoreParams = { vetoThreshold: 0.5, lambda: 0.5 };
+
+/**
+ * Score candidates against a group of users using AWM + disagreement
+ * penalty per ADR-0020. Returns the top-N ranked candidates that pass
+ * the per-user veto floor.
+ *
+ * Empty group or empty candidates → empty output.
+ *
+ * Two distinct "no signal" cases handled differently:
+ *
+ *   - **Cold-start member** (empty taste vector, `taste.size === 0`):
+ *     contributes 0 to the per-user normalised score AND abstains from
+ *     veto. They literally have no opinion to enforce. The other
+ *     members drive ranking.
+ *
+ *   - **Has-taste-but-no-match** (non-empty taste, but `maxRaw === 0`
+ *     across this candidate set): the member has preferences and none
+ *     of these candidates appeal to them. Their normalised score is 0
+ *     and they DO veto at any positive threshold. This is the
+ *     mixed-medium failure mode ADR-0020 §what-would-change-our-mind
+ *     anticipates — anime+TV couples without a theme bridge legitimately
+ *     produce empty recs, prompting the cross-medium-mode UX.
+ *
+ * Tie-breaking: groupScore desc, then titleId asc. Deterministic for
+ * fixed inputs — important for tests, eval harness, and reproducible
+ * parameter sweeps.
+ *
+ * Caller responsibilities (same shape as recommendForUser):
+ *   - Pre-fetch tag data for the candidate set
+ *   - Pre-fetch tag→theme membership data if cross-medium is wanted
+ *   - Exclude titles already in any member's library from `candidates`
+ *     (we don't recommend things any member has already added — same
+ *     contract as the single-user reader)
+ *   - Decide what to do with an empty output (which can happen if every
+ *     candidate is vetoed by some member — likely an "incompatible
+ *     group" UX state)
+ */
+export function recommendForGroup(
+  members: ReadonlyArray<GroupMember>,
+  candidates: ReadonlyArray<TitleTagSet>,
+  params: GroupScoreParams = DEFAULT_GROUP_PARAMS,
+  themeMembership: ReadonlyArray<TagThemeMembership> = [],
+  limit: number = DEFAULT_LIMIT,
+): GroupRecommendation[] {
+  if (members.length === 0 || candidates.length === 0) return [];
+
+  const tagThemes = buildTagThemeIndex(themeMembership);
+
+  // Precompute per-member: tasteTheme + raw score for every candidate +
+  // per-member max raw score (for normalisation). One pass over
+  // candidates per member. `isColdStart` distinguishes "no taste vector
+  // yet" (true cold-start — abstain from veto) from "has taste, no
+  // candidate matches" (the AWM mixed-medium failure mode per ADR-0020
+  // §what-would-change-our-mind — should veto).
+  const memberContexts = members.map((m) => {
+    const tasteTheme = buildTasteTheme(m.taste, tagThemes);
+    const rawScores = candidates.map((c) => scoreCandidate(m.taste, c, tagThemes, tasteTheme));
+    let maxRaw = 0;
+    for (const s of rawScores) {
+      if (s > maxRaw) maxRaw = s;
+    }
+    const isColdStart = m.taste.size === 0;
+    return { userId: m.userId, rawScores, maxRaw, isColdStart };
+  });
+
+  const scored: GroupRecommendation[] = [];
+  for (let i = 0; i < candidates.length; i += 1) {
+    const candidate = candidates[i]!;
+    const perUser = new Map<string, number>();
+    const scoredNorms: number[] = [];
+    let vetoed = false;
+    for (const ctx of memberContexts) {
+      // Cold-start guard — only TRUE cold-start (empty taste vector)
+      // abstains. A member with a non-empty taste whose maxRaw=0 across
+      // these candidates has expressed preferences and just doesn't like
+      // anything offered: that IS a signal and should veto. This is the
+      // AWM mixed-medium failure mode per ADR-0020 §what-would-change-
+      // our-mind — anime+TV couples without a theme bridge legitimately
+      // produce empty recs, prompting the cross-medium-mode UX rather
+      // than silent acceptance.
+      if (ctx.isColdStart) {
+        perUser.set(ctx.userId, 0);
+        continue;
+      }
+      const norm = ctx.maxRaw > 0 ? ctx.rawScores[i]! / ctx.maxRaw : 0;
+      perUser.set(ctx.userId, norm);
+      scoredNorms.push(norm);
+      if (norm < params.vetoThreshold) {
+        vetoed = true;
+      }
+    }
+    if (vetoed) continue;
+
+    // All members cold-start → no signal anywhere. Emit with score 0
+    // rather than dropping; the harness can decide what to do with a
+    // groupless cold-start group, and the deterministic ordering still
+    // surfaces something rather than silently returning empty.
+    if (scoredNorms.length === 0) {
+      scored.push({ titleId: candidate.titleId, groupScore: 0, perUserScores: perUser });
+      continue;
+    }
+
+    const mean = scoredNorms.reduce((a, b) => a + b, 0) / scoredNorms.length;
+    let varSum = 0;
+    for (const v of scoredNorms) {
+      varSum += (v - mean) ** 2;
+    }
+    const stddev = Math.sqrt(varSum / scoredNorms.length);
+    const groupScore = mean - params.lambda * stddev;
+
+    scored.push({ titleId: candidate.titleId, groupScore, perUserScores: perUser });
+  }
+
+  scored.sort((a, b) => {
+    if (a.groupScore !== b.groupScore) return b.groupScore - a.groupScore;
     return a.titleId.localeCompare(b.titleId);
   });
 

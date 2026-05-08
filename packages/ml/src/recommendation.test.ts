@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   extractTasteVector,
+  recommendForGroup,
   recommendForUser,
+  type GroupMember,
+  type GroupScoreParams,
   type TagThemeMembership,
   type TitleTagSet,
   type UserHistory,
@@ -629,5 +632,487 @@ describe('recommendForUser — theme-overlap dimension', () => {
 
     expect(result.every((r) => r.score === 0)).toBe(true);
     expect(result.map((r) => r.titleId)).toEqual(['alpha', 'beta', 'gamma']);
+  });
+});
+
+describe('recommendForGroup', () => {
+  // Fixture conventions for this block:
+  //   - Members carry stable userIds (`alice`, `bob`, `carol`, ...) so per-user
+  //     score assertions stay legible.
+  //   - Where a "compatible" / "incompatible" framing matters, taste vectors
+  //     are constructed by hand (not via extractTasteVector) so the test
+  //     pinpoints group-aggregation behaviour rather than vector extraction.
+  //   - Asserts target rankings + relative directions of groupScore (per
+  //     packages/ml/CLAUDE.md). Absolute groupScore numbers are checked only
+  //     where the contract pins a value (perUserScores 0..1 normalisation;
+  //     identical-mean tie-break with lambda=0).
+
+  const taste = (entries: ReadonlyArray<readonly [string, number]>): UserTasteVector =>
+    new Map<string, number>(entries);
+
+  it('returns an empty array for an empty group', () => {
+    const candidates: TitleTagSet[] = [{ titleId: 't1', tags: [{ tagId: 'actionT', weight: 80 }] }];
+    expect(recommendForGroup([], candidates)).toEqual([]);
+  });
+
+  it('returns an empty array when the candidate set is empty', () => {
+    const members: GroupMember[] = [{ userId: 'alice', taste: taste([['actionT', 100]]) }];
+    expect(recommendForGroup(members, [])).toEqual([]);
+  });
+
+  it('returns an empty array when both group and candidates are empty', () => {
+    expect(recommendForGroup([], [])).toEqual([]);
+  });
+
+  it('produces the same ranking as recommendForUser for a single-member group with permissive params', () => {
+    // Single-member group with vetoThreshold=0 and lambda=0 — same kernel,
+    // same data. Per-user normalisation is monotonic, so it preserves the
+    // descending order recommendForUser produces. Tie-break is also titleId
+    // ASC in both, so the full sequence must match.
+    const userTaste = taste([
+      ['actionT', 100],
+      ['mechaT', 80],
+      ['dramaT', 30],
+    ]);
+    const candidates: TitleTagSet[] = [
+      {
+        titleId: 'allOverlap',
+        tags: [
+          { tagId: 'actionT', weight: 80 },
+          { tagId: 'mechaT', weight: 70 },
+          { tagId: 'dramaT', weight: 40 },
+        ],
+      },
+      { titleId: 'partialOverlap', tags: [{ tagId: 'dramaT', weight: 80 }] },
+      { titleId: 'noOverlap', tags: [{ tagId: 'romanceT', weight: 90 }] },
+    ];
+    const params: GroupScoreParams = { vetoThreshold: 0, lambda: 0 };
+
+    const userOrder = recommendForUser(userTaste, candidates).map((r) => r.titleId);
+    const groupOrder = recommendForGroup(
+      [{ userId: 'alice', taste: userTaste }],
+      candidates,
+      params,
+    ).map((r) => r.titleId);
+
+    expect(groupOrder).toEqual(userOrder);
+  });
+
+  it('ranks high-overlap candidates at the top for a compatible couple sharing tag preferences', () => {
+    // Both members have action+mecha taste; one candidate hits both, another
+    // hits neither. The double-overlap candidate must rank top.
+    const members: GroupMember[] = [
+      {
+        userId: 'alice',
+        taste: taste([
+          ['actionT', 100],
+          ['mechaT', 80],
+        ]),
+      },
+      {
+        userId: 'bob',
+        taste: taste([
+          ['actionT', 90],
+          ['mechaT', 70],
+        ]),
+      },
+    ];
+    const candidates: TitleTagSet[] = [
+      {
+        titleId: 'forBoth',
+        tags: [
+          { tagId: 'actionT', weight: 80 },
+          { tagId: 'mechaT', weight: 70 },
+        ],
+      },
+      {
+        titleId: 'forNeither',
+        tags: [{ tagId: 'romanceT', weight: 80 }],
+      },
+    ];
+    // vetoThreshold=0 so the "for neither" candidate isn't filtered out and
+    // we can read the relative ranking directly.
+    const result = recommendForGroup(members, candidates, { vetoThreshold: 0, lambda: 0 });
+
+    expect(result[0]?.titleId).toBe('forBoth');
+    expect(result[1]?.titleId).toBe('forNeither');
+  });
+
+  it("vetoes a candidate when one member's normalised score is below the threshold", () => {
+    // Alice's only signal is actionT; Bob's only signal is romanceT. The
+    // candidate `forAliceOnly` scores high for Alice (her personal max) and
+    // zero for Bob — Bob's normalised score is 0, well below 0.5, so it must
+    // be excluded.
+    const members: GroupMember[] = [
+      { userId: 'alice', taste: taste([['actionT', 100]]) },
+      { userId: 'bob', taste: taste([['romanceT', 100]]) },
+    ];
+    const candidates: TitleTagSet[] = [
+      { titleId: 'forAliceOnly', tags: [{ tagId: 'actionT', weight: 80 }] },
+      { titleId: 'forBobOnly', tags: [{ tagId: 'romanceT', weight: 80 }] },
+    ];
+
+    const result = recommendForGroup(members, candidates, { vetoThreshold: 0.5, lambda: 0 });
+    const ids = result.map((r) => r.titleId);
+
+    expect(ids).not.toContain('forAliceOnly');
+    expect(ids).not.toContain('forBobOnly');
+    expect(result).toEqual([]);
+  });
+
+  it('includes the same one-sided candidate when vetoThreshold is 0', () => {
+    // Same members and candidates as the veto test above, but with
+    // vetoThreshold=0 the one-sided picks survive (bob's norm=0 is not
+    // strictly less than 0).
+    const members: GroupMember[] = [
+      { userId: 'alice', taste: taste([['actionT', 100]]) },
+      { userId: 'bob', taste: taste([['romanceT', 100]]) },
+    ];
+    const candidates: TitleTagSet[] = [
+      { titleId: 'forAliceOnly', tags: [{ tagId: 'actionT', weight: 80 }] },
+      { titleId: 'forBobOnly', tags: [{ tagId: 'romanceT', weight: 80 }] },
+    ];
+
+    const result = recommendForGroup(members, candidates, { vetoThreshold: 0, lambda: 0 });
+    const ids = result.map((r) => r.titleId);
+
+    expect(ids).toContain('forAliceOnly');
+    expect(ids).toContain('forBobOnly');
+    expect(result.length).toBe(2);
+  });
+
+  it('penalises divergent candidates over uniform candidates with the same mean when lambda > 0', () => {
+    // Two candidates contrived to have an identical mean across two members
+    // but different stddev. The uniform one (low stddev) ranks above the
+    // polarising one (high stddev) when lambda > 0.
+    //
+    // Members: alice signals actionT only; bob signals dramaT only.
+    // Candidate A (`uniform`)  has equal-weight actionT + dramaT → both
+    //   members score symmetrically; their per-user norms are equal → low
+    //   stddev.
+    // Candidate B (`polar`) has actionT only at the same weight → alice's
+    //   norm = 1, bob's norm = 0 (in absolute), but to keep means equal we
+    //   need a third candidate. We use a setup where each member's max-raw
+    //   anchors normalisation: add `aliceMax` (actionT-heavy) and `bobMax`
+    //   (dramaT-heavy) as extra candidates so the personal maxes are pinned
+    //   to those, and `uniform` / `polar` take normalised positions
+    //   orthogonally. Concretely:
+    //   - alice's max raw = aliceMax (weight 100 actionT × 100 taste)
+    //   - bob's   max raw = bobMax (weight 100 dramaT × 100 taste)
+    //   - uniform: actionT+dramaT, weight 50 each → alice norm = 0.5,
+    //                                                bob norm = 0.5
+    //   - polar:   actionT weight 100, no dramaT  → alice norm = 1.0,
+    //                                                bob norm = 0
+    //   Means: uniform = 0.5, polar = 0.5 → equal. stddev: uniform = 0,
+    //   polar = 0.5. With lambda > 0, uniform > polar.
+    const members: GroupMember[] = [
+      { userId: 'alice', taste: taste([['actionT', 100]]) },
+      { userId: 'bob', taste: taste([['dramaT', 100]]) },
+    ];
+    const candidates: TitleTagSet[] = [
+      { titleId: 'aliceMax', tags: [{ tagId: 'actionT', weight: 100 }] },
+      { titleId: 'bobMax', tags: [{ tagId: 'dramaT', weight: 100 }] },
+      {
+        titleId: 'uniform',
+        tags: [
+          { tagId: 'actionT', weight: 50 },
+          { tagId: 'dramaT', weight: 50 },
+        ],
+      },
+      { titleId: 'polar', tags: [{ tagId: 'actionT', weight: 100 }] },
+    ];
+    // vetoThreshold=0 so 'polar' (bob norm = 0) and 'bobMax' (alice norm = 0)
+    // both survive into the ranked output.
+    const result = recommendForGroup(members, candidates, { vetoThreshold: 0, lambda: 0.5 });
+
+    const idxUniform = result.findIndex((r) => r.titleId === 'uniform');
+    const idxPolar = result.findIndex((r) => r.titleId === 'polar');
+
+    expect(idxUniform).toBeGreaterThanOrEqual(0);
+    expect(idxPolar).toBeGreaterThanOrEqual(0);
+    expect(idxUniform).toBeLessThan(idxPolar);
+  });
+
+  it('ties uniform and polar candidates with equal means when lambda is 0, then breaks by titleId ASC', () => {
+    // Same fixture as the lambda penalty test, but with lambda=0 the
+    // disagreement penalty disappears and the two equal-mean candidates
+    // tie on groupScore. Tie-break by titleId ASC ('polar' < 'uniform').
+    const members: GroupMember[] = [
+      { userId: 'alice', taste: taste([['actionT', 100]]) },
+      { userId: 'bob', taste: taste([['dramaT', 100]]) },
+    ];
+    const candidates: TitleTagSet[] = [
+      { titleId: 'aliceMax', tags: [{ tagId: 'actionT', weight: 100 }] },
+      { titleId: 'bobMax', tags: [{ tagId: 'dramaT', weight: 100 }] },
+      {
+        titleId: 'uniform',
+        tags: [
+          { tagId: 'actionT', weight: 50 },
+          { tagId: 'dramaT', weight: 50 },
+        ],
+      },
+      { titleId: 'polar', tags: [{ tagId: 'actionT', weight: 100 }] },
+    ];
+    const result = recommendForGroup(members, candidates, { vetoThreshold: 0, lambda: 0 });
+
+    const uniform = result.find((r) => r.titleId === 'uniform');
+    const polar = result.find((r) => r.titleId === 'polar');
+    expect(uniform).toBeDefined();
+    expect(polar).toBeDefined();
+    expect(uniform?.groupScore).toBe(polar?.groupScore);
+
+    // Among the two equal-mean entries, tie-break is titleId ASC.
+    const idxUniform = result.findIndex((r) => r.titleId === 'uniform');
+    const idxPolar = result.findIndex((r) => r.titleId === 'polar');
+    expect(idxPolar).toBeLessThan(idxUniform);
+  });
+
+  it('does not veto a cold-start member with empty taste even when vetoThreshold is positive', () => {
+    // Per the JSDoc cold-start guard: a member whose maxRaw == 0 (no signal
+    // yet) contributes 0 to per-user score and never vetoes. Other members'
+    // scores drive the ranking.
+    const members: GroupMember[] = [
+      {
+        userId: 'alice',
+        taste: taste([
+          ['actionT', 100],
+          ['mechaT', 80],
+        ]),
+      },
+      // Bob is cold-start — empty taste vector, no signal in any candidate.
+      { userId: 'bob', taste: taste([]) },
+    ];
+    const candidates: TitleTagSet[] = [
+      {
+        titleId: 'forAlice',
+        tags: [
+          { tagId: 'actionT', weight: 80 },
+          { tagId: 'mechaT', weight: 70 },
+        ],
+      },
+      { titleId: 'unrelated', tags: [{ tagId: 'romanceT', weight: 80 }] },
+    ];
+    const result = recommendForGroup(members, candidates, { vetoThreshold: 0.5, lambda: 0 });
+
+    // The cold-start guard means SOME candidate must survive — specifically
+    // Alice's top pick.
+    const ids = result.map((r) => r.titleId);
+    expect(ids).toContain('forAlice');
+  });
+
+  it('still ranks by the non-cold-start member when one member has empty taste', () => {
+    // Same setup as the prior test. Alice's preference order should drive
+    // the ranking among candidates that all survive the (cold-start-guarded)
+    // veto check.
+    const members: GroupMember[] = [
+      {
+        userId: 'alice',
+        taste: taste([
+          ['actionT', 100],
+          ['mechaT', 80],
+        ]),
+      },
+      { userId: 'bob', taste: taste([]) }, // cold-start
+    ];
+    // Two candidates Alice ranks differently. With vetoThreshold=0 we know
+    // both survive regardless of the cold-start interpretation, so we can
+    // read the relative ranking driven by Alice.
+    const candidates: TitleTagSet[] = [
+      {
+        titleId: 'aliceTop',
+        tags: [
+          { tagId: 'actionT', weight: 80 },
+          { tagId: 'mechaT', weight: 70 },
+        ],
+      },
+      { titleId: 'aliceMid', tags: [{ tagId: 'mechaT', weight: 30 }] },
+    ];
+    const result = recommendForGroup(members, candidates, { vetoThreshold: 0, lambda: 0 });
+
+    expect(result[0]?.titleId).toBe('aliceTop');
+    expect(result[1]?.titleId).toBe('aliceMid');
+  });
+
+  it('lifts a candidate that bridges to a second member via cross-medium theme membership', () => {
+    // Alice has direct-tag signal in `tmdb:tragedy`. Bob has direct-tag
+    // signal in `anilist:Tragedy` (a different tag, but member of the same
+    // theme). A bridge-candidate carries `anilist:Tragedy` — it scores
+    // directly for Bob and via the theme bridge for Alice. A
+    // direct-only candidate carries only `tmdb:tragedy` — it scores
+    // directly for Alice only and bridges to Bob's signal via the theme.
+    // We'd like to show that the BRIDGE candidate (which scores well for
+    // both members across paths) is at the top of the group ranking.
+    //
+    // To make the assertion concrete: with vetoThreshold=0 and lambda=0,
+    // a candidate that scores for both members will outrank a candidate
+    // that only scores for one. Add an `unrelated` candidate so we can
+    // pin its rank as the bottom.
+    const members: GroupMember[] = [
+      { userId: 'alice', taste: taste([['tmdb:tragedy', 100]]) },
+      { userId: 'bob', taste: taste([['anilist:Tragedy', 100]]) },
+    ];
+    const themeMembership: TagThemeMembership[] = [
+      { tagId: 'tmdb:tragedy', themeId: 'tragedy', strength: 100 },
+      { tagId: 'anilist:Tragedy', themeId: 'tragedy', strength: 100 },
+    ];
+    const candidates: TitleTagSet[] = [
+      // Bridges to BOTH members — direct tag for Bob, theme bridge for Alice.
+      { titleId: 'crossMediumBridge', tags: [{ tagId: 'anilist:Tragedy', weight: 80 }] },
+      // Unrelated — neither member should score it directly nor via theme.
+      { titleId: 'unrelated', tags: [{ tagId: 'anilist:CookingShow', weight: 80 }] },
+    ];
+    const result = recommendForGroup(
+      members,
+      candidates,
+      { vetoThreshold: 0, lambda: 0 },
+      themeMembership,
+    );
+
+    expect(result[0]?.titleId).toBe('crossMediumBridge');
+  });
+
+  it('survives a positive vetoThreshold for a mixed-medium couple ONLY when the theme bridge is provided', () => {
+    // The differentiator scenario from ADR-0020 §what-would-change-our-mind.
+    // Alice = TV fan (tmdb:tragedy taste); Bob = anime fan (anilist:Tragedy
+    // taste). A candidate carrying anilist:Tragedy scores direct-tag for
+    // Bob; for Alice it can ONLY score via the cross-medium theme bridge.
+    //
+    // With themeMembership present, Alice's normalised score on this
+    // candidate > 0 and the candidate survives a positive vetoThreshold of
+    // 0.5 (Alice's bridge contribution is her personal max → norm = 1).
+    // Without themeMembership, Alice's score = 0 → norm = 0 → vetoed.
+    const members: GroupMember[] = [
+      { userId: 'alice', taste: taste([['tmdb:tragedy', 100]]) },
+      { userId: 'bob', taste: taste([['anilist:Tragedy', 100]]) },
+    ];
+    const themeMembership: TagThemeMembership[] = [
+      { tagId: 'tmdb:tragedy', themeId: 'tragedy', strength: 100 },
+      { tagId: 'anilist:Tragedy', themeId: 'tragedy', strength: 100 },
+    ];
+    const candidates: TitleTagSet[] = [
+      { titleId: 'animeBridge', tags: [{ tagId: 'anilist:Tragedy', weight: 80 }] },
+    ];
+    const params: GroupScoreParams = { vetoThreshold: 0.5, lambda: 0 };
+
+    const withBridge = recommendForGroup(members, candidates, params, themeMembership);
+    const withoutBridge = recommendForGroup(members, candidates, params);
+
+    expect(withBridge.map((r) => r.titleId)).toEqual(['animeBridge']);
+    expect(withoutBridge).toEqual([]);
+  });
+
+  it('populates perUserScores with one entry per group member for every included candidate', () => {
+    // Transparency-layer contract: the per-user map must contain ALL members
+    // (no missing members), and each value must be in [0, 1] (the normalised
+    // scale on which vetoThreshold operates).
+    const members: GroupMember[] = [
+      { userId: 'alice', taste: taste([['actionT', 100]]) },
+      {
+        userId: 'bob',
+        taste: taste([
+          ['actionT', 80],
+          ['mechaT', 60],
+        ]),
+      },
+      { userId: 'carol', taste: taste([['mechaT', 100]]) },
+    ];
+    const candidates: TitleTagSet[] = [
+      {
+        titleId: 'shared',
+        tags: [
+          { tagId: 'actionT', weight: 70 },
+          { tagId: 'mechaT', weight: 70 },
+        ],
+      },
+      { titleId: 'aliceOnly', tags: [{ tagId: 'actionT', weight: 80 }] },
+      { titleId: 'carolOnly', tags: [{ tagId: 'mechaT', weight: 80 }] },
+    ];
+    const result = recommendForGroup(members, candidates, { vetoThreshold: 0, lambda: 0 });
+
+    expect(result.length).toBe(3);
+    for (const rec of result) {
+      const userIds = Array.from(rec.perUserScores.keys()).sort();
+      expect(userIds).toEqual(['alice', 'bob', 'carol']);
+      for (const score of rec.perUserScores.values()) {
+        expect(score).toBeGreaterThanOrEqual(0);
+        expect(score).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it("normalises each member's top-scoring candidate to exactly 1.0 in perUserScores", () => {
+    // Per-user normalisation is divide-by-personal-max. For each member,
+    // SOME included candidate should hit norm = 1.0 — their personal best
+    // across the candidate set.
+    const members: GroupMember[] = [
+      { userId: 'alice', taste: taste([['actionT', 100]]) },
+      { userId: 'bob', taste: taste([['mechaT', 100]]) },
+    ];
+    const candidates: TitleTagSet[] = [
+      { titleId: 'aliceTop', tags: [{ tagId: 'actionT', weight: 100 }] },
+      { titleId: 'bobTop', tags: [{ tagId: 'mechaT', weight: 100 }] },
+      {
+        titleId: 'middle',
+        tags: [
+          { tagId: 'actionT', weight: 50 },
+          { tagId: 'mechaT', weight: 50 },
+        ],
+      },
+    ];
+    const result = recommendForGroup(members, candidates, { vetoThreshold: 0, lambda: 0 });
+
+    const byId = new Map(result.map((r) => [r.titleId, r]));
+    expect(byId.get('aliceTop')?.perUserScores.get('alice')).toBe(1);
+    expect(byId.get('bobTop')?.perUserScores.get('bob')).toBe(1);
+  });
+
+  it('breaks groupScore ties deterministically by titleId ASC regardless of input order', () => {
+    // Two candidates with identical tag sets → identical perUser raw scores
+    // → identical norms → identical groupScore. Tie-break by titleId ASC.
+    // Run with both input orderings to lock that the result is stable.
+    const members: GroupMember[] = [
+      { userId: 'alice', taste: taste([['actionT', 100]]) },
+      { userId: 'bob', taste: taste([['actionT', 100]]) },
+    ];
+    const tieTags = [{ tagId: 'actionT', weight: 50 }];
+
+    const orderA: TitleTagSet[] = [
+      { titleId: 'zebra', tags: tieTags },
+      { titleId: 'apple', tags: tieTags },
+    ];
+    const orderB: TitleTagSet[] = [
+      { titleId: 'apple', tags: tieTags },
+      { titleId: 'zebra', tags: tieTags },
+    ];
+    const params: GroupScoreParams = { vetoThreshold: 0, lambda: 0.5 };
+
+    const idsA = recommendForGroup(members, orderA, params).map((r) => r.titleId);
+    const idsB = recommendForGroup(members, orderB, params).map((r) => r.titleId);
+
+    expect(idsA).toEqual(['apple', 'zebra']);
+    expect(idsB).toEqual(['apple', 'zebra']);
+  });
+
+  it('uses the ADR-0020 defaults (vetoThreshold=0.5, lambda=0.5) when params are omitted', () => {
+    // With the defaults, the same compatible-couple fixture should produce
+    // a non-empty ranked output topped by the both-members candidate. A
+    // one-sided candidate scoring 0 for one member must be vetoed (its
+    // norm = 0 is strictly < 0.5).
+    const members: GroupMember[] = [
+      { userId: 'alice', taste: taste([['actionT', 100]]) },
+      { userId: 'bob', taste: taste([['actionT', 100]]) },
+    ];
+    const candidates: TitleTagSet[] = [
+      { titleId: 'both', tags: [{ tagId: 'actionT', weight: 80 }] },
+      // Survives nothing: weight=0 actionT means scoreCandidate yields 0
+      // for both members, while their max comes from `both`. So norm=0 →
+      // vetoed at default threshold 0.5.
+      { titleId: 'neither', tags: [{ tagId: 'romanceT', weight: 80 }] },
+    ];
+    const result = recommendForGroup(members, candidates);
+
+    const ids = result.map((r) => r.titleId);
+    expect(ids).toContain('both');
+    expect(ids).not.toContain('neither');
   });
 });
