@@ -5,11 +5,13 @@ import {
   recommendForUser,
   type AnchorPick,
   type RatedTitle,
+  type TagThemeMembership,
   type TitleTagSet,
 } from '@helpme2c/ml';
 import { db } from '@/server/db';
 import {
   type RecommendationsPayload,
+  tagThemes,
   titleTags,
   userRecommendations,
   users,
@@ -96,8 +98,18 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
   const userTitles = groupTagsIntoTitleSets(userTitleTagRows);
   const candidates = groupTagsIntoTitleSets(candidateTagRows);
 
+  // Cross-medium theme bridge — see packages/ml/src/recommendation.ts §JSDoc
+  // and apps/web/src/server/schema/themes.ts for the editorial substrate.
+  // Pulled in full because the table is small (~86 rows for the v1 mapping
+  // set) and the entire join is needed at score time. If this scales past
+  // ~10k rows, narrow to themes the user's tags actually touch.
+  const themeRows = await db
+    .select({ tagId: tagThemes.tagId, themeId: tagThemes.themeId, strength: tagThemes.strength })
+    .from(tagThemes);
+  const themeMembership: TagThemeMembership[] = themeRows;
+
   const taste = extractTasteVector({ anchors, ratings }, userTitles);
-  const recs = recommendForUser(taste, candidates, REC_LIMIT);
+  const recs = recommendForUser(taste, candidates, REC_LIMIT, themeMembership);
 
   const payload: RecommendationsPayload = {
     schemaVersion: 1,
