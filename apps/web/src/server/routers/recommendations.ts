@@ -43,8 +43,23 @@ export const recommendationsRouter = router({
       const limit = input?.limit ?? 20;
       const country = input?.country?.toUpperCase() ?? 'US';
 
+      // Default filter context — populated only when the user has saved
+      // 1+ providers AND payload v1 logic actually ran. The dashboard reads
+      // this to render the visible "filtering by N services, X hidden" line.
+      const emptyFilter = {
+        active: false,
+        providers: [] as Array<{
+          providerId: string;
+          providerName: string;
+          providerLogoUrl: string | null;
+        }>,
+        hiddenCount: 0,
+      };
+
       const internalUserId = await resolveInternalUserId(ctx.db, ctx.userId);
-      if (!internalUserId) return { items: [], computedAt: null, filtered: false };
+      if (!internalUserId) {
+        return { items: [], computedAt: null, filtered: false, filter: emptyFilter };
+      }
 
       const [row] = await ctx.db
         .select()
@@ -52,7 +67,9 @@ export const recommendationsRouter = router({
         .where(eq(userRecommendations.userId, internalUserId))
         .limit(1);
 
-      if (!row) return { items: [], computedAt: null, filtered: false };
+      if (!row) {
+        return { items: [], computedAt: null, filtered: false, filter: emptyFilter };
+      }
 
       const { payload } = row;
       // Schema-version guard. v1 is the current shape; anything else means
@@ -60,7 +77,7 @@ export const recommendationsRouter = router({
       // [] makes the home page render the "computing" state until the next
       // cron writes a v1-compatible payload.
       if (payload.schemaVersion !== 1) {
-        return { items: [], computedAt: row.computedAt, filtered: false };
+        return { items: [], computedAt: row.computedAt, filtered: false, filter: emptyFilter };
       }
 
       // Connected-providers filter per ADR-0021: post-ranking, country-strict,
@@ -101,10 +118,46 @@ export const recommendationsRouter = router({
       const filteredItems = allowedTitleIds
         ? payload.items.filter((i) => allowedTitleIds!.has(i.titleId))
         : payload.items;
+      const hiddenCount = payload.items.length - filteredItems.length;
+
+      // Fetch provider display metadata only when the filter is active.
+      // Pulled from streaming_availability (any country, any type) since
+      // the same provider_id has the same name+logo everywhere — first row
+      // wins. Saves us a separate denormalised store of provider metadata.
+      const providersForFilter: Array<{
+        providerId: string;
+        providerName: string;
+        providerLogoUrl: string | null;
+      }> = [];
+      if (filterActive) {
+        const metaRows = await ctx.db
+          .selectDistinctOn([streamingAvailability.providerId], {
+            providerId: streamingAvailability.providerId,
+            providerName: streamingAvailability.providerName,
+            providerLogoUrl: streamingAvailability.providerLogoUrl,
+          })
+          .from(streamingAvailability)
+          .where(inArray(streamingAvailability.providerId, connectedProviderIds));
+        // Preserve the user's saved order so chips stay stable across reads.
+        const byId = new Map(metaRows.map((r) => [r.providerId, r]));
+        for (const id of connectedProviderIds) {
+          const meta = byId.get(id);
+          if (meta) providersForFilter.push(meta);
+        }
+      }
+
+      const filterContext = filterActive
+        ? { active: true as const, providers: providersForFilter, hiddenCount }
+        : emptyFilter;
 
       const topItems = filteredItems.slice(0, limit);
       if (topItems.length === 0) {
-        return { items: [], computedAt: row.computedAt, filtered: filterActive };
+        return {
+          items: [],
+          computedAt: row.computedAt,
+          filtered: filterActive,
+          filter: filterContext,
+        };
       }
 
       const titleIds = topItems.map((item) => item.titleId);
@@ -134,6 +187,7 @@ export const recommendationsRouter = router({
         items,
         computedAt: row.computedAt,
         filtered: filterActive,
+        filter: filterContext,
       };
     }),
 });

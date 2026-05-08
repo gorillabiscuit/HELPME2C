@@ -40,7 +40,11 @@ export default async function HomePage() {
   const country = (requestHeaders.get('x-vercel-ip-country') ?? 'US').toUpperCase();
   const recs = userId
     ? await caller.recommendations.list({ limit: 20, country })
-    : { items: [], filtered: false };
+    : {
+        items: [],
+        filtered: false,
+        filter: { active: false, providers: [], hiddenCount: 0 },
+      };
 
   return (
     <>
@@ -48,7 +52,7 @@ export default async function HomePage() {
         <MarketingHero />
       </Show>
       <Show when="signed-in">
-        <DashboardHome firstName={user?.firstName} recs={recs.items} recsFiltered={recs.filtered} />
+        <DashboardHome firstName={user?.firstName} recs={recs.items} filter={recs.filter} />
       </Show>
     </>
   );
