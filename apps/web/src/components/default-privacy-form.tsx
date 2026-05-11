@@ -49,7 +49,7 @@ export function DefaultPrivacyForm({ initialDefault }: DefaultPrivacyFormProps) 
         <span className="text-sm">
           <span className="block font-medium text-foreground">Private (default)</span>
           <span className="block text-muted-foreground">
-            Only you can see your watch list and ratings.
+            New additions to your list stay visible only to you.
           </span>
         </span>
       </label>
@@ -65,8 +65,8 @@ export function DefaultPrivacyForm({ initialDefault }: DefaultPrivacyFormProps) 
         <span className="text-sm">
           <span className="block font-medium text-foreground">Public</span>
           <span className="block text-muted-foreground">
-            New entries will be visible to anyone with a profile link. Public profile pages
-            aren&apos;t live yet — your list stays private in practice until they ship.
+            New additions will appear on your public profile. Profile pages aren&apos;t live yet —
+            your list stays private in practice until they ship.
           </span>
         </span>
       </label>

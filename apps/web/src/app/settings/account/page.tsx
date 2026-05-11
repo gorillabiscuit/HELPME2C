@@ -48,9 +48,9 @@ export default async function AccountSettingsPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-text-body">
-            Sets the privacy applied to new titles you add. Already-saved entries are not affected
-            by this — change them one by one from each title&apos;s edit dialog. &ldquo;Friends
-            only&rdquo; arrives later, with the social-graph features.
+            Applies to titles you add to your list from now on. Items already on your list keep
+            their current visibility — change them one at a time from each title&apos;s page.
+            &ldquo;Friends only&rdquo; arrives later, with the social-graph features.
           </p>
           <DefaultPrivacyForm initialDefault={initialDefault} />
         </CardContent>
