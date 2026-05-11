@@ -124,15 +124,15 @@ export function MalImportForm() {
           type="file"
           accept=".xml,application/xml,text/xml"
           onChange={onFileChange}
-          className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white hover:file:bg-slate-800"
+          className="block w-full text-sm text-text-body file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-foreground hover:file:bg-primary/90"
         />
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-muted-foreground">
           Get your export at{' '}
           <a
             href="https://myanimelist.net/panel.php?go=export"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-slate-700 underline"
+            className="text-foreground underline"
           >
             myanimelist.net/panel.php?go=export
           </a>{' '}
@@ -140,7 +140,7 @@ export function MalImportForm() {
         </p>
       </div>
 
-      {parseStatus ? <p className="text-sm text-slate-600">{parseStatus}</p> : null}
+      {parseStatus ? <p className="text-sm text-text-body">{parseStatus}</p> : null}
 
       <Button
         type="button"

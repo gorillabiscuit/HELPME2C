@@ -22,13 +22,13 @@ export default async function GroupsPage() {
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
       <div className="mb-6">
-        <Link href="/" className="text-sm text-slate-500 hover:text-slate-900">
+        <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">
           ← Home
         </Link>
       </div>
 
       <h1 className="text-3xl font-semibold tracking-tight">Groups</h1>
-      <p className="mt-2 text-sm text-slate-600">
+      <p className="mt-2 text-sm text-text-body">
         Create a group to get joint recommendations with others. Members see group recs and each
         other&apos;s display name only — your library and ratings stay private.
       </p>
@@ -44,7 +44,7 @@ export default async function GroupsPage() {
 
       <h2 className="mt-10 text-xl font-semibold tracking-tight">Your groups</h2>
       {myGroups.length === 0 ? (
-        <p className="mt-3 text-sm text-slate-600">
+        <p className="mt-3 text-sm text-text-body">
           You&apos;re not in any groups yet. Create one above, or accept an invite link from a
           friend.
         </p>
@@ -54,11 +54,11 @@ export default async function GroupsPage() {
             <li key={g.id}>
               <Link
                 href={`/groups/${g.id}`}
-                className="block rounded-lg border border-slate-200 bg-white px-4 py-3 transition hover:border-slate-400"
+                className="block rounded-lg border border-border bg-white px-4 py-3 transition hover:border-input"
               >
                 <div className="flex items-baseline justify-between gap-3">
-                  <span className="font-medium text-slate-900">{g.name}</span>
-                  <span className="text-xs text-slate-500">
+                  <span className="font-medium text-foreground">{g.name}</span>
+                  <span className="text-xs text-muted-foreground">
                     {g.memberCount} {g.memberCount === 1 ? 'member' : 'members'}
                     {g.isOwner ? ' · you own' : ''}
                   </span>

@@ -16,13 +16,13 @@ export default async function ImportPage() {
   return (
     <main className="mx-auto max-w-2xl px-6 py-12">
       <div className="mb-6">
-        <Link href="/" className="text-sm text-slate-500 hover:text-slate-900">
+        <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">
           ← Home
         </Link>
       </div>
 
       <h1 className="text-3xl font-semibold tracking-tight">Import your list</h1>
-      <p className="mt-2 text-sm text-slate-600">
+      <p className="mt-2 text-sm text-text-body">
         Bring your existing anime list across so HelpME2C&apos;s recommendations can learn from it.
         We&apos;ll match titles to our catalogue and add them as &lsquo;tracking&rsquo; entries with
         your status + rating preserved. Existing anchor picks stay untouched.
@@ -46,7 +46,7 @@ export default async function ImportPage() {
         </CardContent>
       </Card>
 
-      <p className="mt-6 text-xs text-slate-500">
+      <p className="mt-6 text-xs text-muted-foreground">
         Only anime listed in our catalogue can be imported. Titles we don&apos;t have yet are
         skipped — re-run the import after the next nightly catalogue sync if you&apos;re missing
         recent releases.

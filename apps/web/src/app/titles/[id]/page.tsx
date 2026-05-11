@@ -190,14 +190,14 @@ export default async function TitleDetailPage({ params }: PageProps) {
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
       <div className="mb-6">
-        <Link href="/" className="text-sm text-slate-500 hover:text-slate-900">
+        <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">
           ← Home
         </Link>
       </div>
 
       <div className="grid grid-cols-1 gap-8 sm:grid-cols-[200px_1fr]">
         {title.posterUrl ? (
-          <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
+          <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-border bg-muted">
             <Image
               src={title.posterUrl}
               alt={`${title.title} poster`}
@@ -208,23 +208,23 @@ export default async function TitleDetailPage({ params }: PageProps) {
             />
           </div>
         ) : (
-          <div className="aspect-[2/3] rounded-lg border border-slate-200 bg-slate-100" />
+          <div className="aspect-[2/3] rounded-lg border border-border bg-muted" />
         )}
 
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">{title.title}</h1>
           {title.originalTitle && title.originalTitle !== title.title ? (
-            <p className="mt-1 text-sm text-slate-500">{title.originalTitle}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{title.originalTitle}</p>
           ) : null}
 
-          <p className="mt-3 text-sm text-slate-600">
+          <p className="mt-3 text-sm text-text-body">
             {[mediaTypeLabel, yearLabel, episodeLabel, statusLabel]
               .filter((s): s is string => Boolean(s))
               .join(' · ')}
           </p>
 
           {title.synopsis ? (
-            <p className="mt-4 text-sm leading-relaxed text-slate-700">{title.synopsis}</p>
+            <p className="mt-4 text-sm leading-relaxed text-foreground">{title.synopsis}</p>
           ) : null}
 
           <div className="mt-6">
@@ -258,7 +258,7 @@ export default async function TitleDetailPage({ params }: PageProps) {
               {tagRows.map((tag) => (
                 <span
                   key={tag.id}
-                  className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700"
+                  className="inline-flex items-center rounded-full bg-muted px-3 py-1 text-xs font-medium text-foreground"
                 >
                   {tag.name}
                 </span>
@@ -272,12 +272,12 @@ export default async function TitleDetailPage({ params }: PageProps) {
         <CardHeader className="flex flex-row items-baseline justify-between">
           <CardTitle>Where to watch</CardTitle>
           {lastVerified ? (
-            <span className="text-xs font-normal text-slate-400">
+            <span className="text-xs font-normal text-muted-foreground">
               Last verified {formatRelativeTime(lastVerified)}
             </span>
           ) : null}
         </CardHeader>
-        <CardContent className="text-sm text-slate-600">
+        <CardContent className="text-sm text-text-body">
           {streamingRows.length === 0 ? (
             <p>No streaming availability data for this title yet.</p>
           ) : primaryByType.size === 0 ? (
@@ -298,14 +298,14 @@ export default async function TitleDetailPage({ params }: PageProps) {
                 if (!providers || providers.length === 0) return null;
                 return (
                   <div key={type}>
-                    <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+                    <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                       {STREAMING_TYPE_LABEL[type]}
                     </p>
                     <div className="flex flex-wrap items-center gap-3">
                       {providers.map((p) => (
                         <span
                           key={p.providerId}
-                          className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5"
+                          className="inline-flex items-center gap-2 rounded-md border border-border bg-white px-3 py-1.5"
                           title={p.providerName}
                         >
                           {p.providerLogoUrl ? (
@@ -317,14 +317,14 @@ export default async function TitleDetailPage({ params }: PageProps) {
                               className="rounded-sm"
                             />
                           ) : null}
-                          <span className="text-sm text-slate-700">{p.providerName}</span>
+                          <span className="text-sm text-foreground">{p.providerName}</span>
                         </span>
                       ))}
                     </div>
                   </div>
                 );
               })}
-              <div className="flex items-baseline justify-between border-t border-slate-100 pt-3 text-xs text-slate-400">
+              <div className="flex items-baseline justify-between border-t border-border pt-3 text-xs text-muted-foreground">
                 <span>
                   Showing {primaryCountry}.
                   {otherCountries.size > 0 ? (
@@ -340,7 +340,7 @@ export default async function TitleDetailPage({ params }: PageProps) {
                     href={primarySourceUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-slate-500 hover:text-slate-900"
+                    className="text-muted-foreground hover:text-foreground"
                   >
                     More details ↗
                   </a>

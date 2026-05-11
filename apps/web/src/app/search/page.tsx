@@ -58,7 +58,7 @@ export default async function SearchPage({ searchParams }: PageProps) {
   let resultsBlock: ReactNode;
   if (!q) {
     resultsBlock = (
-      <p className="mt-8 text-sm text-slate-600">
+      <p className="mt-8 text-sm text-text-body">
         Type a title above to search the catalog of{' '}
         {/* Hardcoding the count would drift; the runtime row count is in the
             DB. Keep this generic until the search surface needs to advertise. */}
@@ -67,7 +67,7 @@ export default async function SearchPage({ searchParams }: PageProps) {
     );
   } else if (q.length < 2) {
     resultsBlock = (
-      <p className="mt-8 text-sm text-slate-600">Type at least 2 characters to search.</p>
+      <p className="mt-8 text-sm text-text-body">Type at least 2 characters to search.</p>
     );
   } else {
     // Reuses the dogfooded titles.search tRPC procedure so the server
@@ -78,7 +78,7 @@ export default async function SearchPage({ searchParams }: PageProps) {
 
     if (results.length === 0) {
       resultsBlock = (
-        <p className="mt-8 text-sm text-slate-600">
+        <p className="mt-8 text-sm text-text-body">
           No {mediaType ? `${MEDIA_TYPE_LABEL[mediaType].toLowerCase()} ` : ''}titles match &ldquo;
           {q}&rdquo;
           {mediaType ? ' — try a different filter' : ''}.
@@ -93,7 +93,7 @@ export default async function SearchPage({ searchParams }: PageProps) {
               <li key={title.id}>
                 <Link href={`/titles/${title.id}`} className="group block">
                   {title.posterUrl ? (
-                    <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-slate-200 bg-slate-100 transition group-hover:border-slate-400">
+                    <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-border bg-muted transition group-hover:border-input">
                       <Image
                         src={title.posterUrl}
                         alt=""
@@ -103,12 +103,12 @@ export default async function SearchPage({ searchParams }: PageProps) {
                       />
                     </div>
                   ) : (
-                    <div className="aspect-[2/3] rounded-lg border border-slate-200 bg-slate-100" />
+                    <div className="aspect-[2/3] rounded-lg border border-border bg-muted" />
                   )}
-                  <h3 className="mt-2 truncate text-sm font-medium text-slate-900 group-hover:underline">
+                  <h3 className="mt-2 truncate text-sm font-medium text-foreground group-hover:underline">
                     {title.title}
                   </h3>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-muted-foreground">
                     {[mediaTypeLabel, title.releaseYear?.toString()]
                       .filter((s): s is string => Boolean(s))
                       .join(' · ')}
@@ -127,7 +127,7 @@ export default async function SearchPage({ searchParams }: PageProps) {
   const filterPillClass = (active: boolean) =>
     cn(
       'inline-flex items-center rounded-full px-3 py-1 text-sm font-medium transition',
-      active ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200',
+      active ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground hover:bg-muted',
     );
 
   return (

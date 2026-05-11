@@ -17,6 +17,11 @@ export default tseslint.config(
       '**/test-results/**',
       '**/playwright-report/**',
       '**/*.tsbuildinfo',
+      // Skill packages installed via `npx skills add` — vendored content
+      // we don't lint. ESLint doesn't respect .gitignore, hence the
+      // duplicate exclusion alongside the .gitignore entry.
+      '.agents/**',
+      '.claude/skills/**',
     ],
   },
   js.configs.recommended,

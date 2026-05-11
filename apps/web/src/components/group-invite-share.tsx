@@ -48,7 +48,7 @@ export function GroupInviteShare({ groupId, initialUrl }: GroupInviteShareProps)
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-sm text-slate-600">
+      <p className="text-sm text-text-body">
         Share this link with someone you want to add. Anyone with the link can join.
       </p>
       <div className="flex gap-2">
@@ -56,7 +56,7 @@ export function GroupInviteShare({ groupId, initialUrl }: GroupInviteShareProps)
           id="group-invite-url"
           readOnly
           value={url}
-          className="flex-1 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700 outline-none"
+          className="flex-1 rounded-md border border-border bg-muted px-3 py-1.5 text-sm text-foreground outline-none"
           // `as HTMLInputElement` — onClick's `e.target` is typed as
           // EventTarget; we know it's the <input> we attached to.
           onClick={(e) => (e.target as HTMLInputElement).select()}

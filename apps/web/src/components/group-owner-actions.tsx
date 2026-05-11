@@ -26,7 +26,7 @@ export function GroupOwnerActions({ groupId }: GroupOwnerActionsProps) {
         variant="ghost"
         size="sm"
         onClick={() => setConfirming(true)}
-        className="text-slate-500 hover:text-red-600"
+        className="text-muted-foreground hover:text-red-600"
       >
         Delete group
       </Button>
@@ -35,7 +35,7 @@ export function GroupOwnerActions({ groupId }: GroupOwnerActionsProps) {
 
   return (
     <div className="flex items-center gap-2 text-sm">
-      <span className="text-slate-700">Delete this group? Cascades to members + recs.</span>
+      <span className="text-foreground">Delete this group? Cascades to members + recs.</span>
       <Button
         type="button"
         variant="destructive"

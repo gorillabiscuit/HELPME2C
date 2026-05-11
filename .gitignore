@@ -47,6 +47,14 @@ android/.gradle/
 
 # Claude Code per-user local settings (auto-generated; .claude/commands/ stays tracked)
 .claude/settings.local.json
+# Claude Code skill symlinks — restored by `npx skills experimental_install`
+# from skills-lock.json (the lock file IS tracked).
+.claude/skills/
+
+# Skills installed by `npx skills add` — restored from skills-lock.json,
+# same pattern as node_modules / package-lock.json. Lock file tracked,
+# resolved skill content not.
+.agents/
 
 # Husky
 .husky/_

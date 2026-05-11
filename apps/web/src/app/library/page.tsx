@@ -40,7 +40,7 @@ export default async function LibraryPage() {
     <main className="mx-auto max-w-3xl px-6 py-12">
       <header className="mb-8 flex items-baseline justify-between">
         <h1 className="text-3xl font-semibold tracking-tight">Library</h1>
-        <span className="text-sm text-slate-500">
+        <span className="text-sm text-muted-foreground">
           {entries.length === 0
             ? 'No entries yet'
             : `${entries.length} ${entries.length === 1 ? 'title' : 'titles'}`}
@@ -48,16 +48,16 @@ export default async function LibraryPage() {
       </header>
 
       {entries.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-slate-300 px-6 py-12 text-center">
-          <p className="text-sm text-slate-600">
+        <div className="rounded-lg border border-dashed border-border px-6 py-12 text-center">
+          <p className="text-sm text-text-body">
             You haven&apos;t added any titles yet. A search-to-add surface is coming in M3 Path A;
             for now, navigate to a title via{' '}
-            <code className="rounded bg-slate-100 px-1 py-0.5 text-xs">/titles/&lt;uuid&gt;</code>{' '}
-            and use the &ldquo;Add to list&rdquo; button.
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">/titles/&lt;uuid&gt;</code> and
+            use the &ldquo;Add to list&rdquo; button.
           </p>
         </div>
       ) : (
-        <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200">
+        <ul className="divide-y divide-slate-200 rounded-lg border border-border">
           {entries.map(({ entry, title }) => {
             const kindLabel = KIND_LABEL[entry.kind];
             const statusLabel = entry.status ? STATUS_LABEL[entry.status] : null;
@@ -67,7 +67,7 @@ export default async function LibraryPage() {
                 {title.posterUrl ? (
                   <Link
                     href={`/titles/${title.id}`}
-                    className="relative aspect-[2/3] w-[60px] flex-none overflow-hidden rounded border border-slate-200 bg-slate-100"
+                    className="relative aspect-[2/3] w-[60px] flex-none overflow-hidden rounded border border-border bg-muted"
                   >
                     <Image
                       src={title.posterUrl}
@@ -78,17 +78,17 @@ export default async function LibraryPage() {
                     />
                   </Link>
                 ) : (
-                  <div className="aspect-[2/3] w-[60px] flex-none rounded border border-slate-200 bg-slate-100" />
+                  <div className="aspect-[2/3] w-[60px] flex-none rounded border border-border bg-muted" />
                 )}
 
                 <div className="min-w-0 flex-1">
                   <Link
                     href={`/titles/${title.id}`}
-                    className="block truncate text-sm font-medium text-slate-900 hover:underline"
+                    className="block truncate text-sm font-medium text-foreground hover:underline"
                   >
                     {title.title}
                   </Link>
-                  <p className="mt-0.5 text-xs text-slate-500">
+                  <p className="mt-0.5 text-xs text-muted-foreground">
                     {[mediaTypeLabel, title.releaseYear?.toString(), statusLabel ?? kindLabel]
                       .filter((s): s is string => Boolean(s))
                       .join(' · ')}
@@ -97,9 +97,9 @@ export default async function LibraryPage() {
 
                 <div className="flex flex-none items-center gap-2 text-xs">
                   {entry.rating !== null ? (
-                    <span className="font-medium text-slate-700">{entry.rating}/10</span>
+                    <span className="font-medium text-foreground">{entry.rating}/10</span>
                   ) : (
-                    <span className="text-slate-400">—</span>
+                    <span className="text-muted-foreground">—</span>
                   )}
                   {/* Edit only on tracking entries — editing an anchor would
                       implicitly graduate it (kind=anchor + status=set is not

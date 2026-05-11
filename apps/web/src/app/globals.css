@@ -25,6 +25,7 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-text-body: var(--text-body);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -36,6 +37,11 @@
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.129 0.042 264.695);
+  /* Body-text token. Matches Tailwind's slate-600 luminance — darker than
+   * --muted-foreground (slate-500) so body copy keeps WCAG AA contrast on
+   * white backgrounds. Added 2026-05-08 during the impeccable harden pass
+   * to preserve a11y while migrating off hardcoded slate-N usage. */
+  --text-body: oklch(0.446 0.043 257.281);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.129 0.042 264.695);
   --popover: oklch(1 0 0);
@@ -62,6 +68,10 @@
 .dark {
   --background: oklch(0.129 0.042 264.695);
   --foreground: oklch(0.984 0.003 247.858);
+  /* Dark-mode mirror of --text-body: lifted slightly off pure foreground
+   * so body copy reads as slightly dimmer than headings. Slate-300/400
+   * range. */
+  --text-body: oklch(0.704 0.04 256.788);
   --card: oklch(0.208 0.042 265.755);
   --card-foreground: oklch(0.984 0.003 247.858);
   --popover: oklch(0.208 0.042 265.755);

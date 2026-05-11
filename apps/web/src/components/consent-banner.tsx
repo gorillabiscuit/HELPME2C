@@ -13,10 +13,10 @@ export function ConsentBanner() {
     <div
       role="dialog"
       aria-label="Cookie consent"
-      className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white px-6 py-4 shadow-lg"
+      className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-white px-6 py-4 shadow-lg"
     >
       <div className="mx-auto flex max-w-4xl flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <p className="text-sm text-slate-700">
+        <p className="text-sm text-foreground">
           We use cookies for essential site functions, and — with your consent — for analytics and
           session replay so we can improve recommendations. See our{' '}
           <a href="/privacy" className="underline">

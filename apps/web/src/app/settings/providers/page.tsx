@@ -31,16 +31,16 @@ export default async function ProvidersSettingsPage() {
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
       <div className="mb-6">
-        <Link href="/" className="text-sm text-slate-500 hover:text-slate-900">
+        <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">
           ← Home
         </Link>
       </div>
 
       <h1 className="text-3xl font-semibold tracking-tight">Streaming services</h1>
-      <p className="mt-2 text-sm text-slate-600">
+      <p className="mt-2 text-sm text-text-body">
         Pick the services you subscribe to. We&apos;ll filter your recommendations to titles that
         are actually available on at least one of them. Showing providers for{' '}
-        <span className="font-medium text-slate-900">{country}</span>.
+        <span className="font-medium text-foreground">{country}</span>.
       </p>
 
       <Card className="mt-8">
@@ -49,7 +49,7 @@ export default async function ProvidersSettingsPage() {
         </CardHeader>
         <CardContent>
           {providers.length === 0 ? (
-            <p className="text-sm text-slate-600">
+            <p className="text-sm text-text-body">
               No streaming providers in our catalogue for {country} yet — try again after the next
               nightly sync.
             </p>

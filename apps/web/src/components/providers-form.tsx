@@ -71,8 +71,8 @@ export function ProvidersForm({ providers, initialSelected }: ProvidersFormProps
               className={
                 'inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm transition-colors ' +
                 (isSelected
-                  ? 'border-slate-900 bg-slate-900 text-white hover:bg-slate-800'
-                  : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50')
+                  ? 'border-foreground bg-primary text-primary-foreground hover:bg-primary/90'
+                  : 'border-border bg-white text-foreground hover:border-input hover:bg-muted')
               }
               title={`${p.providerName} (${p.titleCount} titles)`}
             >
@@ -96,11 +96,11 @@ export function ProvidersForm({ providers, initialSelected }: ProvidersFormProps
           {save.isPending ? 'Saving…' : 'Save'}
         </Button>
         {selected.size > 0 ? (
-          <span className="text-sm text-slate-500">
+          <span className="text-sm text-muted-foreground">
             {selected.size} {selected.size === 1 ? 'service' : 'services'} selected
           </span>
         ) : (
-          <span className="text-sm text-slate-500">
+          <span className="text-sm text-muted-foreground">
             Nothing selected — recs aren&apos;t filtered.
           </span>
         )}

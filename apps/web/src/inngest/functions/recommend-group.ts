@@ -7,7 +7,6 @@ import {
   type GroupMember,
   type RatedTitle,
   type TagThemeMembership,
-  type TitleTagSet,
 } from '@helpme2c/ml';
 import { db } from '@/server/db';
 import {
@@ -19,6 +18,7 @@ import {
   titleTags,
   watchEntries,
 } from '@/server/schema';
+import { groupTagsIntoTitleSets } from '../lib/group-tags';
 import { inngest, recommendAllGroupsEvent, recommendGroupEvent } from '../client';
 
 // Group rec params per ADR-0020 starting points (to be calibrated against
@@ -184,28 +184,6 @@ export async function recomputeGroupRecommendations(
     });
 
   return { recCount: recs.length };
-}
-
-// Group flat (titleId, tagId, weight) rows into TitleTagSet[] for the ML
-// functions. Same helper as recommend.ts; duplicating rather than
-// extracting because the duplication is trivially small and these
-// functions evolve independently.
-function groupTagsIntoTitleSets(
-  rows: ReadonlyArray<{ titleId: string; tagId: string; weight: number }>,
-): TitleTagSet[] {
-  const byTitle = new Map<
-    string,
-    { titleId: string; tags: Array<{ tagId: string; weight: number }> }
-  >();
-  for (const row of rows) {
-    let entry = byTitle.get(row.titleId);
-    if (!entry) {
-      entry = { titleId: row.titleId, tags: [] };
-      byTitle.set(row.titleId, entry);
-    }
-    entry.tags.push({ tagId: row.tagId, weight: row.weight });
-  }
-  return Array.from(byTitle.values());
 }
 
 // Per-group recompute — triggered on demand (member join/leave) or by
