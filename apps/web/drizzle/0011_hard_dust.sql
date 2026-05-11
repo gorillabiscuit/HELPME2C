@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "default_privacy" "privacy_level" DEFAULT 'private' NOT NULL;

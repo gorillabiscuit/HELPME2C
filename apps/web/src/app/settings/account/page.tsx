@@ -1,8 +1,12 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { eq } from 'drizzle-orm';
 import { auth } from '@clerk/nextjs/server';
+import { db } from '@/server/db';
+import { users } from '@/server/schema';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { AccountDeleteForm } from '@/components/account-delete-form';
+import { DefaultPrivacyForm } from '@/components/default-privacy-form';
 
 // /settings/account — DSAR self-serve surface per ADR-0012 §7.
 // Article 15 + 20 (export) and Article 17 (deletion) live here. Cookie
@@ -11,6 +15,18 @@ import { AccountDeleteForm } from '@/components/account-delete-form';
 export default async function AccountSettingsPage() {
   const { userId } = await auth();
   if (!userId) redirect('/');
+
+  // Fetch default_privacy server-side. Friends-only stays in the DB enum
+  // but isn't selectable here; if a row somehow has 'friends' (e.g. set
+  // via SQL by a future feature flag), treat it as 'private' for the
+  // current UI — safer than silently exposing it as 'public'.
+  const [userRow] = await db
+    .select({ defaultPrivacy: users.defaultPrivacy })
+    .from(users)
+    .where(eq(users.clerkId, userId))
+    .limit(1);
+  const initialDefault: 'public' | 'private' =
+    userRow?.defaultPrivacy === 'public' ? 'public' : 'private';
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-12">
@@ -27,6 +43,20 @@ export default async function AccountSettingsPage() {
       </p>
 
       <Card className="mt-8">
+        <CardHeader>
+          <CardTitle>Default visibility for new entries</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-text-body">
+            Sets the privacy applied to new titles you add. Already-saved entries are not affected
+            by this — change them one by one from each title&apos;s edit dialog. &ldquo;Friends
+            only&rdquo; arrives later, with the social-graph features.
+          </p>
+          <DefaultPrivacyForm initialDefault={initialDefault} />
+        </CardContent>
+      </Card>
+
+      <Card className="mt-6">
         <CardHeader>
           <CardTitle>Download my data</CardTitle>
         </CardHeader>

@@ -78,6 +78,13 @@
       "when": 1778235110799,
       "tag": "0010_wakeful_patch",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1778528974308,
+      "tag": "0011_hard_dust",
+      "breakpoints": true
     }
   ]
 }

@@ -172,6 +172,7 @@ export default async function TitleDetailPage({ params }: PageProps) {
       rating: watchEntries.rating,
       currentEpisode: watchEntries.currentEpisode,
       notes: watchEntries.notes,
+      privacy: watchEntries.privacy,
     })
     .from(watchEntries)
     .innerJoin(users, eq(watchEntries.userId, users.id))
@@ -240,6 +241,7 @@ export default async function TitleDetailPage({ params }: PageProps) {
                       rating: userEntryRow.rating,
                       currentEpisode: userEntryRow.currentEpisode,
                       notes: userEntryRow.notes,
+                      privacy: userEntryRow.privacy,
                     }
                   : null
               }

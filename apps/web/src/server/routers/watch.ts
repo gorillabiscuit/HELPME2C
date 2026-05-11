@@ -4,6 +4,7 @@ import { z } from 'zod';
 import {
   privacyLevelEnum,
   titles,
+  users,
   watchEntries,
   watchEntryKindEnum,
   watchStatusEnum,
@@ -103,8 +104,17 @@ export const watchRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const internalUserId = await resolveInternalUserId(ctx.db, ctx.userId);
-      if (!internalUserId) {
+      // Inlined user lookup (rather than resolveInternalUserId) so we can
+      // grab default_privacy in the same round-trip. The INSERT branch of
+      // the upsert uses it as a fallback when input.privacy is undefined —
+      // respects the user's chosen default for new entries. The UPDATE
+      // branch never touches privacy unless explicitly provided.
+      const [userRow] = await ctx.db
+        .select({ id: users.id, defaultPrivacy: users.defaultPrivacy })
+        .from(users)
+        .where(eq(users.clerkId, ctx.userId))
+        .limit(1);
+      if (!userRow) {
         throw new TRPCError({
           code: 'NOT_FOUND',
           message: 'User row not found — was me.ensure called for this session?',
@@ -126,14 +136,18 @@ export const watchRouter = router({
       const [row] = await ctx.db
         .insert(watchEntries)
         .values({
-          userId: internalUserId,
+          userId: userRow.id,
           titleId: input.titleId,
           kind: input.kind,
           status: input.status,
           rating: input.rating,
           currentEpisode: input.currentEpisode,
           notes: input.notes,
-          privacy: input.privacy,
+          // Fall back to the user's default when the client didn't pick.
+          // Column-level default ('private') is still a final safety net
+          // if defaultPrivacy is somehow null, but the schema NOT NULL +
+          // 'private' default guarantee it isn't.
+          privacy: input.privacy ?? userRow.defaultPrivacy,
         })
         .onConflictDoUpdate({
           target: [watchEntries.userId, watchEntries.titleId],
@@ -146,7 +160,7 @@ export const watchRouter = router({
       // as ensure-user.ts.
       if (!row) {
         throw new Error(
-          `watch.upsert: no row returned for user=${internalUserId} title=${input.titleId}`,
+          `watch.upsert: no row returned for user=${userRow.id} title=${input.titleId}`,
         );
       }
       return row;

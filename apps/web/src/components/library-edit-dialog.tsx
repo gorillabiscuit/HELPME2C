@@ -21,6 +21,13 @@ import { cn } from '@/lib/utils';
 // component doesn't pull in @/server/* into the client bundle.
 type WatchStatus = 'watching' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_watch';
 
+// The DB enum also has 'friends' but it isn't selectable until social
+// graph (Phase 1B); same as the account-settings default-privacy form.
+// Any existing 'friends' row from a future feature flag falls through to
+// the radio's else-branch and shows as 'private'-selected — see preselect
+// logic below.
+type SettablePrivacy = 'public' | 'private';
+
 const STATUS_OPTIONS: Array<{ value: WatchStatus; label: string }> = [
   { value: 'plan_to_watch', label: 'Plan to watch' },
   { value: 'watching', label: 'Watching' },
@@ -34,6 +41,7 @@ interface InitialEntry {
   currentEpisode: number | null;
   rating: number | null;
   notes: string | null;
+  privacy: SettablePrivacy | 'friends' | null;
 }
 
 interface LibraryEditDialogProps {
@@ -68,6 +76,13 @@ export function LibraryEditDialog({
   );
   const [rating, setRating] = useState<string>(initialEntry.rating?.toString() ?? '');
   const [notes, setNotes] = useState<string>(initialEntry.notes ?? '');
+  // 'friends' falls through to 'private' here — the friends-only path
+  // isn't selectable in v1 (no social graph yet), and we don't want a
+  // user with a legacy 'friends' row to accidentally promote it to
+  // 'public' by saving the form without re-picking.
+  const [privacy, setPrivacy] = useState<SettablePrivacy>(
+    initialEntry.privacy === 'public' ? 'public' : 'private',
+  );
 
   const upsertMutation = trpc.watch.upsert.useMutation({
     onSuccess: () => {
@@ -94,6 +109,7 @@ export function LibraryEditDialog({
       rating: ratingNum,
       currentEpisode: episodeNum,
       notes: notesValue,
+      privacy,
     });
   };
 
@@ -174,6 +190,37 @@ export function LibraryEditDialog({
               placeholder="Optional — only visible to you."
             />
           </div>
+
+          <fieldset className="space-y-1.5">
+            <legend className="text-sm font-medium leading-none">Visibility</legend>
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="watch-edit-privacy"
+                value="private"
+                checked={privacy === 'private'}
+                onChange={() => setPrivacy('private')}
+              />
+              <span>
+                Private <span className="text-muted-foreground">— only you</span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="watch-edit-privacy"
+                value="public"
+                checked={privacy === 'public'}
+                onChange={() => setPrivacy('public')}
+              />
+              <span>
+                Public{' '}
+                <span className="text-muted-foreground">
+                  — visible on your profile (profiles aren&apos;t live yet)
+                </span>
+              </span>
+            </label>
+          </fieldset>
 
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
