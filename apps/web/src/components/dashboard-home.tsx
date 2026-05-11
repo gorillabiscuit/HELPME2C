@@ -69,47 +69,11 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
   return (
     <main className="mx-auto max-w-5xl px-6 py-12">
       <header className="mb-8">
-        <div className="flex flex-wrap items-baseline justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tight">{greeting}</h1>
-            <p className="mt-2 text-sm text-text-body">
-              Based on your taste — top {recs.length}{' '}
-              {recs.length === 1 ? 'recommendation' : 'recommendations'}.
-            </p>
-          </div>
-          <div className="flex flex-col items-end gap-1 text-sm">
-            <Link
-              href="/taste"
-              className="rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
-            >
-              Refine your taste →
-            </Link>
-            <Link
-              href="/groups"
-              className="rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
-            >
-              Groups →
-            </Link>
-            <Link
-              href="/settings/providers"
-              className="rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
-            >
-              Manage services →
-            </Link>
-            <Link
-              href="/settings/import"
-              className="rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
-            >
-              Import list →
-            </Link>
-            <Link
-              href="/settings/account"
-              className="rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
-            >
-              Account &amp; privacy →
-            </Link>
-          </div>
-        </div>
+        <h1 className="text-3xl font-semibold tracking-tight">{greeting}</h1>
+        <p className="mt-2 text-sm text-text-body">
+          Based on your taste — top {recs.length}{' '}
+          {recs.length === 1 ? 'recommendation' : 'recommendations'}.
+        </p>
 
         {filter.active ? (
           <div className="mt-4 flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted px-3 py-2 text-xs text-text-body">
