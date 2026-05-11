@@ -1,3 +1,4 @@
+import { redirect } from 'next/navigation';
 import { appRouter } from '@/server/router';
 import { createContext } from '@/server/trpc';
 import { OnboardingFlow } from '@/components/onboarding-flow';
@@ -31,11 +32,19 @@ export default async function OnboardingPage() {
     caller.watch.list(),
   ]);
 
-  // Pre-populate the picked set with any existing anchor entries so
-  // returning users see their previous picks reflected in the grid.
   const initialAnchorIds = watchEntries
     .filter(({ entry }) => entry.kind === 'anchor')
     .map(({ title }) => title.id);
+
+  // /onboarding is the first-visit funnel — intro + initial anchor capture.
+  // Returning users who already have anchors don't need the intro step or
+  // the "this is the first thing you do" framing; they get the permanent
+  // refine surface at /taste. Anchor count is a sufficient proxy for
+  // "has completed cold-start onboarding" (the user must pick ≥1 anchor
+  // to leave the picker; otherwise they'd hit Skip for now → /).
+  if (initialAnchorIds.length > 0) {
+    redirect('/taste');
+  }
 
   return <OnboardingFlow initialPopular={popularTitles} initialAnchorIds={initialAnchorIds} />;
 }
