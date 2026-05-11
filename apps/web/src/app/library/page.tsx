@@ -115,6 +115,7 @@ export default async function LibraryPage() {
                         currentEpisode: entry.currentEpisode,
                         rating: entry.rating,
                         notes: entry.notes,
+                        privacy: entry.privacy,
                       }}
                     />
                   ) : null}

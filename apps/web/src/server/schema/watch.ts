@@ -9,7 +9,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { titles } from './titles';
-import { users } from './users';
+import { privacyLevelEnum, users } from './users';
 
 // Discriminates onboarding "anchor" picks (M3 Path A — user stated this is
 // their taste, no claim about viewing history) from "tracking" entries
@@ -29,10 +29,9 @@ export const watchStatusEnum = pgEnum('watch_status', [
   'plan_to_watch',
 ]);
 
-// Per-entry visibility. Default private — safer if the user never chooses.
-// Actual UX for setting this lands in M9 (privacy hardening); schema is in
-// place now so we don't migrate later.
-export const privacyLevelEnum = pgEnum('privacy_level', ['public', 'friends', 'private']);
+// privacyLevelEnum lives on users.ts — it's referenced by both
+// users.default_privacy and watch_entries.privacy, and putting it there
+// avoids a circular import (watch already imports users).
 
 // One row per (user, title). Both M3 intake paths (onboarding anchors,
 // manual tracking) converge on this table. Rec engine reads it in M4.

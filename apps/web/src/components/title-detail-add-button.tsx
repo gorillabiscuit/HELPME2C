@@ -16,6 +16,7 @@ interface InitialEntry {
   rating: number | null;
   currentEpisode: number | null;
   notes: string | null;
+  privacy: 'public' | 'private' | 'friends' | null;
 }
 
 interface TitleDetailAddButtonProps {
@@ -97,6 +98,7 @@ export function TitleDetailAddButton({
           rating: initialEntry.rating,
           currentEpisode: initialEntry.currentEpisode,
           notes: initialEntry.notes,
+          privacy: initialEntry.privacy,
         }}
       />
     </div>
