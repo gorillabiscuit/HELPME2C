@@ -79,6 +79,12 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
           </div>
           <div className="flex flex-col items-end gap-1 text-sm">
             <Link
+              href="/taste"
+              className="rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+            >
+              Refine your taste →
+            </Link>
+            <Link
               href="/groups"
               className="rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
             >

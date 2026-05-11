@@ -48,7 +48,7 @@ Captured in detail during the mapping session.
 - Multi-bar per-dimension confidence meter (the user sees their taste vector forming)
 - Cross-cluster prompt after 3 anchors share a tight theme signature
 - Genre disambiguation step — three-bucket selector (no thanks / sure / love); skipped if anchors are theme-diverse
-- "Refine your taste" swipe mode persists as a voluntary post-onboarding entry point
+- The picker-grid graduates from `/onboarding` (first-visit funnel) to `/taste` (permanent surface) post-onboarding. The richer "Refine your taste" modes (pairwise/Elo, drag) live on the same `/taste` surface in Phase 1B — see deferred list.
 
 **Path B — manual tracking (ongoing)**
 - Add title → list
@@ -166,7 +166,11 @@ Per [PROJECT.md](../PROJECT.md) cut-line, confirmed during the mapping session:
 
 - Ghost profiles for unregistered group members → 1B
 - Mood / context layer on recommendations → 1B
-- Daily comparative pairs (on roadmap; needs M4+M6 live first) → 1B
+- **Taste Refinement enhancements (`/taste` surface)** — the basic anchor-picker grid + media-type filter ships under v1 as part of M3/M10 polish (the surface itself, see M3 note below). The deeper signal-gathering modes are deferred:
+  - **Pairwise / Elo comparisons** — "A vs B" choices, updates a per-(user, title) Elo score. Materially higher signal than 1–10 ratings for collaborative filtering.
+  - **Manual drag-and-drop ranking** — user directly reorders their ranked list; rank becomes a rec-engine signal weight.
+  - **Category-scoped refinement** — rank within a slice (e.g. anime only, comedies only) so the surface stays usable as the user's library grows.
+  Needs M4 + M6 live first (rec engine must consume the new signals; feedback loop must be closed so we can observe whether Elo-tuned recs outperform). → 1B
 - Behavioral mental-state inference → speculative, Phase 2+ at earliest, may never ship
 - Email feedback trigger + transactional email infrastructure → 1B
 - React Native mobile app → 2
