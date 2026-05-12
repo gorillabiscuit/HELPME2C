@@ -1,6 +1,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { Heart, Users } from 'lucide-react';
+import { FirstVisitCallout } from '@/components/first-visit-callout';
 import { RecCardActions } from '@/components/rec-card-actions';
 
 type MediaType = 'tv' | 'film' | 'anime';
@@ -108,6 +109,8 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
           </div>
         ) : null}
       </header>
+
+      <FirstVisitCallout />
 
       {/* Promote the moat (Groups) + the taste-shaping surface side-by-side
           on the dashboard. These were buried in a nav cluster before — now
