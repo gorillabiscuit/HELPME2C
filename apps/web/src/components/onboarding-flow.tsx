@@ -1,13 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import { trpc } from '@/lib/trpc';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { cn } from '@/lib/utils';
+import { TitleQuickActions } from '@/components/title-quick-actions';
+
+type WatchStatus = 'watching' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_watch';
 
 interface TitleSummary {
   id: string;
@@ -19,9 +21,15 @@ interface TitleSummary {
   popularityScore: number | null;
 }
 
+interface InitialEntry {
+  titleId: string;
+  status: WatchStatus | null;
+  rating: number | null;
+}
+
 interface OnboardingFlowProps {
   initialPopular: TitleSummary[];
-  initialAnchorIds: string[];
+  initialEntries: InitialEntry[];
 }
 
 const MEDIA_TYPE_LABEL: Record<string, string> = {
@@ -33,20 +41,15 @@ const MEDIA_TYPE_LABEL: Record<string, string> = {
 const MIN_QUERY_LENGTH = 2;
 const SEARCH_DEBOUNCE_MS = 250;
 
-export function OnboardingFlow({ initialPopular, initialAnchorIds }: OnboardingFlowProps) {
+export function OnboardingFlow({ initialPopular, initialEntries }: OnboardingFlowProps) {
   const router = useRouter();
 
-  // Two-step flow: intro (value prop) → picker. The intro is the first thing
-  // a new signed-up user sees after age-check, and it answers "what is this
-  // app and what am I about to do." Returning users with anchors don't hit
-  // this page at all (the server-side redirect on /onboarding sends them to
-  // /taste). The intro stays in client state — there's no need to persist
-  // "user dismissed intro" because the redirect already covers the case.
+  // Two-step flow: intro (value prop) → picker. The intro is the first
+  // thing a new signed-up user sees after age-check.
   const [phase, setPhase] = useState<'intro' | 'picker'>('intro');
 
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
-  const [picked, setPicked] = useState<Set<string>>(new Set(initialAnchorIds));
 
   // Debounce the search input so we don't fire a tRPC query on every
   // keystroke. setTimeout here is for input debounce, not retry — the
@@ -62,31 +65,21 @@ export function OnboardingFlow({ initialPopular, initialAnchorIds }: OnboardingF
     { enabled: searchEnabled },
   );
 
-  // Rated-taste model: picking a poster says "I've watched this and
-  // loved it — rate it 10/10." Writes a tracking entry with
-  // status=completed + rating=10. Unpicking removes the entry. The
-  // user can refine the rating later from the title detail page.
-  const upsertMutation = trpc.watch.upsert.useMutation();
-  const removeMutation = trpc.watch.remove.useMutation();
-
-  const handlePick = (title: TitleSummary) => {
-    if (picked.has(title.id)) {
-      setPicked((p) => {
-        const next = new Set(p);
-        next.delete(title.id);
-        return next;
-      });
-      removeMutation.mutate({ titleId: title.id });
-    } else {
-      setPicked((p) => new Set(p).add(title.id));
-      upsertMutation.mutate({
-        titleId: title.id,
-        kind: 'tracking',
-        status: 'completed',
-        rating: 10,
-      });
+  // Map for fast per-card state lookup, derived from the prop so it
+  // refreshes when TitleQuickActions triggers router.refresh after a
+  // mutation.
+  const entryByTitleId = useMemo(() => {
+    const m = new Map<string, { status: WatchStatus | null; rating: number | null }>();
+    for (const e of initialEntries) {
+      m.set(e.titleId, { status: e.status, rating: e.rating });
     }
-  };
+    return m;
+  }, [initialEntries]);
+
+  // Count rated entries (status=completed with a rating). The footer
+  // CTA reads "Continue" once we have any rated signal; otherwise
+  // "Skip for now".
+  const ratedCount = initialEntries.filter((e) => e.rating !== null).length;
 
   const showingSearchResults = searchEnabled;
   const titlesToShow: TitleSummary[] = showingSearchResults
@@ -174,27 +167,15 @@ export function OnboardingFlow({ initialPopular, initialAnchorIds }: OnboardingF
       {titlesToShow.length > 0 ? (
         <ul className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
           {titlesToShow.map((title) => {
-            const isPicked = picked.has(title.id);
             const mediaTypeLabel = MEDIA_TYPE_LABEL[title.mediaType] ?? title.mediaType;
+            const entry = entryByTitleId.get(title.id);
             return (
               <li key={title.id}>
-                <button
-                  type="button"
-                  onClick={() => handlePick(title)}
-                  className={cn(
-                    'group block w-full text-left transition focus-visible:outline-none',
-                    isPicked && 'opacity-100',
-                  )}
-                  aria-pressed={isPicked}
+                <Link
+                  href={`/titles/${title.id}`}
+                  className="group block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
                 >
-                  <div
-                    className={cn(
-                      'relative aspect-[2/3] overflow-hidden rounded-lg border-2 bg-muted transition',
-                      isPicked
-                        ? 'border-foreground shadow-md'
-                        : 'border-transparent group-hover:border-input',
-                    )}
-                  >
+                  <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-border bg-muted transition group-hover:border-input">
                     {title.posterUrl ? (
                       <Image
                         src={title.posterUrl}
@@ -204,13 +185,8 @@ export function OnboardingFlow({ initialPopular, initialAnchorIds }: OnboardingF
                         className="object-cover"
                       />
                     ) : null}
-                    {isPicked ? (
-                      <span className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
-                        ✓
-                      </span>
-                    ) : null}
                   </div>
-                  <h3 className="mt-2 truncate text-sm font-medium text-foreground">
+                  <h3 className="mt-2 truncate text-sm font-medium text-foreground group-hover:underline">
                     {title.title}
                   </h3>
                   <p className="text-xs text-muted-foreground">
@@ -218,24 +194,29 @@ export function OnboardingFlow({ initialPopular, initialAnchorIds }: OnboardingF
                       .filter((s): s is string => Boolean(s))
                       .join(' · ')}
                   </p>
-                </button>
+                </Link>
+                <TitleQuickActions
+                  titleId={title.id}
+                  currentState={entry ? { status: entry.status, rating: entry.rating } : null}
+                  size="compact"
+                />
               </li>
             );
           })}
         </ul>
       ) : null}
 
-      {/* Sticky bottom bar — picked count + Continue. Always available;
-          no minimum-anchor gate so users who want to skip can. They can
-          return to /onboarding later if they want to add more. */}
+      {/* Sticky bottom bar — rated count + Continue. The user can skip
+          ahead with no ratings; we'd just have nothing to recommend
+          until they rate something. */}
       <div className="fixed inset-x-0 bottom-0 border-t border-border bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
           <p className="text-sm text-text-body">
-            <span className="font-semibold text-foreground">{picked.size}</span>{' '}
-            {picked.size === 1 ? 'title rated' : 'titles rated'}
+            <span className="font-semibold text-foreground">{ratedCount}</span>{' '}
+            {ratedCount === 1 ? 'title rated' : 'titles rated'}
           </p>
           <Button onClick={() => router.push('/')}>
-            {picked.size === 0 ? 'Skip for now' : 'Continue'}
+            {ratedCount === 0 ? 'Skip for now' : 'Continue'}
           </Button>
         </div>
       </div>
