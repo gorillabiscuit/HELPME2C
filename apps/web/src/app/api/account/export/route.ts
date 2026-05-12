@@ -23,22 +23,35 @@ import {
 // a download dialog.
 //
 // Schema versioning: the response includes
-// `schema: "helpme2c.account-export.v2"` — bumped from v1 in M9 when the
-// post-M3 user-data tables (watch_entries, recommendations, streaming
-// providers, rec feedback, group memberships, owned groups) were folded
-// in. Bump again when adding/renaming top-level keys.
+// `schema: "helpme2c.account-export.v3"` — bumped from v2 in this commit
+// when (a) group name was denormalised onto memberships, (b) the
+// owned-group invite token was redacted, and (c) the `excluded_from_export`
+// rationale list was added to the payload itself. Bump again when
+// adding/renaming top-level keys.
 //
 // Title metadata is denormalised in (every per-title row joins to
 // titles) so the export is human-readable without having to cross-
 // reference UUIDs against another file. Cost: a few extra fields per
 // row; benefit: a user opening the JSON sees show names directly.
 //
+// Exclusions are documented inline in `excluded_from_export` (in the
+// response body) — comment block below stays as the source-of-truth
+// rationale.
+//
 // Deliberately NOT included:
 //   - Clerk private_metadata (server-only by design — ADR-0012 §5)
 //   - Session tokens (security risk if leaked)
-//   - Other users' data (obvious)
+//   - Other users' data
 //   - Catalogue data not attributable to the user (titles table itself,
 //     tag taxonomy, theme mappings — these are public reference data)
+//   - anonymous_watch_signals (per ADR-0012 §2: post-deletion aggregate
+//     signal with no rejoin path to the original user — by construction
+//     not your data once anonymised)
+//   - Cookie / consent preferences (stored client-side in browser
+//     localStorage, never reaches our server)
+//   - Group invite tokens on owned groups (redacted to prevent
+//     inadvertent disclosure if the export is shared; visible in-app
+//     at /groups/<id>)
 export async function GET() {
   const { userId } = await auth();
   if (!userId) {
@@ -115,13 +128,18 @@ export async function GET() {
       })
       .from(recFeedback)
       .where(eq(recFeedback.userId, internalUserId)),
+    // Join groups so the user sees the group NAME, not just an opaque
+    // UUID. innerJoin is safe because FK CASCADE removes memberships
+    // when their group is deleted (per groupMemberships schema).
     db
       .select({
         groupId: groupMemberships.groupId,
+        groupName: groups.name,
         role: groupMemberships.role,
         joinedAt: groupMemberships.joinedAt,
       })
       .from(groupMemberships)
+      .innerJoin(groups, eq(groupMemberships.groupId, groups.id))
       .where(eq(groupMemberships.userId, internalUserId)),
     db.select().from(groups).where(eq(groups.ownerId, internalUserId)),
   ]);
@@ -165,8 +183,44 @@ export async function GET() {
   const clerkUser = await clerk.users.getUser(userId);
 
   const exportData = {
-    schema: 'helpme2c.account-export.v2',
+    schema: 'helpme2c.account-export.v3',
     exportedAt: new Date().toISOString(),
+    // Make the deliberate omissions visible to the recipient. A
+    // regulator or curious user shouldn't have to read our source to
+    // know what we're not exporting and why.
+    excluded_from_export: [
+      {
+        item: 'Clerk private metadata',
+        reason: 'Server-only by design per ADR-0012 §5.',
+      },
+      {
+        item: 'Session tokens',
+        reason: 'Security risk if the export is shared.',
+      },
+      {
+        item: "Other users' data",
+        reason: 'Not yours; visible only in-app within group contexts you can access.',
+      },
+      {
+        item: 'Catalogue reference data (titles, tags, themes)',
+        reason: 'Public reference data, not attributable to you.',
+      },
+      {
+        item: 'Anonymous post-deletion signals',
+        reason:
+          'ADR-0012 §2: aggregate rec signal preserved after account deletion with no rejoin path to you — by construction not your data once anonymised.',
+      },
+      {
+        item: 'Group invite tokens (owned groups)',
+        reason:
+          'Redacted to prevent inadvertent disclosure if you share this file. Visible in-app at /groups/<id>; rotate from there if needed.',
+      },
+      {
+        item: 'Cookie / consent preferences',
+        reason:
+          'Stored client-side in your browser localStorage; never reaches our server, so we have nothing to export here.',
+      },
+    ],
     user: {
       our_database: dbRow,
       clerk: clerkUserShape(clerkUser),
@@ -199,7 +253,8 @@ export async function GET() {
       owned: ownedGroupsRows.map((g) => ({
         id: g.id,
         name: g.name,
-        inviteToken: g.inviteToken,
+        // inviteToken redacted — see excluded_from_export above.
+        inviteToken: '[redacted]',
         createdAt: g.createdAt,
         updatedAt: g.updatedAt,
       })),
