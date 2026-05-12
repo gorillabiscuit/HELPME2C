@@ -35,30 +35,49 @@ const REC_LIMIT = 200;
 // there's no taste signal, so we write an empty rec list rather than running
 // the ML. The reader (M4 commit 5) detects empty items and renders the
 // "pick anchors to get personal recs" empty state.
+// Elo influence on the rating passed to the engine. Default Elo (1500)
+// adds 0; +200 Elo adds +2; -200 Elo subtracts 2. Clamped 1..10 so the
+// rated-title contract stays valid. Keeps the packages/ml engine
+// signature stable (it doesn't know about Elo) — the caller massages
+// the rating before passing.
+const ELO_BASELINE = 1500;
+const ELO_RATING_INFLUENCE_PER_POINT = 1 / 100;
+
+function effectiveRating(rating: number, eloScore: number | null): number {
+  if (eloScore === null) return rating;
+  const adjustment = (eloScore - ELO_BASELINE) * ELO_RATING_INFLUENCE_PER_POINT;
+  const adjusted = rating + adjustment;
+  return Math.max(1, Math.min(10, adjusted));
+}
+
 export async function recomputeUserRecommendations(userId: string): Promise<{ recCount: number }> {
   const userEntries = await db
     .select({
       titleId: watchEntries.titleId,
       kind: watchEntries.kind,
       rating: watchEntries.rating,
-      loved: watchEntries.loved,
+      eloScore: watchEntries.eloScore,
     })
     .from(watchEntries)
     .where(eq(watchEntries.userId, userId));
 
-  // Unified-taste model (per docs/UX_AUDIT.md): `loved` is the single
-  // source of truth for taste signal. A tracking entry (status=watching,
-  // rating=8) can be loved without overwriting its kind, and the
-  // historical kind='anchor' rows were backfilled to loved=true at
-  // migration time so legacy data still feeds the engine.
-  const anchors: AnchorPick[] = userEntries
-    .filter((e) => e.loved)
-    .map((e) => ({ titleId: e.titleId }));
-
-  // .filter() doesn't narrow non-null; flatMap with explicit narrowing does.
-  const ratings: RatedTitle[] = userEntries.flatMap((e) =>
-    e.kind === 'tracking' && e.rating !== null ? [{ titleId: e.titleId, rating: e.rating }] : [],
+  // Rated-taste model: "your taste" is the set of rated entries. Each
+  // entry's effective rating is the user's 1-10 score, adjusted by Elo
+  // from pairwise comparisons (if any). High-rated entries (≥ 9
+  // effective) get treated as anchors — the engine's anchor signal is
+  // high-weight, suitable for "this defines my taste" titles.
+  const anchorThreshold = 9;
+  const ratingEntries = userEntries.flatMap((e) =>
+    e.rating !== null
+      ? [{ titleId: e.titleId, rating: effectiveRating(e.rating, e.eloScore) }]
+      : [],
   );
+
+  const anchors: AnchorPick[] = ratingEntries
+    .filter((r) => r.rating >= anchorThreshold)
+    .map((r) => ({ titleId: r.titleId }));
+
+  const ratings: RatedTitle[] = ratingEntries;
 
   const userTitleIds = userEntries.map((e) => e.titleId);
   const emptyPayload: RecommendationsPayload = { schemaVersion: 1, items: [] };
