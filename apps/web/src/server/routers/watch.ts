@@ -1,6 +1,7 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
+import * as Sentry from '@sentry/nextjs';
 import {
   privacyLevelEnum,
   titles,
@@ -11,6 +12,28 @@ import {
 } from '../schema';
 import { resolveInternalUserId } from '../lib/resolve-user';
 import { protectedProcedure, router } from '../trpc';
+import { inngest, recommendUserEvent } from '@/inngest/client';
+
+// Fire-and-forget rec recompute trigger. The nightly cron at 04:00 UTC is
+// the floor; this event fires whenever a user's watch_entries change so
+// fresh picks show recommendations within seconds, not up to 24 hours.
+// Inngest debouncing on the recommendUser function (30s window per userId,
+// see recommend.ts) coalesces bursts — onboarding pick 6 anchors in
+// 10 seconds = one recompute, not six.
+//
+// If Inngest is unreachable we don't fail the user-facing mutation; the
+// nightly cron will catch up. Failure is logged to Sentry rather than
+// silently swallowed (CLAUDE.md §3 silent-catch ban).
+async function triggerRecomputeSafely(internalUserId: string): Promise<void> {
+  try {
+    await inngest.send(recommendUserEvent.create({ userId: internalUserId }));
+  } catch (err) {
+    Sentry.captureException(err, {
+      tags: { source: 'watch.router', op: 'trigger-recompute' },
+      extra: { internalUserId },
+    });
+  }
+}
 
 // Zod schemas auto-synced with the Drizzle pgEnum values — single source of
 // truth lives in apps/web/src/server/schema/watch.ts. Drift between Drizzle
@@ -163,6 +186,11 @@ export const watchRouter = router({
           `watch.upsert: no row returned for user=${userRow.id} title=${input.titleId}`,
         );
       }
+
+      // Fire even when fields the rec engine doesn't read changed
+      // (status, notes, episode, privacy). Cheaper to over-fire and let
+      // Inngest debounce than to track which fields are taste-relevant.
+      await triggerRecomputeSafely(userRow.id);
       return row;
     }),
 
@@ -183,6 +211,11 @@ export const watchRouter = router({
         )
         .returning({ id: watchEntries.id });
 
+      // Only recompute when something actually got removed. result.length
+      // can be 0 if the entry was already gone (idempotent remove path).
+      if (result.length > 0) {
+        await triggerRecomputeSafely(internalUserId);
+      }
       return { removed: result.length };
     }),
 });
