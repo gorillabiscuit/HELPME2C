@@ -1,8 +1,9 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import * as Sentry from '@sentry/nextjs';
 import {
+  pairwiseComparisons,
   privacyLevelEnum,
   titles,
   users,
@@ -13,6 +14,20 @@ import {
 import { resolveInternalUserId } from '../lib/resolve-user';
 import { protectedProcedure, router } from '../trpc';
 import { inngest, recommendUserEvent } from '@/inngest/client';
+
+// Elo constants. K=32 is standard for chess; same here. Starting Elo
+// is 1500 — a title's first comparison initialises both sides at 1500
+// if they haven't been compared yet, then runs the standard update.
+const ELO_K_FACTOR = 32;
+const ELO_STARTING = 1500;
+
+function eloExpected(a: number, b: number): number {
+  return 1 / (1 + Math.pow(10, (b - a) / 400));
+}
+
+function eloUpdate(current: number, expected: number, actual: 0 | 1): number {
+  return current + ELO_K_FACTOR * (actual - expected);
+}
 
 // Fire-and-forget rec recompute trigger. The nightly cron at 04:00 UTC is
 // the floor; this event fires whenever a user's watch_entries change so
@@ -197,82 +212,219 @@ export const watchRouter = router({
       return row;
     }),
 
-  // Toggle "I love this — treat as taste-defining." Unified-taste model
-  // (docs/UX_AUDIT.md): the user can love a title from anywhere it
-  // appears — rec card, title detail, library — without having to
-  // navigate to /taste.
-  //
-  // Insert path (no existing entry, loved=true): create kind='anchor'
-  // with loved=true. The row is purely a taste expression — no claim
-  // about having watched it.
-  //
-  // Update path (existing tracking entry): only flip `loved`. The
-  // existing status/rating/notes are preserved — a tracking entry stays
-  // tracking with its watching state intact, just now also loved.
-  //
-  // Unlove path (loved=false on an anchor-only row): delete the row
-  // entirely. An unloved anchor-only entry is an orphan — it'd
-  // suppress the title from rec candidates (library-filter) without
-  // contributing any taste signal. Deletion is the only correctness-
-  // preserving choice.
-  setLoved: protectedProcedure
-    .input(z.object({ titleId: titleIdSchema, loved: z.boolean() }))
+  // Returns the current user's "taste" — every rated entry, ordered by
+  // (manual_rank if set) → (elo_score if set) → (rating). Includes title
+  // metadata for inline rendering. Used by the /taste page's ranked
+  // view + as the candidate pool for pairwise comparisons.
+  taste: protectedProcedure.query(async ({ ctx }) => {
+    const internalUserId = await resolveInternalUserId(ctx.db, ctx.userId);
+    if (!internalUserId) return [];
+
+    return ctx.db
+      .select({
+        titleId: watchEntries.titleId,
+        rating: watchEntries.rating,
+        eloScore: watchEntries.eloScore,
+        manualRank: watchEntries.manualRank,
+        status: watchEntries.status,
+        title: {
+          id: titles.id,
+          title: titles.title,
+          mediaType: titles.mediaType,
+          releaseYear: titles.releaseYear,
+          posterUrl: titles.posterUrl,
+        },
+      })
+      .from(watchEntries)
+      .innerJoin(titles, eq(watchEntries.titleId, titles.id))
+      .where(and(eq(watchEntries.userId, internalUserId), isNotNull(watchEntries.rating)))
+      .orderBy(
+        // Custom ordering: manual_rank ASC NULLS LAST, then elo DESC NULLS LAST,
+        // then rating DESC. Drizzle's helper doesn't expose this combo cleanly
+        // so we drop to a sql template — sortable + indexable since both
+        // columns are simple types.
+        sql`${watchEntries.manualRank} ASC NULLS LAST`,
+        sql`${watchEntries.eloScore} DESC NULLS LAST`,
+        desc(watchEntries.rating),
+      );
+  }),
+
+  // Bulk-set manual_rank by reading the new ordered titleId list.
+  // Position in the array becomes manual_rank (1-indexed, lower=higher
+  // in the list). Used by the /taste page's drag-to-reorder UI. Sends
+  // the whole list rather than per-row deltas because that's robust
+  // against concurrent edits and avoids gap arithmetic.
+  setRankedOrder: protectedProcedure
+    .input(z.object({ orderedTitleIds: z.array(z.string().uuid()).max(500) }))
     .mutation(async ({ ctx, input }) => {
-      const [userRow] = await ctx.db
-        .select({ id: users.id, defaultPrivacy: users.defaultPrivacy })
-        .from(users)
-        .where(eq(users.clerkId, ctx.userId))
-        .limit(1);
-      if (!userRow) {
+      const internalUserId = await resolveInternalUserId(ctx.db, ctx.userId);
+      if (!internalUserId) {
         throw new TRPCError({
           code: 'NOT_FOUND',
           message: 'User row not found — was me.ensure called for this session?',
         });
       }
 
-      // Smart-delete path: unloving an anchor-only entry removes it.
-      if (!input.loved) {
-        const [existing] = await ctx.db
-          .select({ kind: watchEntries.kind })
-          .from(watchEntries)
-          .where(and(eq(watchEntries.userId, userRow.id), eq(watchEntries.titleId, input.titleId)))
-          .limit(1);
-        if (existing && existing.kind === 'anchor') {
-          await ctx.db
-            .delete(watchEntries)
-            .where(
-              and(eq(watchEntries.userId, userRow.id), eq(watchEntries.titleId, input.titleId)),
-            );
-          await triggerRecomputeSafely(userRow.id);
-          return { titleId: input.titleId, loved: false, removed: true };
-        }
-        // else: tracking entry → fall through to upsert, just flips loved
-      }
+      if (input.orderedTitleIds.length === 0) return { updated: 0 };
 
-      const [row] = await ctx.db
-        .insert(watchEntries)
-        .values({
-          userId: userRow.id,
-          titleId: input.titleId,
-          kind: 'anchor',
-          privacy: userRow.defaultPrivacy,
-          loved: input.loved,
+      // Build a single CASE expression: manual_rank = CASE title_id WHEN ... THEN n ...
+      // One UPDATE statement, atomic per-row from the user's POV.
+      const cases = sql.join(
+        input.orderedTitleIds.map(
+          (titleId, idx) => sql`WHEN ${watchEntries.titleId} = ${titleId} THEN ${idx + 1}`,
+        ),
+        sql` `,
+      );
+
+      const result = await ctx.db
+        .update(watchEntries)
+        .set({
+          manualRank: sql`CASE ${cases} END`,
+          updatedAt: new Date(),
         })
-        .onConflictDoUpdate({
-          target: [watchEntries.userId, watchEntries.titleId],
-          set: { loved: input.loved, updatedAt: new Date() },
-        })
-        .returning();
+        .where(
+          and(
+            eq(watchEntries.userId, internalUserId),
+            inArray(watchEntries.titleId, input.orderedTitleIds),
+          ),
+        )
+        .returning({ id: watchEntries.id });
 
-      if (!row) {
-        throw new Error(
-          `watch.setLoved: no row returned for user=${userRow.id} title=${input.titleId}`,
-        );
-      }
-
-      await triggerRecomputeSafely(userRow.id);
-      return { titleId: input.titleId, loved: row.loved, removed: false };
+      await triggerRecomputeSafely(internalUserId);
+      return { updated: result.length };
     }),
+
+  // Record a pairwise comparison: user said winner is preferred to
+  // loser. Updates Elo on both watch_entries rows (initialising at
+  // ELO_STARTING if either is null) and appends a row to
+  // pairwise_comparisons for audit / re-derivation.
+  //
+  // Both rows must already exist (i.e. the user has rated both
+  // titles); we error if not, because pairwise comparison without a
+  // base rating is meaningless under the rated-taste model.
+  recordPairwise: protectedProcedure
+    .input(
+      z
+        .object({
+          winnerTitleId: z.string().uuid(),
+          loserTitleId: z.string().uuid(),
+        })
+        .refine((d) => d.winnerTitleId !== d.loserTitleId, {
+          message: 'Winner and loser must be different titles',
+        }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const internalUserId = await resolveInternalUserId(ctx.db, ctx.userId);
+      if (!internalUserId) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'User row not found — was me.ensure called for this session?',
+        });
+      }
+
+      const rows = await ctx.db
+        .select({
+          titleId: watchEntries.titleId,
+          eloScore: watchEntries.eloScore,
+        })
+        .from(watchEntries)
+        .where(
+          and(
+            eq(watchEntries.userId, internalUserId),
+            inArray(watchEntries.titleId, [input.winnerTitleId, input.loserTitleId]),
+          ),
+        );
+
+      if (rows.length !== 2) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Both titles must already be in your taste to compare them.',
+        });
+      }
+
+      const winnerRow = rows.find((r) => r.titleId === input.winnerTitleId);
+      const loserRow = rows.find((r) => r.titleId === input.loserTitleId);
+      if (!winnerRow || !loserRow) {
+        // Belt-and-braces — the count check above implies this can't happen.
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Pair lookup failed.' });
+      }
+
+      const winnerElo = winnerRow.eloScore ?? ELO_STARTING;
+      const loserElo = loserRow.eloScore ?? ELO_STARTING;
+      const expectedWin = eloExpected(winnerElo, loserElo);
+      const newWinnerElo = eloUpdate(winnerElo, expectedWin, 1);
+      const newLoserElo = eloUpdate(loserElo, 1 - expectedWin, 0);
+
+      // Two updates + one log insert. Run sequentially — the log
+      // insert is non-critical (it's audit, not correctness), so if
+      // updates land but log fails the comparison still took effect.
+      await ctx.db
+        .update(watchEntries)
+        .set({ eloScore: newWinnerElo, updatedAt: new Date() })
+        .where(
+          and(
+            eq(watchEntries.userId, internalUserId),
+            eq(watchEntries.titleId, input.winnerTitleId),
+          ),
+        );
+      await ctx.db
+        .update(watchEntries)
+        .set({ eloScore: newLoserElo, updatedAt: new Date() })
+        .where(
+          and(
+            eq(watchEntries.userId, internalUserId),
+            eq(watchEntries.titleId, input.loserTitleId),
+          ),
+        );
+      await ctx.db.insert(pairwiseComparisons).values({
+        userId: internalUserId,
+        winnerTitleId: input.winnerTitleId,
+        loserTitleId: input.loserTitleId,
+      });
+
+      await triggerRecomputeSafely(internalUserId);
+      return {
+        winnerTitleId: input.winnerTitleId,
+        loserTitleId: input.loserTitleId,
+        winnerElo: newWinnerElo,
+        loserElo: newLoserElo,
+      };
+    }),
+
+  // Returns two rated titles for the user to compare. v1 strategy:
+  // sample two at random from rated entries. Future improvements
+  // (pair-by-Elo-closeness, avoid recent repeats) are deferred —
+  // random is enough for the first cut.
+  getPairwisePair: protectedProcedure.query(async ({ ctx }) => {
+    const internalUserId = await resolveInternalUserId(ctx.db, ctx.userId);
+    if (!internalUserId) return null;
+
+    // ORDER BY RANDOM() + LIMIT 2 is the simplest correct approach.
+    // For Phase 1A scale (a user's rated set is in the dozens, not
+    // thousands) the table-scan cost is negligible. Above ~10k rated
+    // titles per user we'd switch to a TABLESAMPLE or maintain a
+    // shuffled cursor.
+    const rows = await ctx.db
+      .select({
+        titleId: watchEntries.titleId,
+        title: {
+          id: titles.id,
+          title: titles.title,
+          mediaType: titles.mediaType,
+          releaseYear: titles.releaseYear,
+          posterUrl: titles.posterUrl,
+        },
+      })
+      .from(watchEntries)
+      .innerJoin(titles, eq(watchEntries.titleId, titles.id))
+      .where(and(eq(watchEntries.userId, internalUserId), isNotNull(watchEntries.rating)))
+      .orderBy(sql`RANDOM()`)
+      .limit(2);
+
+    const [a, b] = rows;
+    if (!a || !b) return null;
+    return { a, b };
+  }),
 
   // Remove the current user's entry for a single title. Idempotent —
   // returns the count so callers can verify (0 means there was no entry).

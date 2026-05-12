@@ -44,10 +44,10 @@ export function FirstVisitCallout() {
       <div className="min-w-0 flex-1">
         <h2 className="text-base font-semibold text-foreground">Your first recommendations</h2>
         <p className="mt-1 text-sm text-text-body">
-          These are based on the favourites you just picked. As you mark titles{' '}
-          <strong>Watched it</strong>, hit <strong>Love this</strong> on shows you adore, or rate
-          recs that hit or miss — we get sharper every time. There&apos;s no separate &ldquo;train
-          the model&rdquo; step; everything you do here shapes what we suggest next.
+          These are based on the shows you rated. As you watch more, rate what you&apos;ve seen, or
+          mark things you&apos;re not interested in — we get sharper every time. There&apos;s no
+          separate &ldquo;train the model&rdquo; step; everything you do here shapes what we suggest
+          next.
         </p>
       </div>
       <button

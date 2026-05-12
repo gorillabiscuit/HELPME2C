@@ -1,5 +1,6 @@
 import {
   boolean,
+  doublePrecision,
   index,
   integer,
   pgEnum,
@@ -78,12 +79,25 @@ export const watchEntries = pgTable(
 
     privacy: privacyLevelEnum('privacy').notNull().default('private'),
 
-    // "I love this — treat it as taste-defining." The unified-taste model
-    // (see docs/UX_AUDIT.md) drops the user-facing distinction between
-    // anchors and tracked entries: a tracking row (status=watching,
-    // rating=8) can ALSO be loved without overwriting its kind. Rec
-    // engine treats kind='anchor' OR loved=true as a high-weight signal.
+    // DEPRECATED — kept for backward compatibility with the unified-taste
+    // model commit. Under the rated-taste model (current): "your taste"
+    // is the set of rated entries, ordered by `manual_rank` (if set),
+    // then `elo_score`, then `rating`. `loved` is no longer read by
+    // anything; column will be dropped once the data has migrated and
+    // we're confident there's no rollback.
     loved: boolean('loved').notNull().default(false),
+
+    // User's explicit position in the ranked taste list. Set by the
+    // drag-to-reorder UI. Lower = ranked higher. NULL means "no manual
+    // rank set" — sort by Elo / rating instead. Sparse: most rows will
+    // be NULL since drag is a power-user affordance.
+    manualRank: integer('manual_rank'),
+
+    // Elo rating from pairwise comparisons. Defaults to NULL until the
+    // user does their first comparison involving this title. Initialised
+    // to 1500 (standard starting Elo) on first comparison. Updated by
+    // K-factor=32 on each comparison win/loss.
+    eloScore: doublePrecision('elo_score'),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -96,6 +110,46 @@ export const watchEntries = pgTable(
     // "Show me this user's list filtered by status" — the most common
     // expected query shape on the M3 list/dashboard surface.
     index('watch_entries_user_status_idx').on(t.userId, t.status),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Pairwise comparisons — Elo-driven taste ranking.
+// ---------------------------------------------------------------------------
+//
+// Each row records "user said winner is preferred to loser." Used to
+// derive Elo scores on watch_entries.elo_score. We log every comparison
+// rather than just updating the score in-place because:
+//   - Re-deriving Elo from scratch is possible if the K-factor changes
+//     or we want to weight recent comparisons more heavily.
+//   - Auditability for the rec engine ("show me which pairs drove this
+//     user's top recs").
+//
+// Both title FKs cascade on title delete (if the title is gone, the
+// comparison is moot). User FK cascade follows the same pattern as
+// watch_entries — on user erasure the comparisons are removed via the
+// user FK; the Elo scores on watch_entries are also gone via cascade
+// there. No anonymisation needed here because the data is per-user
+// preference, not aggregable signal.
+export const pairwiseComparisons = pgTable(
+  'pairwise_comparisons',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    winnerTitleId: uuid('winner_title_id')
+      .notNull()
+      .references(() => titles.id, { onDelete: 'cascade' }),
+    loserTitleId: uuid('loser_title_id')
+      .notNull()
+      .references(() => titles.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // "What has this user compared lately" — for the pairwise UI to avoid
+    // showing the same pair twice in a session.
+    index('pairwise_user_created_idx').on(t.userId, t.createdAt),
   ],
 );
 

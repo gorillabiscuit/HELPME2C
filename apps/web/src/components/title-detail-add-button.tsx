@@ -1,14 +1,13 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { Heart } from 'lucide-react';
+import { useState } from 'react';
+import { Bookmark, Check } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { Button } from '@/components/ui/button';
 import { LibraryEditDialog } from '@/components/library-edit-dialog';
 import { cn } from '@/lib/utils';
 
-// Minimal shape — declared inline rather than imported from @/server/* so
-// the client bundle doesn't pull in server-side schema modules.
 type WatchKind = 'anchor' | 'tracking';
 type WatchStatus = 'watching' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_watch';
 
@@ -19,7 +18,6 @@ interface InitialEntry {
   currentEpisode: number | null;
   notes: string | null;
   privacy: 'public' | 'private' | 'friends' | null;
-  loved: boolean;
 }
 
 interface TitleDetailAddButtonProps {
@@ -31,25 +29,22 @@ interface TitleDetailAddButtonProps {
 
 const STATUS_LABEL: Record<WatchStatus, string> = {
   watching: 'Watching',
-  completed: 'Completed',
+  completed: 'Watched',
   on_hold: 'On hold',
   dropped: 'Dropped',
-  plan_to_watch: 'Plan to watch',
+  plan_to_watch: 'Want to watch',
 };
 
-// Title-detail action area under the unified-taste model. Two orthogonal
-// affordances live side-by-side:
+// Title-detail action area under the rated-taste model.
 //
-//   1. ♥ Love toggle — always present. Reflects loved=true regardless
-//      of whether the user has also tracked the title in their library.
-//      Adds to "your taste."
-//   2. Library row — either an "Add to library" button (no tracking row
-//      yet) or "In your library · {status}" + Edit (tracking row exists).
+// No prior entry → two intent buttons:
+//   - "Want to watch" (status=plan_to_watch)
+//   - "I've seen it" → expands a 1-10 rating row; submit marks
+//     status=completed and the chosen rating (or skip).
 //
-// Clicking ♥ writes a kind='anchor' row if none exists, or just flips
-// the loved flag on an existing row. Clicking "Add to library" upserts
-// kind='tracking' + status=plan_to_watch — graduates an anchor-only
-// row to tracking without losing the loved flag.
+// Prior entry → status badge + Edit dialog. Editing the entry is where
+// status, rating, episode progress, and notes change. The dialog is
+// shared with the library list.
 export function TitleDetailAddButton({
   titleId,
   titleText,
@@ -57,82 +52,107 @@ export function TitleDetailAddButton({
   initialEntry,
 }: TitleDetailAddButtonProps) {
   const router = useRouter();
+  const [ratingOpen, setRatingOpen] = useState(false);
 
   const upsertMutation = trpc.watch.upsert.useMutation({
-    onSuccess: () => router.refresh(),
+    onSuccess: () => {
+      setRatingOpen(false);
+      router.refresh();
+    },
   });
-  const setLovedMutation = trpc.watch.setLoved.useMutation({
-    onSuccess: () => router.refresh(),
-  });
 
-  const isLoved = initialEntry?.loved === true;
-  const hasTrackingEntry = initialEntry?.kind === 'tracking';
-  const statusLabel =
-    initialEntry?.status && STATUS_LABEL[initialEntry.status]
-      ? STATUS_LABEL[initialEntry.status]
-      : null;
-
-  const onLoveToggle = () => {
-    setLovedMutation.mutate({ titleId, loved: !isLoved });
-  };
-
-  const onAddToLibrary = () => {
+  const onWantToWatch = () => {
     upsertMutation.mutate({ titleId, kind: 'tracking', status: 'plan_to_watch' });
   };
 
-  const anyPending = setLovedMutation.isPending || upsertMutation.isPending;
+  const onWatchedWithRating = (rating: number | null) => {
+    upsertMutation.mutate(
+      rating === null
+        ? { titleId, kind: 'tracking', status: 'completed' }
+        : { titleId, kind: 'tracking', status: 'completed', rating },
+    );
+  };
+
+  // No entry yet — show the two intent buttons.
+  if (!initialEntry) {
+    return (
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button onClick={onWantToWatch} disabled={upsertMutation.isPending} variant="outline">
+            <Bookmark className="h-4 w-4" aria-hidden="true" />
+            Want to watch
+          </Button>
+          <Button
+            onClick={() => setRatingOpen((v) => !v)}
+            disabled={upsertMutation.isPending}
+            aria-expanded={ratingOpen}
+          >
+            <Check className="h-4 w-4" aria-hidden="true" />
+            I&apos;ve seen it
+          </Button>
+        </div>
+
+        {ratingOpen ? (
+          <div className="rounded-md border border-border bg-muted/40 p-3">
+            <p className="mb-2 text-xs uppercase tracking-wider text-muted-foreground">
+              How would you rate it? (10 = loved it · 1 = hated it)
+            </p>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => onWatchedWithRating(n)}
+                  disabled={upsertMutation.isPending}
+                  className={cn(
+                    'h-8 w-8 rounded-md border border-border bg-white text-sm font-medium text-foreground transition-colors hover:bg-foreground hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-50',
+                    n >= 9 && 'border-foreground/60',
+                  )}
+                >
+                  {n}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => onWatchedWithRating(null)}
+                disabled={upsertMutation.isPending}
+                className="ml-1 rounded-md border border-border bg-white px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
+              >
+                Skip rating
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  // Entry exists — show status + rating, with Edit dialog to change.
+  const statusLabel =
+    initialEntry.status && STATUS_LABEL[initialEntry.status]
+      ? STATUS_LABEL[initialEntry.status]
+      : 'In your library';
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      {/* ♥ Love toggle */}
-      <button
-        type="button"
-        onClick={onLoveToggle}
-        disabled={anyPending}
-        aria-pressed={isLoved}
-        title={
-          isLoved
-            ? "Remove from your taste — we won't weight this when recommending."
-            : "Add to your taste — we'll recommend more like this."
-        }
-        className={cn(
-          'inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-50',
-          isLoved
-            ? 'border-foreground bg-foreground text-primary-foreground hover:bg-foreground/90'
-            : 'border-border text-foreground hover:border-input hover:bg-muted',
-        )}
-      >
-        <Heart className={cn('h-4 w-4', isLoved ? 'fill-current' : '')} aria-hidden="true" />
-        <span>{isLoved ? 'Loved' : 'Love this'}</span>
-      </button>
-
-      {/* Library row */}
-      {hasTrackingEntry ? (
-        <div className="inline-flex items-center gap-2">
-          <span className="inline-flex items-center rounded-md border border-border bg-muted px-3 py-1.5 text-sm font-medium text-foreground">
-            In your library · {statusLabel ?? 'On your list'}
-            {initialEntry?.rating !== null && initialEntry?.rating !== undefined ? (
-              <span className="ml-2 text-muted-foreground">· {initialEntry.rating}/10</span>
-            ) : null}
-          </span>
-          <LibraryEditDialog
-            titleId={titleId}
-            titleText={titleText}
-            hasEpisodes={hasEpisodes}
-            initialEntry={{
-              status: initialEntry?.status ?? null,
-              rating: initialEntry?.rating ?? null,
-              currentEpisode: initialEntry?.currentEpisode ?? null,
-              notes: initialEntry?.notes ?? null,
-              privacy: initialEntry?.privacy ?? null,
-            }}
-          />
-        </div>
-      ) : (
-        <Button onClick={onAddToLibrary} disabled={anyPending} variant="outline">
-          {upsertMutation.isPending ? 'Adding…' : 'Add to library'}
-        </Button>
-      )}
+    <div className="inline-flex flex-wrap items-center gap-2">
+      <span className="inline-flex items-center rounded-md border border-border bg-muted px-3 py-1.5 text-sm font-medium text-foreground">
+        In your library · {statusLabel}
+        {initialEntry.rating !== null ? (
+          <span className="ml-2 text-muted-foreground">· {initialEntry.rating}/10</span>
+        ) : null}
+      </span>
+      <LibraryEditDialog
+        titleId={titleId}
+        titleText={titleText}
+        hasEpisodes={hasEpisodes}
+        initialEntry={{
+          status: initialEntry.status,
+          rating: initialEntry.rating,
+          currentEpisode: initialEntry.currentEpisode,
+          notes: initialEntry.notes,
+          privacy: initialEntry.privacy,
+        }}
+      />
     </div>
   );
 }

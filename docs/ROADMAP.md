@@ -166,11 +166,11 @@ Per [PROJECT.md](../PROJECT.md) cut-line, confirmed during the mapping session:
 
 - Ghost profiles for unregistered group members → 1B
 - Mood / context layer on recommendations → 1B
-- **Taste Refinement enhancements (`/taste` surface)** — the basic anchor-picker grid + media-type filter ships under v1 as part of M3/M10 polish (the surface itself, see M3 note below). The deeper signal-gathering modes are deferred:
-  - **Pairwise / Elo comparisons** — "A vs B" choices, updates a per-(user, title) Elo score. Materially higher signal than 1–10 ratings for collaborative filtering.
-  - **Manual drag-and-drop ranking** — user directly reorders their ranked list; rank becomes a rec-engine signal weight.
-  - **Category-scoped refinement** — rank within a slice (e.g. anime only, comedies only) so the surface stays usable as the user's library grows.
-  Needs M4 + M6 live first (rec engine must consume the new signals; feedback loop must be closed so we can observe whether Elo-tuned recs outperform). → 1B
+- ~~Taste Refinement enhancements~~ — **moved to v1A** as the rated-taste reframe. `/taste` is now a three-tab workspace: drag-to-reorder ranked list, pairwise Elo comparisons, and add-via-picker. The "anchor" concept was dropped entirely (logically incoherent: you can't love something you haven't watched) — taste is now the set of rated entries, ordered. Future polish for this surface:
+  - Category-scoped refinement (rank within a slice — anime only, comedies only).
+  - Smarter pair selection in Compare mode (pair-by-Elo-closeness, avoid recent repeats).
+  - Keyboard a11y for drag reorder.
+  → 1B
 - Behavioral mental-state inference → speculative, Phase 2+ at earliest, may never ship
 - Email feedback trigger + transactional email infrastructure → 1B
 - React Native mobile app → 2
