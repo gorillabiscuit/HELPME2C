@@ -41,12 +41,18 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
       titleId: watchEntries.titleId,
       kind: watchEntries.kind,
       rating: watchEntries.rating,
+      loved: watchEntries.loved,
     })
     .from(watchEntries)
     .where(eq(watchEntries.userId, userId));
 
+  // Unified-taste model (per docs/UX_AUDIT.md): treat any entry that is
+  // EITHER kind='anchor' OR loved=true as a high-weight taste signal. The
+  // 'loved' flag lets a tracking entry (status=watching, rating=8) also
+  // participate as taste-defining without overwriting its kind. From the
+  // engine's perspective these are interchangeable.
   const anchors: AnchorPick[] = userEntries
-    .filter((e) => e.kind === 'anchor')
+    .filter((e) => e.kind === 'anchor' || e.loved)
     .map((e) => ({ titleId: e.titleId }));
 
   // .filter() doesn't narrow non-null; flatMap with explicit narrowing does.
