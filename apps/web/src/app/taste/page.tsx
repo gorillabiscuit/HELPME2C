@@ -17,11 +17,12 @@ export default async function TastePage() {
     caller.watch.list(),
   ]);
 
-  // Unified-taste model: favourites are loved=true entries (regardless
-  // of kind). See docs/UX_AUDIT.md for the reframe.
-  const initialFavouriteIds = watchEntries
-    .filter(({ entry }) => entry.loved)
+  // Rated-taste model: pre-fill the picker with rated entries (any
+  // rating). The picker writes rating=10 on click; user can refine
+  // ratings on title detail pages.
+  const initialRatedIds = watchEntries
+    .filter(({ entry }) => entry.rating !== null)
     .map(({ title }) => title.id);
 
-  return <TastePicker initialPopular={popularTitles} initialAnchorIds={initialFavouriteIds} />;
+  return <TastePicker initialPopular={popularTitles} initialAnchorIds={initialRatedIds} />;
 }

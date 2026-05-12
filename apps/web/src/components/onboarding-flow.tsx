@@ -62,24 +62,29 @@ export function OnboardingFlow({ initialPopular, initialAnchorIds }: OnboardingF
     { enabled: searchEnabled },
   );
 
-  // Unified-taste model: picking a poster sets loved=true (which writes
-  // a kind='anchor' row if one doesn't already exist). Unpicking sets
-  // loved=false, which the server interprets as remove-if-anchor-only.
-  const setLovedMutation = trpc.watch.setLoved.useMutation();
+  // Rated-taste model: picking a poster says "I've watched this and
+  // loved it — rate it 10/10." Writes a tracking entry with
+  // status=completed + rating=10. Unpicking removes the entry. The
+  // user can refine the rating later from the title detail page.
+  const upsertMutation = trpc.watch.upsert.useMutation();
+  const removeMutation = trpc.watch.remove.useMutation();
 
   const handlePick = (title: TitleSummary) => {
     if (picked.has(title.id)) {
-      // Optimistic toggle off; mutation runs in background. Page reload
-      // would resync if the mutation ever failed.
       setPicked((p) => {
         const next = new Set(p);
         next.delete(title.id);
         return next;
       });
-      setLovedMutation.mutate({ titleId: title.id, loved: false });
+      removeMutation.mutate({ titleId: title.id });
     } else {
       setPicked((p) => new Set(p).add(title.id));
-      setLovedMutation.mutate({ titleId: title.id, loved: true });
+      upsertMutation.mutate({
+        titleId: title.id,
+        kind: 'tracking',
+        status: 'completed',
+        rating: 10,
+      });
     }
   };
 
@@ -104,8 +109,8 @@ export function OnboardingFlow({ initialPopular, initialAnchorIds }: OnboardingF
               Step 1 · Now
             </h2>
             <p className="mt-2 text-base text-foreground">
-              Pick a handful of titles you love. These are your <strong>favourites</strong> —
-              they&apos;re what we use to start understanding your taste.
+              Rate a few shows you&apos;ve watched and loved. Each pick says &ldquo;I love
+              this&rdquo; — we use that to start understanding your taste.
             </p>
           </div>
           <div>
@@ -138,11 +143,11 @@ export function OnboardingFlow({ initialPopular, initialAnchorIds }: OnboardingF
   return (
     <main className="mx-auto max-w-5xl px-6 pt-12 pb-32">
       <header className="mb-8 max-w-2xl">
-        <h1 className="text-4xl font-semibold tracking-tight">Pick a few favourites</h1>
+        <h1 className="text-4xl font-semibold tracking-tight">Rate shows you&apos;ve loved</h1>
         <p className="mt-3 text-base text-text-body">
-          Anything you&apos;d recommend to a friend. Click a poster to add it; click again to
-          remove. Five or six is plenty to start — you can add more anytime from <em>Your taste</em>
-          .
+          Click a poster you&apos;ve watched and loved — that&apos;s a 10/10 rating, and it teaches
+          us your taste. Five or six is plenty to start; you can refine ratings and add more anytime
+          from <em>Your taste</em>.
         </p>
       </header>
 
@@ -227,7 +232,7 @@ export function OnboardingFlow({ initialPopular, initialAnchorIds }: OnboardingF
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
           <p className="text-sm text-text-body">
             <span className="font-semibold text-foreground">{picked.size}</span>{' '}
-            {picked.size === 1 ? 'favourite' : 'favourites'} picked
+            {picked.size === 1 ? 'title rated' : 'titles rated'}
           </p>
           <Button onClick={() => router.push('/')}>
             {picked.size === 0 ? 'Skip for now' : 'Continue'}

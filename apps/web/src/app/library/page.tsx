@@ -6,7 +6,6 @@ import { appRouter } from '@/server/router';
 import { createContext } from '@/server/trpc';
 import { LibraryEditDialog } from '@/components/library-edit-dialog';
 import { LibraryRemoveButton } from '@/components/library-remove-button';
-import { LoveToggle } from '@/components/love-toggle';
 
 const STATUS_LABEL: Record<string, string> = {
   watching: 'Watching',
@@ -54,7 +53,7 @@ export default async function LibraryPage() {
         </div>
         <p className="mt-2 text-base text-text-body">
           Everything you&apos;re tracking — what you&apos;ve watched, what you&apos;re watching, and
-          what&apos;s on deck. Tap the heart on any row to add a title to your taste.
+          what you want to watch next. Ratings here shape your recommendations.
         </p>
       </header>
 
@@ -119,7 +118,6 @@ export default async function LibraryPage() {
                 </div>
 
                 <div className="flex flex-none items-center gap-2 text-xs">
-                  <LoveToggle titleId={title.id} initialLoved={entry.loved} />
                   {entry.rating !== null ? (
                     <span className="font-medium text-foreground">{entry.rating}/10</span>
                   ) : (

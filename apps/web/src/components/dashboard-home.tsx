@@ -1,6 +1,6 @@
 import Image from 'next/image';
 import Link from 'next/link';
-import { Heart, Users } from 'lucide-react';
+import { Star, Users } from 'lucide-react';
 import { FirstVisitCallout } from '@/components/first-visit-callout';
 import { RecCardActions } from '@/components/rec-card-actions';
 
@@ -77,8 +77,8 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
         <h1 className="mt-1 text-4xl font-semibold tracking-tight">Your recommendations</h1>
         <p className="mt-3 max-w-2xl text-base text-text-body">
           {recs.length} {recs.length === 1 ? 'title' : 'titles'} picked for you based on what
-          you&apos;ve loved and watched. Every action — *Love this*, *Watched it*, *Not interested*,
-          *Rate* — refines what we suggest.
+          you&apos;ve rated and watched. Every action — <em>Watched it</em>, <em>Want to watch</em>,{' '}
+          <em>Not interested</em> — refines what we suggest.
         </p>
 
         {filter.active ? (
@@ -141,12 +141,12 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
           className="group flex items-start gap-4 rounded-lg border border-border bg-white p-5 transition hover:border-input hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
         >
           <span className="flex h-10 w-10 flex-none items-center justify-center rounded-md bg-primary/10 text-primary">
-            <Heart className="h-5 w-5" aria-hidden="true" />
+            <Star className="h-5 w-5" aria-hidden="true" />
           </span>
           <span className="min-w-0">
             <span className="block text-base font-semibold text-foreground">Want better recs?</span>
             <span className="mt-1 block text-sm text-text-body">
-              Tell us more about your taste — add favourites, rate what you&apos;ve watched.
+              Rate more shows you&apos;ve watched — every rating sharpens what we suggest next.
             </span>
           </span>
         </Link>

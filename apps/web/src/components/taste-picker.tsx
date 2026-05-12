@@ -84,10 +84,11 @@ export function TastePicker({ initialPopular, initialAnchorIds }: TastePickerPro
     { enabled: searchEnabled },
   );
 
-  // Unified-taste model: picking a poster sets loved=true (which writes
-  // a kind='anchor' row if one doesn't already exist). Unpicking sets
-  // loved=false, which the server interprets as remove-if-anchor-only.
-  const setLovedMutation = trpc.watch.setLoved.useMutation();
+  // Rated-taste model: click = "I love this" = tracking + completed +
+  // rating=10. Click again = remove. Users refine ratings on title
+  // detail pages; the picker is for fast "this defines me" entry.
+  const upsertMutation = trpc.watch.upsert.useMutation();
+  const removeMutation = trpc.watch.remove.useMutation();
 
   const handlePick = (title: TitleSummary) => {
     if (picked.has(title.id)) {
@@ -96,10 +97,15 @@ export function TastePicker({ initialPopular, initialAnchorIds }: TastePickerPro
         next.delete(title.id);
         return next;
       });
-      setLovedMutation.mutate({ titleId: title.id, loved: false });
+      removeMutation.mutate({ titleId: title.id });
     } else {
       setPicked((p) => new Set(p).add(title.id));
-      setLovedMutation.mutate({ titleId: title.id, loved: true });
+      upsertMutation.mutate({
+        titleId: title.id,
+        kind: 'tracking',
+        status: 'completed',
+        rating: 10,
+      });
     }
   };
 
@@ -226,7 +232,7 @@ export function TastePicker({ initialPopular, initialAnchorIds }: TastePickerPro
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
           <p className="text-sm text-text-body">
             <span className="font-semibold text-foreground">{picked.size}</span>{' '}
-            {picked.size === 1 ? 'favourite' : 'favourites'}
+            {picked.size === 1 ? 'title rated' : 'titles rated'}
           </p>
           <Link
             href="/"
