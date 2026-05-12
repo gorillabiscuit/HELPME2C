@@ -18,7 +18,7 @@ export default async function ImportPage() {
       <p className="mt-2 text-sm text-text-body">
         Bring your existing anime list across so HelpME2C&apos;s recommendations can learn from it.
         We&apos;ll match titles to our catalogue and add them as &lsquo;tracking&rsquo; entries with
-        your status + rating preserved. Existing anchor picks stay untouched.
+        your status + rating preserved. Existing favourites stay untouched.
       </p>
 
       <Card className="mt-8">

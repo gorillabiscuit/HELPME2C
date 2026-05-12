@@ -40,10 +40,10 @@ export default function AgeCheckPage() {
 
   return (
     <main className="mx-auto max-w-md px-6 py-16">
-      <h1 className="text-2xl font-semibold tracking-tight">Quick verification</h1>
-      <p className="mt-2 text-sm text-text-body">
-        Per GDPR / COPPA we need to confirm your age. This is self-declared and stored against your
-        account — we keep the fact of verification, not your birth date.
+      <h1 className="text-3xl font-semibold tracking-tight">Quick verification</h1>
+      <p className="mt-3 text-base text-text-body">
+        Per privacy regulations we need to confirm your age. This is self-declared and stored
+        against your account — we keep the fact of verification, not your birth date.
       </p>
 
       <form onSubmit={handleSubmit} className="mt-6 space-y-5">

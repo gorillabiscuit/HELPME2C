@@ -132,7 +132,10 @@ export default async function SearchPage({ searchParams }: PageProps) {
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-12">
-      <h1 className="text-3xl font-semibold tracking-tight">Search</h1>
+      <h1 className="text-4xl font-semibold tracking-tight">Search</h1>
+      <p className="mt-2 max-w-2xl text-base text-text-body">
+        Find a TV show, film, or anime to add to your library — or to your taste.
+      </p>
 
       {/* Plain HTML form, method=GET. Submits the query as ?q=<input> +
           ?type=<hidden>, which renders this same page server-side with

@@ -45,7 +45,7 @@ export default async function GroupJoinPage({ params }: PageProps) {
           <p className="text-sm text-text-body">
             By joining, the other members of <span className="font-medium">{group.name}</span> will
             see your display name in the group. They won&apos;t see your library, ratings, or
-            anchors — only the group&apos;s shared recommendations.
+            favourites — only the group&apos;s shared recommendations.
           </p>
           <div className="flex gap-2">
             <GroupJoinButton token={token} />

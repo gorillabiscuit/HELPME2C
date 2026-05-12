@@ -92,20 +92,20 @@ export function OnboardingFlow({ initialPopular, initialAnchorIds }: OnboardingF
   if (phase === 'intro') {
     return (
       <main className="mx-auto max-w-2xl px-6 py-16">
-        <h1 className="text-3xl font-semibold tracking-tight">Welcome to HelpME2C</h1>
-        <p className="mt-4 text-base text-text-body">
-          A cross-medium recommendation engine for TV, film, and anime — designed for what to watch
-          alone, and what to watch with someone else.
+        <h1 className="text-4xl font-semibold tracking-tight">Welcome to HelpME2C</h1>
+        <p className="mt-4 text-lg text-text-body">
+          A recommendation engine for TV, film, and anime — designed for what to watch alone, and
+          what to watch with someone else.
         </p>
 
-        <div className="mt-10 space-y-5">
+        <div className="mt-12 space-y-6">
           <div>
             <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              Step 1 · Next
+              Step 1 · Now
             </h2>
             <p className="mt-2 text-base text-foreground">
-              Pick 5–6 titles you&apos;d recommend to a friend. These become <em>anchors</em> for
-              your taste — the seeds we use to start recommending.
+              Pick a handful of titles you love. These are your <strong>favourites</strong> —
+              they&apos;re what we use to start understanding your taste.
             </p>
           </div>
           <div>
@@ -113,9 +113,9 @@ export function OnboardingFlow({ initialPopular, initialAnchorIds }: OnboardingF
               Step 2 · After
             </h2>
             <p className="mt-2 text-base text-foreground">
-              You&apos;ll land on your personal recommendations. From there you can refine your
-              taste, build groups with a partner or household, and connect streaming services so
-              recs link straight to where to watch.
+              You&apos;ll land on your personal recommendations. The more you do — rate shows, mark
+              what you&apos;ve watched, love new things — the smarter the recs get. You can also
+              build groups with a partner or household for joint suggestions.
             </p>
           </div>
         </div>
@@ -138,11 +138,11 @@ export function OnboardingFlow({ initialPopular, initialAnchorIds }: OnboardingF
   return (
     <main className="mx-auto max-w-5xl px-6 pt-12 pb-32">
       <header className="mb-8 max-w-2xl">
-        <h1 className="text-3xl font-semibold tracking-tight">Tell us what you love</h1>
-        <p className="mt-3 text-text-body">
-          Pick a few titles that represent your taste — anything you&apos;d recommend to a friend.
-          We&apos;ll use these as <em>anchors</em> for your personal recommendations. Five or six is
-          plenty; you can always add more later.
+        <h1 className="text-4xl font-semibold tracking-tight">Pick a few favourites</h1>
+        <p className="mt-3 text-base text-text-body">
+          Anything you&apos;d recommend to a friend. Click a poster to add it; click again to
+          remove. Five or six is plenty to start — you can add more anytime from <em>Your taste</em>
+          .
         </p>
       </header>
 
@@ -227,7 +227,7 @@ export function OnboardingFlow({ initialPopular, initialAnchorIds }: OnboardingF
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
           <p className="text-sm text-text-body">
             <span className="font-semibold text-foreground">{picked.size}</span>{' '}
-            {picked.size === 1 ? 'anchor' : 'anchors'} picked
+            {picked.size === 1 ? 'favourite' : 'favourites'} picked
           </p>
           <Button onClick={() => router.push('/')}>
             {picked.size === 0 ? 'Skip for now' : 'Continue'}
