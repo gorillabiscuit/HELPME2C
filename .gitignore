@@ -47,6 +47,7 @@ android/.gradle/
 
 # Claude Code per-user local settings (auto-generated; .claude/commands/ stays tracked)
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
 # Claude Code skill symlinks — restored by `npx skills experimental_install`
 # from skills-lock.json (the lock file IS tracked).
 .claude/skills/
