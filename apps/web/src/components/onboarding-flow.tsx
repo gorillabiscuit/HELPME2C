@@ -62,8 +62,10 @@ export function OnboardingFlow({ initialPopular, initialAnchorIds }: OnboardingF
     { enabled: searchEnabled },
   );
 
-  const upsertMutation = trpc.watch.upsert.useMutation();
-  const removeMutation = trpc.watch.remove.useMutation();
+  // Unified-taste model: picking a poster sets loved=true (which writes
+  // a kind='anchor' row if one doesn't already exist). Unpicking sets
+  // loved=false, which the server interprets as remove-if-anchor-only.
+  const setLovedMutation = trpc.watch.setLoved.useMutation();
 
   const handlePick = (title: TitleSummary) => {
     if (picked.has(title.id)) {
@@ -74,10 +76,10 @@ export function OnboardingFlow({ initialPopular, initialAnchorIds }: OnboardingF
         next.delete(title.id);
         return next;
       });
-      removeMutation.mutate({ titleId: title.id });
+      setLovedMutation.mutate({ titleId: title.id, loved: false });
     } else {
       setPicked((p) => new Set(p).add(title.id));
-      upsertMutation.mutate({ titleId: title.id, kind: 'anchor' });
+      setLovedMutation.mutate({ titleId: title.id, loved: true });
     }
   };
 

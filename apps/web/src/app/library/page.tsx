@@ -6,6 +6,7 @@ import { appRouter } from '@/server/router';
 import { createContext } from '@/server/trpc';
 import { LibraryEditDialog } from '@/components/library-edit-dialog';
 import { LibraryRemoveButton } from '@/components/library-remove-button';
+import { LoveToggle } from '@/components/love-toggle';
 
 const STATUS_LABEL: Record<string, string> = {
   watching: 'Watching',
@@ -108,6 +109,7 @@ export default async function LibraryPage() {
                 </div>
 
                 <div className="flex flex-none items-center gap-2 text-xs">
+                  <LoveToggle titleId={title.id} initialLoved={entry.loved} />
                   {entry.rating !== null ? (
                     <span className="font-medium text-foreground">{entry.rating}/10</span>
                   ) : (

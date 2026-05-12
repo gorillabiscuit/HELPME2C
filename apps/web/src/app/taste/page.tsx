@@ -17,9 +17,11 @@ export default async function TastePage() {
     caller.watch.list(),
   ]);
 
-  const initialAnchorIds = watchEntries
-    .filter(({ entry }) => entry.kind === 'anchor')
+  // Unified-taste model: favourites are loved=true entries (regardless
+  // of kind). See docs/UX_AUDIT.md for the reframe.
+  const initialFavouriteIds = watchEntries
+    .filter(({ entry }) => entry.loved)
     .map(({ title }) => title.id);
 
-  return <TastePicker initialPopular={popularTitles} initialAnchorIds={initialAnchorIds} />;
+  return <TastePicker initialPopular={popularTitles} initialAnchorIds={initialFavouriteIds} />;
 }
