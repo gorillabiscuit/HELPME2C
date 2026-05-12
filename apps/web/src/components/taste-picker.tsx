@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
-import Link from 'next/link';
 import { trpc } from '@/lib/trpc';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -122,15 +121,7 @@ export function TastePicker({ initialPopular, initialAnchorIds }: TastePickerPro
     );
 
   return (
-    <main className="mx-auto max-w-5xl px-6 pt-12 pb-32">
-      <header className="mb-6 max-w-2xl">
-        <h1 className="text-4xl font-semibold tracking-tight">Your taste</h1>
-        <p className="mt-3 text-base text-text-body">
-          The titles below shape what we recommend. Click any poster to add it as a favourite, or
-          click again to remove. Every change saves automatically and refines your recs in seconds.
-        </p>
-      </header>
-
+    <div>
       <div className="mb-6 max-w-md">
         <Input
           type="search"
@@ -225,23 +216,10 @@ export function TastePicker({ initialPopular, initialAnchorIds }: TastePickerPro
         </ul>
       ) : null}
 
-      {/* Sticky bottom bar — picked count + Done. No required "Continue"
-          here; picks auto-save and the user navigates back via Done or
-          a nav click. */}
-      <div className="fixed inset-x-0 bottom-0 border-t border-border bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
-          <p className="text-sm text-text-body">
-            <span className="font-semibold text-foreground">{picked.size}</span>{' '}
-            {picked.size === 1 ? 'title rated' : 'titles rated'}
-          </p>
-          <Link
-            href="/"
-            className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
-          >
-            Done
-          </Link>
-        </div>
-      </div>
-    </main>
+      <p className="mt-6 text-sm text-text-body">
+        <span className="font-semibold text-foreground">{picked.size}</span>{' '}
+        {picked.size === 1 ? 'title rated so far' : 'titles rated so far'}.
+      </p>
+    </div>
   );
 }

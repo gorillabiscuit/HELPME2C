@@ -1,13 +1,13 @@
 import { appRouter } from '@/server/router';
 import { createContext } from '@/server/trpc';
-import { TastePicker } from '@/components/taste-picker';
+import { TasteWorkspace } from '@/components/taste-workspace';
 import { requireAgeVerified } from '@/lib/require-age-verified';
 
-// /taste — permanent home for taste refinement. Mounted after a user has
-// finished cold-start onboarding (/onboarding redirects here once anchors
-// exist). The current surface is the same picker grid as /onboarding plus
-// a media-type filter — pairwise/Elo and manual drag-and-drop arrive in
-// Phase 1B per the roadmap.
+// /taste — permanent home for taste refinement under the rated-taste
+// model. Three modes (tabs): Ranked (drag-to-reorder), Compare (pairwise
+// Elo), Add (search + popular grid). The page itself is a thin server
+// component that fetches the popular grid + pre-filled ratings; the
+// TasteWorkspace client component handles tab state and per-tab data.
 export default async function TastePage() {
   await requireAgeVerified();
 
@@ -17,12 +17,12 @@ export default async function TastePage() {
     caller.watch.list(),
   ]);
 
-  // Rated-taste model: pre-fill the picker with rated entries (any
-  // rating). The picker writes rating=10 on click; user can refine
-  // ratings on title detail pages.
+  // Pre-fill the Add tab's picker with already-rated titles so the user
+  // sees their existing picks highlighted. (Per-tab data for Ranked /
+  // Compare lives on tRPC and is fetched client-side from the workspace.)
   const initialRatedIds = watchEntries
     .filter(({ entry }) => entry.rating !== null)
     .map(({ title }) => title.id);
 
-  return <TastePicker initialPopular={popularTitles} initialAnchorIds={initialRatedIds} />;
+  return <TasteWorkspace initialPopular={popularTitles} initialAnchorIds={initialRatedIds} />;
 }

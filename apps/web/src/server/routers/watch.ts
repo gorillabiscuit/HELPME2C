@@ -421,8 +421,9 @@ export const watchRouter = router({
       .orderBy(sql`RANDOM()`)
       .limit(2);
 
-    if (rows.length < 2) return null;
-    return { a: rows[0], b: rows[1] };
+    const [a, b] = rows;
+    if (!a || !b) return null;
+    return { a, b };
   }),
 
   // Remove the current user's entry for a single title. Idempotent —
