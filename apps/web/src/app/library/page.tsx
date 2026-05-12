@@ -50,14 +50,26 @@ export default async function LibraryPage() {
       {entries.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border px-6 py-12 text-center">
           <p className="text-sm text-text-body">
-            You haven&apos;t added any titles yet. A search-to-add surface is coming in M3 Path A;
-            for now, navigate to a title via{' '}
-            <code className="rounded bg-muted px-1 py-0.5 text-xs">/titles/&lt;uuid&gt;</code> and
-            use the &ldquo;Add to list&rdquo; button.
+            Your library is empty. Add titles by searching for them or picking from your taste
+            refinement surface.
           </p>
+          <div className="mt-4 flex justify-center gap-3">
+            <Link
+              href="/search"
+              className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+            >
+              Search
+            </Link>
+            <Link
+              href="/taste"
+              className="inline-flex items-center rounded-md border border-border bg-white px-4 py-2 text-sm font-medium text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+            >
+              Refine your taste
+            </Link>
+          </div>
         </div>
       ) : (
-        <ul className="divide-y divide-slate-200 rounded-lg border border-border">
+        <ul className="divide-y divide-border rounded-lg border border-border">
           {entries.map(({ entry, title }) => {
             const kindLabel = KIND_LABEL[entry.kind];
             const statusLabel = entry.status ? STATUS_LABEL[entry.status] : null;

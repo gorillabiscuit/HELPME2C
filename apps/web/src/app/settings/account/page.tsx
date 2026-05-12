@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { eq } from 'drizzle-orm';
 import { auth } from '@clerk/nextjs/server';
@@ -30,12 +29,6 @@ export default async function AccountSettingsPage() {
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-12">
-      <div className="mb-6">
-        <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">
-          ← Home
-        </Link>
-      </div>
-
       <h1 className="text-3xl font-semibold tracking-tight">Account &amp; privacy</h1>
       <p className="mt-2 text-sm text-text-body">
         Download a copy of everything we hold on you, or permanently delete your account. Cookie and

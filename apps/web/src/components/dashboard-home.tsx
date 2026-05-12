@@ -40,26 +40,27 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
   const greeting = firstName ? `Welcome back, ${firstName}` : 'Welcome back';
 
   if (recs.length === 0) {
-    // Either the user hasn't picked anchors yet, or the cron hasn't computed
-    // recs for them yet. Single message covers both cases — the link to
-    // /onboarding is the right action either way (a user who already
-    // anchored will see "Update your picks").
+    // Two narrow cases this covers: (1) cold-start user with no anchors,
+    // (2) just-picked user inside the ~30s debounce before the rec
+    // recompute writes back. Copy speaks to both. /onboarding is the
+    // intended landing for (1); it auto-redirects to /taste for (2)
+    // because that's the page that explains what to do next.
     return (
       <main className="mx-auto max-w-2xl px-6 py-16">
         <h1 className="text-3xl font-semibold tracking-tight">{greeting}</h1>
         <div className="mt-8 rounded-lg border border-dashed border-border px-6 py-12 text-center">
           <h2 className="text-xl font-semibold tracking-tight text-foreground">
-            No recommendations yet
+            Let&apos;s get to know your taste
           </h2>
           <p className="mx-auto mt-2 max-w-md text-sm text-text-body">
-            Pick a few titles that represent your taste — anything you&apos;d recommend to a friend.
-            We&apos;ll use them to start your personal recommendations.
+            Pick a few titles you&apos;d recommend to a friend. We use them as anchors to build your
+            personal recommendations. If you just picked, give us a moment.
           </p>
           <Link
             href="/onboarding"
             className="mt-4 inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
           >
-            Get started
+            Pick titles
           </Link>
         </div>
       </main>

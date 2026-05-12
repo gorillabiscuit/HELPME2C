@@ -1,5 +1,4 @@
 import { headers } from 'next/headers';
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { auth } from '@clerk/nextjs/server';
 import { appRouter } from '@/server/router';
@@ -30,12 +29,6 @@ export default async function ProvidersSettingsPage() {
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
-      <div className="mb-6">
-        <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">
-          ← Home
-        </Link>
-      </div>
-
       <h1 className="text-3xl font-semibold tracking-tight">Streaming services</h1>
       <p className="mt-2 text-sm text-text-body">
         Pick the services you subscribe to. We&apos;ll filter your recommendations to titles that
