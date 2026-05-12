@@ -1,25 +1,24 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { trpc } from '@/lib/trpc';
 import { Input } from '@/components/ui/input';
+import { TitleQuickActions } from '@/components/title-quick-actions';
 import { cn } from '@/lib/utils';
 
-// Adapted from OnboardingFlow. Same picker mechanics (search + popular grid
-// + multi-pick toggle that writes anchor watch_entries), with three deltas:
-//   - No intro step (returning users already know the product)
-//   - Media-type filter (TV / Film / Anime / All) — applied to both the
-//     popular grid and the search results via the existing `mediaType`
-//     arg on titles.popular / titles.search
-//   - No "Continue" → / redirect; this surface is ongoing, every pick
-//     auto-saves, the user navigates away when done
+// Add-to-taste surface. Used in the /taste workspace's Add tab and as
+// the picker grid on /onboarding. Same interaction model as dashboard
+// rec cards (Watched it / Want to watch / Not interested) — every
+// poster gets the full action panel rather than a single-click rate-10
+// shortcut. Consistency over speed, per the rated-taste reframe.
 //
-// Refactoring the two components into a shared base lands when the third
-// consumer (Phase 1B pairwise/Elo refinement) needs the same grid — at
-// that point the dup will be worth removing.
+// Poster + title text are wrapped in a Link to the title detail page,
+// so users can dig into a show before deciding what to do with it.
 
 type MediaType = 'tv' | 'film' | 'anime';
+type WatchStatus = 'watching' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_watch';
 
 interface TitleSummary {
   id: string;
@@ -31,9 +30,15 @@ interface TitleSummary {
   popularityScore: number | null;
 }
 
+interface InitialEntry {
+  titleId: string;
+  status: WatchStatus | null;
+  rating: number | null;
+}
+
 interface TastePickerProps {
   initialPopular: TitleSummary[];
-  initialAnchorIds: string[];
+  initialEntries: InitialEntry[];
 }
 
 const MEDIA_TYPE_LABEL: Record<MediaType, string> = {
@@ -50,10 +55,9 @@ const POPULAR_LIMIT = 24;
 
 type FilterValue = MediaType | 'all';
 
-export function TastePicker({ initialPopular, initialAnchorIds }: TastePickerProps) {
+export function TastePicker({ initialPopular, initialEntries }: TastePickerProps) {
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
-  const [picked, setPicked] = useState<Set<string>>(new Set(initialAnchorIds));
   const [filter, setFilter] = useState<FilterValue>('all');
 
   useEffect(() => {
@@ -63,15 +67,6 @@ export function TastePicker({ initialPopular, initialAnchorIds }: TastePickerPro
 
   const filterArg: MediaType | undefined = filter === 'all' ? undefined : filter;
 
-  // initialPopular came from the server with no filter applied. Re-fetch
-  // the popular grid via tRPC whenever filter or initial mount diverges,
-  // so the user immediately sees a filtered slice when they pick TV/Film/
-  // Anime. React Query keeps prior results cached so toggling the filter
-  // back-and-forth is instant.
-  // Skip the network round-trip on first paint when the filter is 'all' —
-  // we already have initialPopular for that case. exactOptionalPropertyTypes
-  // means initialData must be omitted entirely (not set to undefined) when
-  // we don't have an initial value to seed.
   const popularQuery = trpc.titles.popular.useQuery(
     { mediaType: filterArg, limit: POPULAR_LIMIT },
     filter === 'all' ? { initialData: initialPopular } : {},
@@ -83,36 +78,27 @@ export function TastePicker({ initialPopular, initialAnchorIds }: TastePickerPro
     { enabled: searchEnabled },
   );
 
-  // Rated-taste model: click = "I love this" = tracking + completed +
-  // rating=10. Click again = remove. Users refine ratings on title
-  // detail pages; the picker is for fast "this defines me" entry.
-  const upsertMutation = trpc.watch.upsert.useMutation();
-  const removeMutation = trpc.watch.remove.useMutation();
-
-  const handlePick = (title: TitleSummary) => {
-    if (picked.has(title.id)) {
-      setPicked((p) => {
-        const next = new Set(p);
-        next.delete(title.id);
-        return next;
-      });
-      removeMutation.mutate({ titleId: title.id });
-    } else {
-      setPicked((p) => new Set(p).add(title.id));
-      upsertMutation.mutate({
-        titleId: title.id,
-        kind: 'tracking',
-        status: 'completed',
-        rating: 10,
-      });
+  // Map for fast per-card state lookup. Built from the prop so it
+  // refreshes when the server re-renders after a TitleQuickActions
+  // mutation triggers router.refresh().
+  const entryByTitleId = useMemo(() => {
+    const m = new Map<string, { status: WatchStatus | null; rating: number | null }>();
+    for (const e of initialEntries) {
+      m.set(e.titleId, { status: e.status, rating: e.rating });
     }
-  };
+    return m;
+  }, [initialEntries]);
 
   const showingSearchResults = searchEnabled;
   const titlesToShow: TitleSummary[] = showingSearchResults
     ? (searchQuery.data ?? [])
     : (popularQuery.data ?? []);
   const isLoadingResults = showingSearchResults ? searchQuery.isFetching : popularQuery.isFetching;
+
+  // "N rated" = entries with a non-null rating. The picker is for
+  // adding taste signal; want-to-watch is added scaffolding but
+  // doesn't count toward the count.
+  const ratedCount = initialEntries.filter((e) => e.rating !== null).length;
 
   const filterPillClass = (active: boolean) =>
     cn(
@@ -168,24 +154,15 @@ export function TastePicker({ initialPopular, initialAnchorIds }: TastePickerPro
       {titlesToShow.length > 0 ? (
         <ul className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
           {titlesToShow.map((title) => {
-            const isPicked = picked.has(title.id);
             const mediaTypeLabel = MEDIA_TYPE_LABEL[title.mediaType] ?? title.mediaType;
+            const entry = entryByTitleId.get(title.id);
             return (
               <li key={title.id}>
-                <button
-                  type="button"
-                  onClick={() => handlePick(title)}
-                  className="group block w-full text-left transition focus-visible:outline-none"
-                  aria-pressed={isPicked}
+                <Link
+                  href={`/titles/${title.id}`}
+                  className="group block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
                 >
-                  <div
-                    className={cn(
-                      'relative aspect-[2/3] overflow-hidden rounded-lg border-2 bg-muted transition',
-                      isPicked
-                        ? 'border-foreground shadow-md'
-                        : 'border-transparent group-hover:border-input',
-                    )}
-                  >
+                  <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-border bg-muted transition group-hover:border-input">
                     {title.posterUrl ? (
                       <Image
                         src={title.posterUrl}
@@ -195,13 +172,8 @@ export function TastePicker({ initialPopular, initialAnchorIds }: TastePickerPro
                         className="object-cover"
                       />
                     ) : null}
-                    {isPicked ? (
-                      <span className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
-                        ✓
-                      </span>
-                    ) : null}
                   </div>
-                  <h3 className="mt-2 truncate text-sm font-medium text-foreground">
+                  <h3 className="mt-2 truncate text-sm font-medium text-foreground group-hover:underline">
                     {title.title}
                   </h3>
                   <p className="text-xs text-muted-foreground">
@@ -209,7 +181,12 @@ export function TastePicker({ initialPopular, initialAnchorIds }: TastePickerPro
                       .filter((s): s is string => Boolean(s))
                       .join(' · ')}
                   </p>
-                </button>
+                </Link>
+                <TitleQuickActions
+                  titleId={title.id}
+                  currentState={entry ? { status: entry.status, rating: entry.rating } : null}
+                  size="compact"
+                />
               </li>
             );
           })}
@@ -217,8 +194,8 @@ export function TastePicker({ initialPopular, initialAnchorIds }: TastePickerPro
       ) : null}
 
       <p className="mt-6 text-sm text-text-body">
-        <span className="font-semibold text-foreground">{picked.size}</span>{' '}
-        {picked.size === 1 ? 'title rated so far' : 'titles rated so far'}.
+        <span className="font-semibold text-foreground">{ratedCount}</span>{' '}
+        {ratedCount === 1 ? 'title rated so far' : 'titles rated so far'}.
       </p>
     </div>
   );

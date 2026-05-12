@@ -36,9 +36,17 @@ interface TasteEntry {
   };
 }
 
+type WatchStatus = 'watching' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_watch';
+
+interface InitialEntry {
+  titleId: string;
+  status: WatchStatus | null;
+  rating: number | null;
+}
+
 interface TasteWorkspaceProps {
   initialPopular: TitleSummary[];
-  initialAnchorIds: string[];
+  initialEntries: InitialEntry[];
 }
 
 const MEDIA_TYPE_LABEL: Record<MediaType, string> = {
@@ -55,7 +63,7 @@ const MEDIA_TYPE_LABEL: Record<MediaType, string> = {
 // All three operate on the same watch_entries data; reads come from
 // trpc.watch.taste, writes go via setRankedOrder / recordPairwise /
 // watch.upsert respectively.
-export function TasteWorkspace({ initialPopular, initialAnchorIds }: TasteWorkspaceProps) {
+export function TasteWorkspace({ initialPopular, initialEntries }: TasteWorkspaceProps) {
   const [tab, setTab] = useState<Tab>('ranked');
 
   return (
@@ -77,7 +85,7 @@ export function TasteWorkspace({ initialPopular, initialAnchorIds }: TasteWorksp
       {tab === 'ranked' ? <RankedView /> : null}
       {tab === 'compare' ? <CompareView /> : null}
       {tab === 'add' ? (
-        <TastePickerWrapper initialPopular={initialPopular} initialAnchorIds={initialAnchorIds} />
+        <TastePickerWrapper initialPopular={initialPopular} initialEntries={initialEntries} />
       ) : null}
     </main>
   );
@@ -335,10 +343,10 @@ function ComparisonCard({ title, onPick, disabled }: ComparisonCardProps) {
 // ---------------------------------------------------------------------
 function TastePickerWrapper({
   initialPopular,
-  initialAnchorIds,
+  initialEntries,
 }: {
   initialPopular: TitleSummary[];
-  initialAnchorIds: string[];
+  initialEntries: InitialEntry[];
 }) {
   return (
     <div>
@@ -346,7 +354,7 @@ function TastePickerWrapper({
         Click any title you&apos;ve watched and loved. That records a 10/10 rating; you can refine
         the rating later from the title page or by comparing here.
       </p>
-      <TastePicker initialPopular={initialPopular} initialAnchorIds={initialAnchorIds} />
+      <TastePicker initialPopular={initialPopular} initialEntries={initialEntries} />
     </div>
   );
 }

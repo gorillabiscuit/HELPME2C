@@ -32,20 +32,21 @@ export default async function OnboardingPage() {
     caller.watch.list(),
   ]);
 
-  // Rated-taste model: pre-fill the picker with any rated entries so a
-  // returning user sees their previous picks already toggled on. Any
-  // rating counts (the picker writes rating=10 on click, but a user
-  // might have refined to 8 or 7 via the title detail page).
-  const initialRatedIds = watchEntries
-    .filter(({ entry }) => entry.rating !== null)
-    .map(({ title }) => title.id);
-
-  // /onboarding is the first-visit funnel — intro + initial rating
-  // capture. Returning users who already have rated titles don't need
-  // the intro step; they get the permanent refine surface at /taste.
-  if (initialRatedIds.length > 0) {
+  // /onboarding is the first-visit funnel. Returning users who already
+  // have any rated titles get the permanent refine surface at /taste.
+  const hasAnyRating = watchEntries.some(({ entry }) => entry.rating !== null);
+  if (hasAnyRating) {
     redirect('/taste');
   }
 
-  return <OnboardingFlow initialPopular={popularTitles} initialAnchorIds={initialRatedIds} />;
+  // Pass the full per-title state so TitleQuickActions on each card
+  // reflects "already on your list / already rated" — important for a
+  // cold-start user who's revisiting the picker mid-flow.
+  const initialEntries = watchEntries.map(({ entry, title }) => ({
+    titleId: title.id,
+    status: entry.status,
+    rating: entry.rating,
+  }));
+
+  return <OnboardingFlow initialPopular={popularTitles} initialEntries={initialEntries} />;
 }

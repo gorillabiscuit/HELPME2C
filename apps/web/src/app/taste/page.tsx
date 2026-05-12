@@ -17,12 +17,15 @@ export default async function TastePage() {
     caller.watch.list(),
   ]);
 
-  // Pre-fill the Add tab's picker with already-rated titles so the user
-  // sees their existing picks highlighted. (Per-tab data for Ranked /
-  // Compare lives on tRPC and is fetched client-side from the workspace.)
-  const initialRatedIds = watchEntries
-    .filter(({ entry }) => entry.rating !== null)
-    .map(({ title }) => title.id);
+  // Pass the full per-title state so the Add tab's TitleQuickActions
+  // reflect "already in your library / already rated" on each card.
+  // (Per-tab data for Ranked / Compare lives on tRPC and is fetched
+  // client-side from the workspace.)
+  const initialEntries = watchEntries.map(({ entry, title }) => ({
+    titleId: title.id,
+    status: entry.status,
+    rating: entry.rating,
+  }));
 
-  return <TasteWorkspace initialPopular={popularTitles} initialAnchorIds={initialRatedIds} />;
+  return <TasteWorkspace initialPopular={popularTitles} initialEntries={initialEntries} />;
 }
