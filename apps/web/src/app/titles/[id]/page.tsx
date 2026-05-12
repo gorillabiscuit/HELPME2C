@@ -1,7 +1,6 @@
 import { and, eq, desc } from 'drizzle-orm';
 import { headers } from 'next/headers';
 import Image from 'next/image';
-import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { auth } from '@clerk/nextjs/server';
 import { z } from 'zod';
@@ -190,12 +189,6 @@ export default async function TitleDetailPage({ params }: PageProps) {
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
-      <div className="mb-6">
-        <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">
-          ← Home
-        </Link>
-      </div>
-
       <div className="grid grid-cols-1 gap-8 sm:grid-cols-[200px_1fr]">
         {title.posterUrl ? (
           <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-border bg-muted">

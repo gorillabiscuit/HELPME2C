@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { auth } from '@clerk/nextjs/server';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,12 +14,6 @@ export default async function ImportPage() {
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-12">
-      <div className="mb-6">
-        <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">
-          ← Home
-        </Link>
-      </div>
-
       <h1 className="text-3xl font-semibold tracking-tight">Import your list</h1>
       <p className="mt-2 text-sm text-text-body">
         Bring your existing anime list across so HelpME2C&apos;s recommendations can learn from it.

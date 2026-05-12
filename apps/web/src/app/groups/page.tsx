@@ -21,12 +21,6 @@ export default async function GroupsPage() {
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
-      <div className="mb-6">
-        <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">
-          ← Home
-        </Link>
-      </div>
-
       <h1 className="text-3xl font-semibold tracking-tight">Groups</h1>
       <p className="mt-2 text-sm text-text-body">
         Create a group to get joint recommendations with others. Members see group recs and each
