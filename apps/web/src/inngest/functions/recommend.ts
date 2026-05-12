@@ -127,15 +127,23 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
   return { recCount: recs.length };
 }
 
-// Per-user recompute — triggered by the all-users fan-out below or by a
-// user-action recompute event we don't fire yet (M4 follow-on: trigger a
-// recompute event from watch.upsert / watch.remove so a user who just added
-// an anchor sees fresh recs without waiting for the nightly cron).
+// Per-user recompute — triggered by the all-users fan-out below or by the
+// per-mutation event fires from watch.upsert / watch.remove (and list-import
+// fromAnilist / fromMal), so a user who just added an anchor sees fresh
+// recs in seconds rather than up to 24 hours.
+//
+// Debounce coalesces bursts: an onboarding session that picks 6 anchors
+// in 10 seconds fires 6 events but only one recompute runs — the last
+// event's trigger time. 30s is long enough to cover a typical pick burst
+// (multi-second think time between picks) and short enough that the user
+// sees fresh recs by the time they navigate to /. Key is per-user so
+// concurrent users don't interfere with each other.
 export const recommendUser = inngest.createFunction(
   {
     id: 'recommend-user',
     name: 'Recommend: recompute for a single user',
     retries: 3,
+    debounce: { key: 'event.data.userId', period: '30s' },
     triggers: [recommendUserEvent],
   },
   async ({ event, step }) => {
