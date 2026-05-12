@@ -6,6 +6,7 @@ import { appRouter } from '@/server/router';
 import { createContext } from '@/server/trpc';
 import { LibraryEditDialog } from '@/components/library-edit-dialog';
 import { LibraryRemoveButton } from '@/components/library-remove-button';
+import { LoveToggle } from '@/components/love-toggle';
 
 const STATUS_LABEL: Record<string, string> = {
   watching: 'Watching',
@@ -16,7 +17,11 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const KIND_LABEL: Record<string, string> = {
-  anchor: 'Anchor',
+  // 'anchor' rows are taste-only entries (no library tracking state).
+  // Under the unified-taste model the user thinks of these as
+  // "favourites" — the heart icon in the row's action area is the
+  // primary affordance; this label is a fallback when no status exists.
+  anchor: 'Favourite',
   tracking: 'Tracking',
 };
 
@@ -38,13 +43,19 @@ export default async function LibraryPage() {
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
-      <header className="mb-8 flex items-baseline justify-between">
-        <h1 className="text-3xl font-semibold tracking-tight">Library</h1>
-        <span className="text-sm text-muted-foreground">
-          {entries.length === 0
-            ? 'No entries yet'
-            : `${entries.length} ${entries.length === 1 ? 'title' : 'titles'}`}
-        </span>
+      <header className="mb-8">
+        <div className="flex items-baseline justify-between gap-3">
+          <h1 className="text-4xl font-semibold tracking-tight">Library</h1>
+          <span className="text-sm text-muted-foreground">
+            {entries.length === 0
+              ? 'No entries yet'
+              : `${entries.length} ${entries.length === 1 ? 'title' : 'titles'}`}
+          </span>
+        </div>
+        <p className="mt-2 text-base text-text-body">
+          Everything you&apos;re tracking — what you&apos;ve watched, what you&apos;re watching, and
+          what&apos;s on deck. Tap the heart on any row to add a title to your taste.
+        </p>
       </header>
 
       {entries.length === 0 ? (
@@ -108,6 +119,7 @@ export default async function LibraryPage() {
                 </div>
 
                 <div className="flex flex-none items-center gap-2 text-xs">
+                  <LoveToggle titleId={title.id} initialLoved={entry.loved} />
                   {entry.rating !== null ? (
                     <span className="font-medium text-foreground">{entry.rating}/10</span>
                   ) : (

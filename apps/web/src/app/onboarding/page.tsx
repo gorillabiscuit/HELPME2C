@@ -32,19 +32,23 @@ export default async function OnboardingPage() {
     caller.watch.list(),
   ]);
 
-  const initialAnchorIds = watchEntries
-    .filter(({ entry }) => entry.kind === 'anchor')
+  // Unified-taste model (docs/UX_AUDIT.md): "favourites" are watch_entries
+  // with loved=true, regardless of kind. The picker still works on these
+  // — toggling adds/removes loved.
+  const initialFavouriteIds = watchEntries
+    .filter(({ entry }) => entry.loved)
     .map(({ title }) => title.id);
 
-  // /onboarding is the first-visit funnel — intro + initial anchor capture.
-  // Returning users who already have anchors don't need the intro step or
-  // the "this is the first thing you do" framing; they get the permanent
-  // refine surface at /taste. Anchor count is a sufficient proxy for
-  // "has completed cold-start onboarding" (the user must pick ≥1 anchor
-  // to leave the picker; otherwise they'd hit Skip for now → /).
-  if (initialAnchorIds.length > 0) {
+  // /onboarding is the first-visit funnel — intro + initial favourite
+  // capture. Returning users who already have favourites don't need the
+  // intro step or the "this is the first thing you do" framing; they
+  // get the permanent refine surface at /taste. Count is a sufficient
+  // proxy for "has completed cold-start onboarding" (the user must
+  // pick ≥1 favourite to leave the picker; otherwise they'd hit Skip
+  // for now → /).
+  if (initialFavouriteIds.length > 0) {
     redirect('/taste');
   }
 
-  return <OnboardingFlow initialPopular={popularTitles} initialAnchorIds={initialAnchorIds} />;
+  return <OnboardingFlow initialPopular={popularTitles} initialAnchorIds={initialFavouriteIds} />;
 }

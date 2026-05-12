@@ -124,6 +124,7 @@ export const watchRouter = router({
         currentEpisode: z.number().int().min(0).optional(),
         notes: z.string().max(5000).optional(),
         privacy: privacySchema.optional(),
+        loved: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -155,6 +156,7 @@ export const watchRouter = router({
       if (input.currentEpisode !== undefined) updateSet.currentEpisode = input.currentEpisode;
       if (input.notes !== undefined) updateSet.notes = input.notes;
       if (input.privacy !== undefined) updateSet.privacy = input.privacy;
+      if (input.loved !== undefined) updateSet.loved = input.loved;
 
       const [row] = await ctx.db
         .insert(watchEntries)
@@ -171,6 +173,7 @@ export const watchRouter = router({
           // if defaultPrivacy is somehow null, but the schema NOT NULL +
           // 'private' default guarantee it isn't.
           privacy: input.privacy ?? userRow.defaultPrivacy,
+          loved: input.loved ?? false,
         })
         .onConflictDoUpdate({
           target: [watchEntries.userId, watchEntries.titleId],
@@ -192,6 +195,83 @@ export const watchRouter = router({
       // Inngest debounce than to track which fields are taste-relevant.
       await triggerRecomputeSafely(userRow.id);
       return row;
+    }),
+
+  // Toggle "I love this — treat as taste-defining." Unified-taste model
+  // (docs/UX_AUDIT.md): the user can love a title from anywhere it
+  // appears — rec card, title detail, library — without having to
+  // navigate to /taste.
+  //
+  // Insert path (no existing entry, loved=true): create kind='anchor'
+  // with loved=true. The row is purely a taste expression — no claim
+  // about having watched it.
+  //
+  // Update path (existing tracking entry): only flip `loved`. The
+  // existing status/rating/notes are preserved — a tracking entry stays
+  // tracking with its watching state intact, just now also loved.
+  //
+  // Unlove path (loved=false on an anchor-only row): delete the row
+  // entirely. An unloved anchor-only entry is an orphan — it'd
+  // suppress the title from rec candidates (library-filter) without
+  // contributing any taste signal. Deletion is the only correctness-
+  // preserving choice.
+  setLoved: protectedProcedure
+    .input(z.object({ titleId: titleIdSchema, loved: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const [userRow] = await ctx.db
+        .select({ id: users.id, defaultPrivacy: users.defaultPrivacy })
+        .from(users)
+        .where(eq(users.clerkId, ctx.userId))
+        .limit(1);
+      if (!userRow) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'User row not found — was me.ensure called for this session?',
+        });
+      }
+
+      // Smart-delete path: unloving an anchor-only entry removes it.
+      if (!input.loved) {
+        const [existing] = await ctx.db
+          .select({ kind: watchEntries.kind })
+          .from(watchEntries)
+          .where(and(eq(watchEntries.userId, userRow.id), eq(watchEntries.titleId, input.titleId)))
+          .limit(1);
+        if (existing && existing.kind === 'anchor') {
+          await ctx.db
+            .delete(watchEntries)
+            .where(
+              and(eq(watchEntries.userId, userRow.id), eq(watchEntries.titleId, input.titleId)),
+            );
+          await triggerRecomputeSafely(userRow.id);
+          return { titleId: input.titleId, loved: false, removed: true };
+        }
+        // else: tracking entry → fall through to upsert, just flips loved
+      }
+
+      const [row] = await ctx.db
+        .insert(watchEntries)
+        .values({
+          userId: userRow.id,
+          titleId: input.titleId,
+          kind: 'anchor',
+          privacy: userRow.defaultPrivacy,
+          loved: input.loved,
+        })
+        .onConflictDoUpdate({
+          target: [watchEntries.userId, watchEntries.titleId],
+          set: { loved: input.loved, updatedAt: new Date() },
+        })
+        .returning();
+
+      if (!row) {
+        throw new Error(
+          `watch.setLoved: no row returned for user=${userRow.id} title=${input.titleId}`,
+        );
+      }
+
+      await triggerRecomputeSafely(userRow.id);
+      return { titleId: input.titleId, loved: row.loved, removed: false };
     }),
 
   // Remove the current user's entry for a single title. Idempotent —

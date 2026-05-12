@@ -1,4 +1,5 @@
 import {
+  boolean,
   index,
   integer,
   pgEnum,
@@ -76,6 +77,13 @@ export const watchEntries = pgTable(
     notes: text('notes'),
 
     privacy: privacyLevelEnum('privacy').notNull().default('private'),
+
+    // "I love this — treat it as taste-defining." The unified-taste model
+    // (see docs/UX_AUDIT.md) drops the user-facing distinction between
+    // anchors and tracked entries: a tracking row (status=watching,
+    // rating=8) can ALSO be loved without overwriting its kind. Rec
+    // engine treats kind='anchor' OR loved=true as a high-weight signal.
+    loved: boolean('loved').notNull().default(false),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

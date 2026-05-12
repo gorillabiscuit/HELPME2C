@@ -1,0 +1,1 @@
+ALTER TABLE "watch_entries" ADD COLUMN "loved" boolean DEFAULT false NOT NULL;

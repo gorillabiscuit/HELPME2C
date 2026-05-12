@@ -1,5 +1,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
+import { Heart, Users } from 'lucide-react';
+import { FirstVisitCallout } from '@/components/first-visit-callout';
 import { RecCardActions } from '@/components/rec-card-actions';
 
 type MediaType = 'tv' | 'film' | 'anime';
@@ -37,30 +39,31 @@ interface DashboardHomeProps {
 }
 
 export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
-  const greeting = firstName ? `Welcome back, ${firstName}` : 'Welcome back';
+  const greetingSuffix = firstName ? `, ${firstName}` : '';
 
   if (recs.length === 0) {
-    // Two narrow cases this covers: (1) cold-start user with no anchors,
-    // (2) just-picked user inside the ~30s debounce before the rec
-    // recompute writes back. Copy speaks to both. /onboarding is the
-    // intended landing for (1); it auto-redirects to /taste for (2)
-    // because that's the page that explains what to do next.
+    // Two narrow cases this covers: (1) cold-start user with no
+    // favourites, (2) just-picked user inside the ~30s debounce before
+    // the rec recompute writes back. /onboarding is the intended
+    // landing for (1); it auto-redirects to /taste for (2) because
+    // that's the page that explains what to do next.
     return (
       <main className="mx-auto max-w-2xl px-6 py-16">
-        <h1 className="text-3xl font-semibold tracking-tight">{greeting}</h1>
-        <div className="mt-8 rounded-lg border border-dashed border-border px-6 py-12 text-center">
+        <p className="text-base text-muted-foreground">Welcome{greetingSuffix}.</p>
+        <h1 className="mt-1 text-4xl font-semibold tracking-tight">Your recommendations</h1>
+        <div className="mt-10 rounded-lg border border-dashed border-border px-6 py-12 text-center">
           <h2 className="text-xl font-semibold tracking-tight text-foreground">
             Let&apos;s get to know your taste
           </h2>
-          <p className="mx-auto mt-2 max-w-md text-sm text-text-body">
-            Pick a few titles you&apos;d recommend to a friend. We use them as anchors to build your
-            personal recommendations. If you just picked, give us a moment.
+          <p className="mx-auto mt-3 max-w-md text-base text-text-body">
+            Pick a few titles you&apos;d recommend to a friend. We&apos;ll use them as the starting
+            point for your personal recommendations. If you just picked, give us a moment.
           </p>
           <Link
             href="/onboarding"
-            className="mt-4 inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+            className="mt-6 inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
           >
-            Pick titles
+            Pick favourites
           </Link>
         </div>
       </main>
@@ -69,11 +72,13 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-12">
-      <header className="mb-8">
-        <h1 className="text-3xl font-semibold tracking-tight">{greeting}</h1>
-        <p className="mt-2 text-sm text-text-body">
-          Based on your taste — top {recs.length}{' '}
-          {recs.length === 1 ? 'recommendation' : 'recommendations'}.
+      <header className="mb-10">
+        <p className="text-base text-muted-foreground">Welcome back{greetingSuffix}.</p>
+        <h1 className="mt-1 text-4xl font-semibold tracking-tight">Your recommendations</h1>
+        <p className="mt-3 max-w-2xl text-base text-text-body">
+          {recs.length} {recs.length === 1 ? 'title' : 'titles'} picked for you based on what
+          you&apos;ve loved and watched. Every action — *Love this*, *Watched it*, *Not interested*,
+          *Rate* — refines what we suggest.
         </p>
 
         {filter.active ? (
@@ -105,10 +110,50 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
         ) : null}
       </header>
 
+      <FirstVisitCallout />
+
+      {/* Promote the moat (Groups) + the taste-shaping surface side-by-side
+          on the dashboard. These were buried in a nav cluster before — now
+          they're prominent calls to action where new users will actually
+          notice them. Two cards instead of nav links: people scan cards. */}
+      <section
+        aria-label="Get more out of HelpME2C"
+        className="mb-10 grid grid-cols-1 gap-4 sm:grid-cols-2"
+      >
+        <Link
+          href="/groups"
+          className="group flex items-start gap-4 rounded-lg border border-border bg-white p-5 transition hover:border-input hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+        >
+          <span className="flex h-10 w-10 flex-none items-center justify-center rounded-md bg-primary/10 text-primary">
+            <Users className="h-5 w-5" aria-hidden="true" />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-base font-semibold text-foreground">
+              Watching with someone?
+            </span>
+            <span className="mt-1 block text-sm text-text-body">
+              Build a group to get recommendations everyone in the room will enjoy.
+            </span>
+          </span>
+        </Link>
+        <Link
+          href="/taste"
+          className="group flex items-start gap-4 rounded-lg border border-border bg-white p-5 transition hover:border-input hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+        >
+          <span className="flex h-10 w-10 flex-none items-center justify-center rounded-md bg-primary/10 text-primary">
+            <Heart className="h-5 w-5" aria-hidden="true" />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-base font-semibold text-foreground">Want better recs?</span>
+            <span className="mt-1 block text-sm text-text-body">
+              Tell us more about your taste — add favourites, rate what you&apos;ve watched.
+            </span>
+          </span>
+        </Link>
+      </section>
+
       {/* Visually-hidden landmark for screen readers — the rec grid is the
-          page's main content but had no semantic boundary between the
-          h1 greeting and the per-card h3 titles. sr-only keeps the
-          visual hierarchy unchanged. */}
+          page's main content. The visible H1 above is the page identity. */}
       <h2 className="sr-only">Recommendations</h2>
 
       <ul className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">

@@ -41,12 +41,18 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
       titleId: watchEntries.titleId,
       kind: watchEntries.kind,
       rating: watchEntries.rating,
+      loved: watchEntries.loved,
     })
     .from(watchEntries)
     .where(eq(watchEntries.userId, userId));
 
+  // Unified-taste model (per docs/UX_AUDIT.md): `loved` is the single
+  // source of truth for taste signal. A tracking entry (status=watching,
+  // rating=8) can be loved without overwriting its kind, and the
+  // historical kind='anchor' rows were backfilled to loved=true at
+  // migration time so legacy data still feeds the engine.
   const anchors: AnchorPick[] = userEntries
-    .filter((e) => e.kind === 'anchor')
+    .filter((e) => e.loved)
     .map((e) => ({ titleId: e.titleId }));
 
   // .filter() doesn't narrow non-null; flatMap with explicit narrowing does.

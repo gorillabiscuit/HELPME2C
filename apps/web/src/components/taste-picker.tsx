@@ -84,8 +84,10 @@ export function TastePicker({ initialPopular, initialAnchorIds }: TastePickerPro
     { enabled: searchEnabled },
   );
 
-  const upsertMutation = trpc.watch.upsert.useMutation();
-  const removeMutation = trpc.watch.remove.useMutation();
+  // Unified-taste model: picking a poster sets loved=true (which writes
+  // a kind='anchor' row if one doesn't already exist). Unpicking sets
+  // loved=false, which the server interprets as remove-if-anchor-only.
+  const setLovedMutation = trpc.watch.setLoved.useMutation();
 
   const handlePick = (title: TitleSummary) => {
     if (picked.has(title.id)) {
@@ -94,10 +96,10 @@ export function TastePicker({ initialPopular, initialAnchorIds }: TastePickerPro
         next.delete(title.id);
         return next;
       });
-      removeMutation.mutate({ titleId: title.id });
+      setLovedMutation.mutate({ titleId: title.id, loved: false });
     } else {
       setPicked((p) => new Set(p).add(title.id));
-      upsertMutation.mutate({ titleId: title.id, kind: 'anchor' });
+      setLovedMutation.mutate({ titleId: title.id, loved: true });
     }
   };
 
@@ -116,10 +118,10 @@ export function TastePicker({ initialPopular, initialAnchorIds }: TastePickerPro
   return (
     <main className="mx-auto max-w-5xl px-6 pt-12 pb-32">
       <header className="mb-6 max-w-2xl">
-        <h1 className="text-3xl font-semibold tracking-tight">Refine your taste</h1>
-        <p className="mt-3 text-text-body">
-          Add or remove anchors to shape your recommendations. Every pick saves automatically. More
-          refinement modes — pairwise comparisons and manual ranking — arrive in a future release.
+        <h1 className="text-4xl font-semibold tracking-tight">Your taste</h1>
+        <p className="mt-3 text-base text-text-body">
+          The titles below shape what we recommend. Click any poster to add it as a favourite, or
+          click again to remove. Every change saves automatically and refines your recs in seconds.
         </p>
       </header>
 
@@ -224,7 +226,7 @@ export function TastePicker({ initialPopular, initialAnchorIds }: TastePickerPro
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
           <p className="text-sm text-text-body">
             <span className="font-semibold text-foreground">{picked.size}</span>{' '}
-            {picked.size === 1 ? 'anchor' : 'anchors'} picked
+            {picked.size === 1 ? 'favourite' : 'favourites'}
           </p>
           <Link
             href="/"

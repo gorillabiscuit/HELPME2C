@@ -108,7 +108,7 @@ export default async function GroupDetailPage({ params }: PageProps) {
 
       <Card>
         <CardHeader className="flex flex-row items-baseline justify-between">
-          <CardTitle>Group recommendations</CardTitle>
+          <CardTitle>Recommendations for this group</CardTitle>
           {group.recs.computedAt ? (
             <span className="text-xs font-normal text-muted-foreground">
               Computed {group.recs.computedAt.toUTCString()}
@@ -117,65 +117,73 @@ export default async function GroupDetailPage({ params }: PageProps) {
         </CardHeader>
         <CardContent>
           {top.length === 0 ? (
-            <p className="text-sm text-text-body">
-              No group recs yet. Either everyone&apos;s tastes are too different (the algorithm
-              honestly excludes things one of you would dislike), or the recompute hasn&apos;t
-              landed yet — try refreshing in a moment.
+            <p className="text-base text-text-body">
+              Nothing to suggest yet. This usually means tastes don&apos;t overlap enough (we
+              exclude anything one member would dislike) or the recompute hasn&apos;t finished — try
+              refreshing in a moment.
             </p>
           ) : (
-            <ul className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
-              {top.map((rec) => {
-                const mediaTypeLabel = MEDIA_TYPE_LABEL[rec.mediaType];
-                return (
-                  <li key={rec.id}>
-                    <Link href={`/titles/${rec.id}`} className="group block">
-                      {rec.posterUrl ? (
-                        <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-border bg-muted transition group-hover:border-input">
-                          <Image
-                            src={rec.posterUrl}
-                            alt=""
-                            fill
-                            sizes="(min-width: 1024px) 220px, (min-width: 640px) 33vw, 50vw"
-                            className="object-cover"
-                          />
-                        </div>
-                      ) : (
-                        <div className="aspect-[2/3] rounded-lg border border-border bg-muted" />
-                      )}
-                      <h3 className="mt-2 truncate text-sm font-medium text-foreground group-hover:underline">
-                        {rec.title}
-                      </h3>
-                      <p className="text-xs text-muted-foreground">
-                        {[mediaTypeLabel, rec.releaseYear?.toString()]
-                          .filter((s): s is string => Boolean(s))
-                          .join(' · ')}
-                      </p>
-                    </Link>
-                    {/* Per-member transparency — tiny pills with each
+            <>
+              <p className="mb-4 text-sm text-text-body">
+                Each title shows a small score per member (out of 100). Higher numbers mean a
+                stronger match — handy when you&apos;re weighing whose turn it is to pick.
+              </p>
+              <ul className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
+                {top.map((rec) => {
+                  const mediaTypeLabel = MEDIA_TYPE_LABEL[rec.mediaType];
+                  return (
+                    <li key={rec.id}>
+                      <Link href={`/titles/${rec.id}`} className="group block">
+                        {rec.posterUrl ? (
+                          <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-border bg-muted transition group-hover:border-input">
+                            <Image
+                              src={rec.posterUrl}
+                              alt=""
+                              fill
+                              sizes="(min-width: 1024px) 220px, (min-width: 640px) 33vw, 50vw"
+                              className="object-cover"
+                            />
+                          </div>
+                        ) : (
+                          <div className="aspect-[2/3] rounded-lg border border-border bg-muted" />
+                        )}
+                        <h3 className="mt-2 truncate text-sm font-medium text-foreground group-hover:underline">
+                          {rec.title}
+                        </h3>
+                        <p className="text-xs text-muted-foreground">
+                          {[mediaTypeLabel, rec.releaseYear?.toString()]
+                            .filter((s): s is string => Boolean(s))
+                            .join(' · ')}
+                        </p>
+                      </Link>
+                      {/* Per-member transparency — tiny pills with each
                         member's normalised 0..100 score. The only cross-
                         member data that's exposed per ROADMAP M7 privacy. */}
-                    <div className="mt-1.5 flex flex-wrap gap-1">
-                      {group.members.map((m) => {
-                        const score = rec.perUserScores[m.userId];
-                        if (score === undefined) return null;
-                        return (
-                          <span
-                            key={m.userId}
-                            className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-text-body"
-                            title={`${m.displayName ?? 'Member'}: ${formatScore(score)}/100`}
-                          >
-                            <span className="font-medium">
-                              {m.displayName ?? m.userId.slice(0, 4)}
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {group.members.map((m) => {
+                          const score = rec.perUserScores[m.userId];
+                          if (score === undefined) return null;
+                          return (
+                            <span
+                              key={m.userId}
+                              className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-text-body"
+                              title={`${m.displayName ?? 'Member'}: ${formatScore(score)}/100`}
+                            >
+                              <span className="font-medium">
+                                {m.displayName ?? m.userId.slice(0, 4)}
+                              </span>
+                              <span className="ml-1 text-muted-foreground">
+                                {formatScore(score)}
+                              </span>
                             </span>
-                            <span className="ml-1 text-muted-foreground">{formatScore(score)}</span>
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+                          );
+                        })}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
           )}
         </CardContent>
       </Card>
