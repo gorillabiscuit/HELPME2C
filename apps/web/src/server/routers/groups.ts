@@ -4,6 +4,7 @@ import { and, desc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { inngest, recommendGroupEvent } from '@/inngest/client';
 import { groupMemberships, groupRecommendations, groups, titles, users } from '../schema';
+import { dedupeByFranchise } from '../lib/franchise';
 import { resolveInternalUserId } from '../lib/resolve-user';
 import { protectedProcedure, router } from '../trpc';
 
@@ -191,7 +192,7 @@ export const groupsRouter = router({
             .from(titles)
             .where(inArray(titles.id, titleIds));
           const titleById = new Map(titleRows.map((t) => [t.id, t]));
-          recItems = recRow.payload.items.flatMap((item) => {
+          const joined = recRow.payload.items.flatMap((item) => {
             const t = titleById.get(item.titleId);
             if (!t) return [];
             return [
@@ -202,6 +203,18 @@ export const groupsRouter = router({
               },
             ];
           });
+
+          // Collapse franchise seasons/cours/parts to one card so a
+          // group's rec list doesn't waste slots on multiple AoT entries.
+          // Caveat (v1): dedupeByFranchise keeps the lowest-specificity
+          // entry verbatim — including ITS groupScore + perUserScores —
+          // which differs from recommendations.list's "keep the highest-
+          // scored entry's rank position, swap only the display poster"
+          // pattern. If the canonical entry was scored lower than its
+          // sequel, the displayed score will reflect the canonical entry.
+          // Acceptable for v1; if it bites, port the recommendations.ts
+          // pattern over.
+          recItems = dedupeByFranchise(joined);
         }
       }
 
