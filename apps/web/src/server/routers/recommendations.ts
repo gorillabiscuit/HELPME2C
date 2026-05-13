@@ -11,6 +11,28 @@ import {
 import { resolveInternalUserId } from '../lib/resolve-user';
 import { protectedProcedure, router } from '../trpc';
 
+// Franchise-dedup helper. Normalises a title to its franchise root by
+// stripping common season/cour/part suffixes. Used at rec-read time so
+// the same franchise (e.g. "Jujutsu Kaisen" + "Jujutsu Kaisen Season 2")
+// only shows up once in the dashboard list.
+//
+// Intentionally conservative — keeps colons and bare trailing numbers
+// intact, so distinct works like "Steins;Gate" vs "Steins;Gate 0" or
+// "Demon Slayer: Entertainment District Arc" don't get collapsed.
+// Tradeoff: under-dedups on titles that use bare numbers as season
+// markers (e.g. "Konosuba 2"). Acceptable for v1; the real fix is
+// a franchise_id column populated from AniList relations.
+function franchiseKey(title: string): string {
+  return title
+    .toLowerCase()
+    .trim()
+    .replace(/\s*\(\d{4}\)$/, '') // strip trailing "(2023)"
+    .replace(/\s+(?:season|cour|part|s)\s*\d+$/i, '') // "X Season 2", "X S2", "X Part 3"
+    .replace(/\s+\d+(?:st|nd|rd|th)\s+season$/i, '') // "X 2nd Season"
+    .replace(/\s+(?:ii|iii|iv|v|vi|vii|viii|ix|x)$/i, '') // "X II", "X III"
+    .trim();
+}
+
 // Read path for pre-computed personal recommendations. Per ADR-0008 the
 // scoring runs offline (Inngest job — apps/web/src/inngest/functions/recommend.ts);
 // per ADR-0013 the cache is a single Postgres row per user with a JSONB
@@ -179,8 +201,7 @@ export const recommendationsRouter = router({
         ? { active: true as const, providers: providersForFilter, hiddenCount }
         : emptyFilter;
 
-      const topItems = filteredItems.slice(0, limit);
-      if (topItems.length === 0) {
+      if (filteredItems.length === 0) {
         return {
           items: [],
           computedAt: row.computedAt,
@@ -189,7 +210,13 @@ export const recommendationsRouter = router({
         };
       }
 
-      const titleIds = topItems.map((item) => item.titleId);
+      // Fetch title metadata for the FULL filtered set (up to ~200 ids).
+      // Necessary because franchise-dedup needs the title text to derive
+      // each item's franchiseKey, and dedup must happen before the slice
+      // to `limit` — otherwise we'd slice 20 raw items, dedup, and end
+      // up showing fewer than 20 (or in a degenerate case 1) franchise
+      // groups when several seasons of the same show cluster at the top.
+      const allFilteredIds = filteredItems.map((item) => item.titleId);
       const titleRows = await ctx.db
         .select({
           id: titles.id,
@@ -199,18 +226,35 @@ export const recommendationsRouter = router({
           posterUrl: titles.posterUrl,
         })
         .from(titles)
-        .where(inArray(titles.id, titleIds));
+        .where(inArray(titles.id, allFilteredIds));
 
-      // Map for O(1) lookup; reconstruct rank order from the cached payload.
-      // Titles that have been deleted between cache write and read are
-      // silently dropped — better to show 19 instead of 20 than to show a
-      // broken link.
+      // Map for O(1) lookup; iterate the ranked filteredItems and emit
+      // one row per franchise (the first encountered wins, which is the
+      // highest-scoring entry per franchise since filteredItems is in
+      // engine-rank order). Titles that have been deleted between cache
+      // write and read are silently dropped — better to show 19 than 20
+      // with a broken link.
       const titleById = new Map(titleRows.map((t) => [t.id, t]));
-      const items = topItems.flatMap((item) => {
+      const seenFranchises = new Set<string>();
+      const deduped: Array<{
+        id: string;
+        title: string;
+        mediaType: 'tv' | 'film' | 'anime';
+        releaseYear: number | null;
+        posterUrl: string | null;
+        score: number;
+      }> = [];
+      for (const item of filteredItems) {
         const title = titleById.get(item.titleId);
-        if (!title) return [];
-        return [{ ...title, score: item.score }];
-      });
+        if (!title) continue;
+        const key = franchiseKey(title.title);
+        if (seenFranchises.has(key)) continue;
+        seenFranchises.add(key);
+        deduped.push({ ...title, score: item.score });
+        if (deduped.length >= limit) break;
+      }
+
+      const items = deduped;
 
       return {
         items,
