@@ -23,13 +23,18 @@ import { requireAgeVerified } from '@/lib/require-age-verified';
 //     using TMDB genres as buckets, but the "skip if anchors are
 //     theme-diverse" branch is rec-engine-dependent
 //   - "Refine your taste" swipe mode — voluntary post-onboarding entry
-export default async function OnboardingPage() {
+interface OnboardingPageProps {
+  searchParams: Promise<{ start?: string }>;
+}
+
+export default async function OnboardingPage({ searchParams }: OnboardingPageProps) {
   await requireAgeVerified();
 
   const caller = appRouter.createCaller(await createContext());
-  const [popularTitles, watchEntries] = await Promise.all([
+  const [popularTitles, watchEntries, params] = await Promise.all([
     caller.titles.popular({ limit: 16 }),
     caller.watch.list(),
+    searchParams,
   ]);
 
   // /onboarding is the first-visit funnel. Returning users who already
@@ -48,5 +53,16 @@ export default async function OnboardingPage() {
     rating: entry.rating,
   }));
 
-  return <OnboardingFlow initialPopular={popularTitles} initialEntries={initialEntries} />;
+  // ?start=pick → skip the intro phase. Used by the empty-dashboard
+  // "Pick favourites" CTA; users who clicked it have already opted
+  // into picking and shouldn't see the value-prop screen.
+  const initialPhase = params.start === 'pick' ? 'picker' : 'intro';
+
+  return (
+    <OnboardingFlow
+      initialPopular={popularTitles}
+      initialEntries={initialEntries}
+      initialPhase={initialPhase}
+    />
+  );
 }

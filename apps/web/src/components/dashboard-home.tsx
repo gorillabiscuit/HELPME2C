@@ -64,7 +64,7 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
             point for your personal recommendations. If you just picked, give us a moment.
           </p>
           <Link
-            href="/onboarding"
+            href="/onboarding?start=pick"
             className="mt-6 inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
           >
             Pick favourites
