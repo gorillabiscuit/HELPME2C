@@ -167,7 +167,11 @@ export default async function SearchPage({ searchParams }: PageProps) {
           across query submissions; clicking a filter pill is its own
           link-based navigation that preserves the current q. */}
       <form action="/search" method="get" className="mt-6 flex gap-2">
+        <label htmlFor="search-q" className="sr-only">
+          Search the catalogue
+        </label>
         <Input
+          id="search-q"
           name="q"
           type="search"
           defaultValue={rawQ ?? ''}

@@ -152,11 +152,10 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
         </Link>
       </section>
 
-      {/* Visually-hidden landmark for screen readers — the rec grid is the
-          page's main content. The visible H1 above is the page identity. */}
-      <h2 className="sr-only">Recommendations</h2>
-
-      <ul className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
+      <ul
+        aria-label="Recommendations"
+        className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4"
+      >
         {recs.map((rec, i) => {
           const mediaTypeLabel = MEDIA_TYPE_LABEL[rec.mediaType];
           return (

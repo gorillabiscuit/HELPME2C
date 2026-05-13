@@ -52,18 +52,22 @@ export function TopNav() {
         <Show when="signed-in">
           {/* Desktop primary nav — hidden on mobile, replaced by hamburger sheet. */}
           <nav className="hidden items-center gap-4 text-sm md:flex">
-            {PRIMARY_NAV.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  'rounded text-text-body hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2',
-                  isActive(pathname, item.href) && 'font-medium text-foreground',
-                )}
-              >
-                {item.label}
-              </Link>
-            ))}
+            {PRIMARY_NAV.map((item) => {
+              const active = isActive(pathname, item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  aria-current={active ? 'page' : undefined}
+                  className={cn(
+                    'rounded text-text-body hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2',
+                    active && 'font-medium text-foreground',
+                  )}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
           </nav>
         </Show>
       </div>
@@ -130,19 +134,23 @@ export function TopNav() {
             </div>
 
             <nav className="flex flex-col gap-1 text-base">
-              {PRIMARY_NAV.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={() => setMobileOpen(false)}
-                  className={cn(
-                    'rounded-md px-3 py-2 text-text-body hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2',
-                    isActive(pathname, item.href) && 'bg-muted font-medium text-foreground',
-                  )}
-                >
-                  {item.label}
-                </Link>
-              ))}
+              {PRIMARY_NAV.map((item) => {
+                const active = isActive(pathname, item.href);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    aria-current={active ? 'page' : undefined}
+                    onClick={() => setMobileOpen(false)}
+                    className={cn(
+                      'rounded-md px-3 py-2 text-text-body hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2',
+                      active && 'bg-muted font-medium text-foreground',
+                    )}
+                  >
+                    {item.label}
+                  </Link>
+                );
+              })}
             </nav>
           </DialogPrimitive.Content>
         </DialogPrimitive.Portal>

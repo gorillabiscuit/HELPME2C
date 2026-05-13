@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { GripVertical, Shuffle, Star } from 'lucide-react';
+import { ChevronDown, ChevronUp, GripVertical, Shuffle, Star } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { Button } from '@/components/ui/button';
 import { TastePicker } from '@/components/taste-picker';
@@ -76,33 +76,68 @@ export function TasteWorkspace({ initialPopular, initialEntries }: TasteWorkspac
         </p>
       </header>
 
-      <nav aria-label="Taste workspace tabs" className="mb-6 flex gap-1 border-b border-border">
-        <TabButton active={tab === 'ranked'} onClick={() => setTab('ranked')} label="Ranked" />
-        <TabButton active={tab === 'compare'} onClick={() => setTab('compare')} label="Compare" />
-        <TabButton active={tab === 'add'} onClick={() => setTab('add')} label="Add" />
-      </nav>
+      <div
+        role="tablist"
+        aria-label="Taste workspace"
+        className="mb-6 flex gap-1 border-b border-border"
+      >
+        <TabButton
+          tab="ranked"
+          active={tab === 'ranked'}
+          onClick={() => setTab('ranked')}
+          label="Ranked"
+        />
+        <TabButton
+          tab="compare"
+          active={tab === 'compare'}
+          onClick={() => setTab('compare')}
+          label="Compare"
+        />
+        <TabButton tab="add" active={tab === 'add'} onClick={() => setTab('add')} label="Add" />
+      </div>
 
-      {tab === 'ranked' ? <RankedView /> : null}
-      {tab === 'compare' ? <CompareView /> : null}
-      {tab === 'add' ? (
-        <TastePickerWrapper initialPopular={initialPopular} initialEntries={initialEntries} />
-      ) : null}
+      <div
+        role="tabpanel"
+        id="tabpanel-ranked"
+        aria-labelledby="tab-ranked"
+        hidden={tab !== 'ranked'}
+      >
+        {tab === 'ranked' ? <RankedView /> : null}
+      </div>
+      <div
+        role="tabpanel"
+        id="tabpanel-compare"
+        aria-labelledby="tab-compare"
+        hidden={tab !== 'compare'}
+      >
+        {tab === 'compare' ? <CompareView /> : null}
+      </div>
+      <div role="tabpanel" id="tabpanel-add" aria-labelledby="tab-add" hidden={tab !== 'add'}>
+        {tab === 'add' ? (
+          <TastePickerWrapper initialPopular={initialPopular} initialEntries={initialEntries} />
+        ) : null}
+      </div>
     </main>
   );
 }
 
 interface TabButtonProps {
+  tab: Tab;
   active: boolean;
   onClick: () => void;
   label: string;
 }
 
-function TabButton({ active, onClick, label }: TabButtonProps) {
+function TabButton({ tab, active, onClick, label }: TabButtonProps) {
   return (
     <button
       type="button"
+      role="tab"
+      id={`tab-${tab}`}
+      aria-selected={active}
+      aria-controls={`tabpanel-${tab}`}
+      tabIndex={active ? 0 : -1}
       onClick={onClick}
-      aria-current={active ? 'page' : undefined}
       className={cn(
         '-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2',
         active
@@ -173,11 +208,26 @@ function RankedView() {
     setDragIdx(null);
   };
 
+  // Keyboard alternative to drag — move-up / move-down buttons per row.
+  // Operates on the live order (entries), commits via setRankedOrder.
+  const moveBy = (idx: number, delta: -1 | 1) => {
+    const target = idx + delta;
+    if (target < 0 || target >= entries.length) return;
+    const next = entries.slice();
+    const moved = next[idx];
+    const swap = next[target];
+    if (!moved || !swap) return;
+    next[idx] = swap;
+    next[target] = moved;
+    setDraftOrder(next);
+    setRankedOrder.mutate({ orderedTitleIds: next.map((e) => e.titleId) });
+  };
+
   return (
     <div>
       <p className="mb-4 text-sm text-text-body">
-        Drag titles up or down to reorder. Top of the list = strongest taste signal. Changes save
-        automatically.
+        Drag titles up or down to reorder — or use the arrow buttons on each row for keyboard
+        access. Top of the list = strongest taste signal. Changes save automatically.
       </p>
       <ol className="divide-y divide-border rounded-lg border border-border">
         {entries.map((entry, i) => (
@@ -221,11 +271,33 @@ function RankedView() {
                   .join(' · ')}
               </p>
             </div>
+            <div className="flex flex-none items-center gap-1">
+              <button
+                type="button"
+                onClick={() => moveBy(i, -1)}
+                disabled={i === 0 || setRankedOrder.isPending}
+                aria-label={`Move ${entry.title.title} up`}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-30"
+              >
+                <ChevronUp className="h-4 w-4" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                onClick={() => moveBy(i, 1)}
+                disabled={i === entries.length - 1 || setRankedOrder.isPending}
+                aria-label={`Move ${entry.title.title} down`}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-30"
+              >
+                <ChevronDown className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
           </li>
         ))}
       </ol>
       {setRankedOrder.isPending ? (
-        <p className="mt-2 text-xs text-muted-foreground">Saving order…</p>
+        <p className="mt-2 text-xs text-muted-foreground" aria-live="polite">
+          Saving order…
+        </p>
       ) : null}
     </div>
   );
