@@ -152,7 +152,13 @@ export const titlesRouter = router({
         ? and(textMatch, eq(titles.mediaType, input.mediaType))
         : textMatch;
 
-      return ctx.db
+      // Overfetch 3× so franchise dedup has room to find representatives
+      // without leaving the grid short. Then collapse seasons/cours/parts
+      // of the same franchise into the canonical entry so a user searching
+      // "attack on titan" sees one card, not three. Specific-season
+      // searches ("attack on titan season 3") naturally still match
+      // only one row, so dedup is a no-op there.
+      const rows = await ctx.db
         .select({
           id: titles.id,
           title: titles.title,
@@ -167,6 +173,7 @@ export const titlesRouter = router({
         .from(titles)
         .where(where)
         .orderBy(sql`${titles.popularityScore} DESC NULLS LAST, ${titles.title} ASC`)
-        .limit(input.limit);
+        .limit(input.limit * 3);
+      return dedupeByFranchise(rows).slice(0, input.limit);
     }),
 });
