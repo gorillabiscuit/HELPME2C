@@ -45,6 +45,19 @@ export function PreviewModal({ open, onOpenChange, videoId, titleText }: Preview
     if (open) setAudioOn(audioPreference);
   }, [open, audioPreference]);
 
+  // The Radix dialog centres itself with translate(-50%) + top/left 50%
+  // and constrains width to max-w-3xl. Those CSS rules persist when the
+  // element enters fullscreen, putting only the bottom-right quadrant
+  // of the modal visible inside the fullscreen viewport. Track fullscreen
+  // state in React and swap to a fill-the-viewport class set so Tailwind
+  // utility classes win cleanly without CSS specificity battles.
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  useEffect(() => {
+    const handler = () => setIsFullscreen(document.fullscreenElement === containerRef.current);
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  }, []);
+
   const onToggleFullscreen = async () => {
     const el = containerRef.current;
     if (!el) return;
@@ -72,8 +85,10 @@ export function PreviewModal({ open, onOpenChange, videoId, titleText }: Preview
           ref={containerRef}
           aria-label={`Preview: ${titleText}`}
           className={cn(
-            'fixed top-[50%] left-[50%] z-50 w-[calc(100vw-2rem)] max-w-3xl translate-x-[-50%] translate-y-[-50%]',
-            'overflow-hidden rounded-xl bg-black shadow-2xl ring-1 ring-white/10',
+            'fixed z-50 overflow-hidden bg-black shadow-2xl ring-1 ring-white/10',
+            isFullscreen
+              ? 'inset-0 flex h-screen w-screen items-center justify-center'
+              : 'top-[50%] left-[50%] w-[calc(100vw-2rem)] max-w-3xl translate-x-[-50%] translate-y-[-50%] rounded-xl',
             'data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95',
             'data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95',
           )}
@@ -81,8 +96,14 @@ export function PreviewModal({ open, onOpenChange, videoId, titleText }: Preview
           {/* Hidden title for screen readers — Radix requires DialogTitle. */}
           <DialogPrimitive.Title className="sr-only">Preview: {titleText}</DialogPrimitive.Title>
 
-          {/* 16:9 video frame */}
-          <div className="relative aspect-video w-full bg-black">
+          {/* Video frame: 16:9 by default; in fullscreen, fill the viewport
+              and let YouTube letterbox inside its own iframe. */}
+          <div
+            className={cn(
+              'relative bg-black',
+              isFullscreen ? 'h-full w-full' : 'aspect-video w-full',
+            )}
+          >
             <iframe
               key={embedSrc}
               src={embedSrc}
