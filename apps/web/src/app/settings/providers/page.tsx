@@ -29,8 +29,8 @@ export default async function ProvidersSettingsPage() {
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
-      <h1 className="text-3xl font-semibold tracking-tight">Streaming services</h1>
-      <p className="mt-2 text-sm text-text-body">
+      <h1 className="text-4xl font-semibold tracking-tight">Streaming services</h1>
+      <p className="mt-2 max-w-2xl text-base text-text-body">
         Pick the services you subscribe to. We&apos;ll filter your recommendations to titles that
         are actually available on at least one of them. Showing providers for{' '}
         <span className="font-medium text-foreground">{country}</span>.

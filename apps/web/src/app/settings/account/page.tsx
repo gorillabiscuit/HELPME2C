@@ -29,8 +29,8 @@ export default async function AccountSettingsPage() {
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-12">
-      <h1 className="text-3xl font-semibold tracking-tight">Account &amp; privacy</h1>
-      <p className="mt-2 text-sm text-text-body">
+      <h1 className="text-4xl font-semibold tracking-tight">Account &amp; privacy</h1>
+      <p className="mt-2 max-w-2xl text-base text-text-body">
         Download a copy of everything we hold on you, or permanently delete your account. Cookie and
         analytics preferences live on the banner at the foot of the page.
       </p>

@@ -21,8 +21,8 @@ export default async function GroupsPage() {
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
-      <h1 className="text-3xl font-semibold tracking-tight">Groups</h1>
-      <p className="mt-2 text-sm text-text-body">
+      <h1 className="text-4xl font-semibold tracking-tight">Groups</h1>
+      <p className="mt-2 max-w-2xl text-base text-text-body">
         Create a group to get joint recommendations with others. Members see group recs and each
         other&apos;s display name only — your library and ratings stay private.
       </p>

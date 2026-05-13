@@ -14,11 +14,11 @@ export default async function ImportPage() {
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-12">
-      <h1 className="text-3xl font-semibold tracking-tight">Import your list</h1>
-      <p className="mt-2 text-sm text-text-body">
+      <h1 className="text-4xl font-semibold tracking-tight">Import your list</h1>
+      <p className="mt-2 max-w-2xl text-base text-text-body">
         Bring your existing anime list across so HelpME2C&apos;s recommendations can learn from it.
-        We&apos;ll match titles to our catalogue and add them as &lsquo;tracking&rsquo; entries with
-        your status + rating preserved. Existing favourites stay untouched.
+        We&apos;ll match titles to our catalogue and add them as tracking entries with your status
+        and rating preserved.
       </p>
 
       <Card className="mt-8">
