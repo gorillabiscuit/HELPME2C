@@ -1,5 +1,4 @@
 import {
-  boolean,
   doublePrecision,
   index,
   integer,
@@ -78,14 +77,6 @@ export const watchEntries = pgTable(
     notes: text('notes'),
 
     privacy: privacyLevelEnum('privacy').notNull().default('private'),
-
-    // DEPRECATED — kept for backward compatibility with the unified-taste
-    // model commit. Under the rated-taste model (current): "your taste"
-    // is the set of rated entries, ordered by `manual_rank` (if set),
-    // then `elo_score`, then `rating`. `loved` is no longer read by
-    // anything; column will be dropped once the data has migrated and
-    // we're confident there's no rollback.
-    loved: boolean('loved').notNull().default(false),
 
     // User's explicit position in the ranked taste list. Set by the
     // drag-to-reorder UI. Lower = ranked higher. NULL means "no manual

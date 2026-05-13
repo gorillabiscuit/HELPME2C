@@ -139,7 +139,6 @@ export const watchRouter = router({
         currentEpisode: z.number().int().min(0).optional(),
         notes: z.string().max(5000).optional(),
         privacy: privacySchema.optional(),
-        loved: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -171,7 +170,6 @@ export const watchRouter = router({
       if (input.currentEpisode !== undefined) updateSet.currentEpisode = input.currentEpisode;
       if (input.notes !== undefined) updateSet.notes = input.notes;
       if (input.privacy !== undefined) updateSet.privacy = input.privacy;
-      if (input.loved !== undefined) updateSet.loved = input.loved;
 
       const [row] = await ctx.db
         .insert(watchEntries)
@@ -188,7 +186,6 @@ export const watchRouter = router({
           // if defaultPrivacy is somehow null, but the schema NOT NULL +
           // 'private' default guarantee it isn't.
           privacy: input.privacy ?? userRow.defaultPrivacy,
-          loved: input.loved ?? false,
         })
         .onConflictDoUpdate({
           target: [watchEntries.userId, watchEntries.titleId],
