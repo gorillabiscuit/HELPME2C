@@ -21,6 +21,47 @@ function franchiseKey(title: string): string {
   return key;
 }
 
+const ROMAN_TO_INT: Record<string, number> = {
+  ii: 2,
+  iii: 3,
+  iv: 4,
+  v: 5,
+  vi: 6,
+  vii: 7,
+  viii: 8,
+  ix: 9,
+  x: 10,
+};
+
+function franchiseSpecificity(originalTitle: string, key: string): number {
+  const lower = originalTitle.toLowerCase().trim();
+  const lowerNoYear = lower.replace(/\s*\(\d{4}\)$/, '');
+  if (lowerNoYear === key) return 0;
+  if (/(?:^|\s)(?:the\s+)?final\s+(?:season|cour|part)\b/i.test(lower)) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+  let max = 1;
+  const numPatterns = [
+    /season\s*(\d+)/i,
+    /part\s*(\d+)/i,
+    /cour\s*(\d+)/i,
+    /(\d+)(?:st|nd|rd|th)\s+season/i,
+  ];
+  for (const pat of numPatterns) {
+    const m = lower.match(pat);
+    if (m && m[1]) {
+      const n = parseInt(m[1], 10);
+      if (Number.isFinite(n)) max = Math.max(max, n);
+    }
+  }
+  const romanMatch = lower.match(/\s+(ii|iii|iv|v|vi|vii|viii|ix|x)$/i);
+  if (romanMatch && romanMatch[1]) {
+    const n = ROMAN_TO_INT[romanMatch[1].toLowerCase()];
+    if (n) max = Math.max(max, n);
+  }
+  return max;
+}
+
 describe('franchiseKey', () => {
   it('collapses "Season N" suffix', () => {
     expect(franchiseKey('Jujutsu Kaisen')).toBe(franchiseKey('Jujutsu Kaisen Season 2'));
@@ -84,6 +125,70 @@ describe('franchiseKey', () => {
   it('collapses ": The Final Season" with later Part suffix', () => {
     expect(franchiseKey('Attack on Titan: The Final Season Part 1')).toBe(
       franchiseKey('Attack on Titan'),
+    );
+  });
+});
+
+describe('franchiseSpecificity', () => {
+  // Returns the integer that ranks within-franchise entries — lower
+  // is a better representative (the entry-point title a new viewer
+  // should land on).
+
+  it('returns 0 for the series entry (no suffix)', () => {
+    const t = 'Attack on Titan';
+    expect(franchiseSpecificity(t, franchiseKey(t))).toBe(0);
+  });
+
+  it('returns 0 for a series entry with year suffix only', () => {
+    const t = 'Hunter x Hunter (2011)';
+    expect(franchiseSpecificity(t, franchiseKey(t))).toBe(0);
+  });
+
+  it('returns the season number for "Season N"', () => {
+    const t = 'Jujutsu Kaisen Season 2';
+    expect(franchiseSpecificity(t, franchiseKey(t))).toBe(2);
+  });
+
+  it('returns the highest number in compound "Season N Part M"', () => {
+    const t = 'Attack on Titan Season 3 Part 2';
+    expect(franchiseSpecificity(t, franchiseKey(t))).toBe(3);
+  });
+
+  it('returns the roman numeral value for "X II"', () => {
+    const t = 'Hunter x Hunter II';
+    expect(franchiseSpecificity(t, franchiseKey(t))).toBe(2);
+  });
+
+  it('returns ordinal for "X 2nd Season"', () => {
+    const t = 'Mob Psycho 100 2nd Season';
+    expect(franchiseSpecificity(t, franchiseKey(t))).toBe(2);
+  });
+
+  it('returns MAX_SAFE_INTEGER for "Final Season"', () => {
+    const t = 'Attack on Titan Final Season';
+    expect(franchiseSpecificity(t, franchiseKey(t))).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  it('returns MAX_SAFE_INTEGER for ": The Final Season Part N"', () => {
+    const t = 'Attack on Titan: The Final Season Part 1';
+    expect(franchiseSpecificity(t, franchiseKey(t))).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  // Representative-picking sanity: when grouping a franchise, the
+  // entry-point title (lowest specificity) wins.
+  it('ranks Season 1 below Season 3 Part 2', () => {
+    const a = 'Attack on Titan';
+    const b = 'Attack on Titan Season 3 Part 2';
+    expect(franchiseSpecificity(a, franchiseKey(a))).toBeLessThan(
+      franchiseSpecificity(b, franchiseKey(b)),
+    );
+  });
+
+  it('ranks Season 1 below the Final Season', () => {
+    const s1 = 'Attack on Titan Season 1';
+    const fin = 'Attack on Titan Final Season';
+    expect(franchiseSpecificity(s1, franchiseKey(s1))).toBeLessThan(
+      franchiseSpecificity(fin, franchiseKey(fin)),
     );
   });
 });
