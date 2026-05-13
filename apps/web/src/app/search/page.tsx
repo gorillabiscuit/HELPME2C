@@ -7,7 +7,10 @@ import { appRouter } from '@/server/router';
 import { createContext } from '@/server/trpc';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { TitleQuickActions } from '@/components/title-quick-actions';
 import { cn } from '@/lib/utils';
+
+type WatchStatus = 'watching' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_watch';
 
 interface PageProps {
   searchParams: Promise<{ q?: string | string[]; type?: string | string[] }>;
@@ -72,9 +75,21 @@ export default async function SearchPage({ searchParams }: PageProps) {
   } else {
     // Reuses the dogfooded titles.search tRPC procedure so the server
     // page and any future client autocomplete share the same shape +
-    // wildcard escaping + popularity ordering.
+    // wildcard escaping + popularity ordering. Also fetch the user's
+    // full library so each result card knows its current state — keeps
+    // the TitleQuickActions panel consistent with rec cards + /taste Add.
     const caller = appRouter.createCaller(await createContext());
-    const results = await caller.titles.search({ q, mediaType });
+    const [results, watchEntries] = await Promise.all([
+      caller.titles.search({ q, mediaType }),
+      caller.watch.list(),
+    ]);
+
+    const entryByTitleId = new Map<string, { status: WatchStatus | null; rating: number | null }>(
+      watchEntries.map(({ entry, title }) => [
+        title.id,
+        { status: entry.status, rating: entry.rating },
+      ]),
+    );
 
     if (results.length === 0) {
       resultsBlock = (
@@ -89,9 +104,13 @@ export default async function SearchPage({ searchParams }: PageProps) {
         <ul className="mt-8 grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
           {results.map((title) => {
             const mediaTypeLabel = MEDIA_TYPE_LABEL[title.mediaType];
+            const entry = entryByTitleId.get(title.id);
             return (
               <li key={title.id}>
-                <Link href={`/titles/${title.id}`} className="group block">
+                <Link
+                  href={`/titles/${title.id}`}
+                  className="group block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+                >
                   {title.posterUrl ? (
                     <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-border bg-muted transition group-hover:border-input">
                       <Image
@@ -114,6 +133,11 @@ export default async function SearchPage({ searchParams }: PageProps) {
                       .join(' · ')}
                   </p>
                 </Link>
+                <TitleQuickActions
+                  titleId={title.id}
+                  currentState={entry ? { status: entry.status, rating: entry.rating } : null}
+                  size="compact"
+                />
               </li>
             );
           })}
