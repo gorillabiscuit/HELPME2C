@@ -8,6 +8,7 @@ import { trpc } from '@/lib/trpc';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { TitleQuickActions } from '@/components/title-quick-actions';
+import { cn } from '@/lib/utils';
 
 type WatchStatus = 'watching' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_watch';
 
@@ -40,6 +41,9 @@ const MEDIA_TYPE_LABEL: Record<string, string> = {
 
 const MIN_QUERY_LENGTH = 2;
 const SEARCH_DEBOUNCE_MS = 250;
+// Fade-out duration before the picker card unmounts after the user
+// acts on it. Matches the CSS transition below.
+const TRANSITION_OUT_MS = 220;
 
 export function OnboardingFlow({ initialPopular, initialEntries }: OnboardingFlowProps) {
   const router = useRouter();
@@ -50,6 +54,23 @@ export function OnboardingFlow({ initialPopular, initialEntries }: OnboardingFlo
 
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
+
+  // Titles being faded out — held briefly so the CSS transition runs
+  // before the parent re-render with new server state removes them.
+  const [exiting, setExiting] = useState<Set<string>>(new Set());
+
+  const handleActionComplete = (titleId: string) => {
+    setExiting((s) => new Set(s).add(titleId));
+    // setTimeout here is for animation timing, not retry — §3 ban is
+    // specifically about retry loops.
+    setTimeout(() => {
+      setExiting((s) => {
+        const next = new Set(s);
+        next.delete(titleId);
+        return next;
+      });
+    }, TRANSITION_OUT_MS);
+  };
 
   // Debounce the search input so we don't fire a tRPC query on every
   // keystroke. setTimeout here is for input debounce, not retry — the
@@ -82,10 +103,23 @@ export function OnboardingFlow({ initialPopular, initialEntries }: OnboardingFlo
   const ratedCount = initialEntries.filter((e) => e.rating !== null).length;
 
   const showingSearchResults = searchEnabled;
-  const titlesToShow: TitleSummary[] = showingSearchResults
+  const rawTitlesToShow: TitleSummary[] = showingSearchResults
     ? (searchQuery.data ?? [])
     : initialPopular;
   const isLoadingResults = showingSearchResults && searchQuery.isFetching;
+
+  // Hide titles the user has already rated/added from the popular grid
+  // so each action makes room for a new title to rate. Mid-fade cards
+  // (`exiting`) stay rendered until their transition finishes. Search
+  // results are not filtered — if a user explicitly searched a title
+  // they already rated, they want to see it.
+  const titlesToShow = showingSearchResults
+    ? rawTitlesToShow
+    : rawTitlesToShow.filter((title) => {
+        if (exiting.has(title.id)) return true;
+        const entry = entryByTitleId.get(title.id);
+        return !entry || entry.status === null;
+      });
 
   if (phase === 'intro') {
     return (
@@ -169,8 +203,15 @@ export function OnboardingFlow({ initialPopular, initialEntries }: OnboardingFlo
           {titlesToShow.map((title) => {
             const mediaTypeLabel = MEDIA_TYPE_LABEL[title.mediaType] ?? title.mediaType;
             const entry = entryByTitleId.get(title.id);
+            const isExiting = exiting.has(title.id);
             return (
-              <li key={title.id}>
+              <li
+                key={title.id}
+                className={cn(
+                  'transition-all duration-200 ease-out',
+                  isExiting && 'pointer-events-none scale-95 opacity-0',
+                )}
+              >
                 <Link
                   href={`/titles/${title.id}`}
                   className="group block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
@@ -199,6 +240,7 @@ export function OnboardingFlow({ initialPopular, initialEntries }: OnboardingFlo
                   titleId={title.id}
                   currentState={entry ? { status: entry.status, rating: entry.rating } : null}
                   size="compact"
+                  onActionComplete={() => handleActionComplete(title.id)}
                 />
               </li>
             );
