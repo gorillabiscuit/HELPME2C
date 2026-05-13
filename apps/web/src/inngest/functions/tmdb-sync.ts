@@ -25,6 +25,19 @@ interface TmdbDiscoverPage {
   total_pages: number;
 }
 
+interface TmdbVideo {
+  id: string;
+  key: string; // YouTube video id when site === 'YouTube'
+  site: string; // 'YouTube' | 'Vimeo' | ...
+  type: string; // 'Trailer' | 'Teaser' | 'Clip' | ...
+  official: boolean;
+  published_at?: string;
+}
+
+interface TmdbVideosResponse {
+  results: TmdbVideo[];
+}
+
 interface TmdbTvDetail {
   id: number;
   name: string;
@@ -39,6 +52,26 @@ interface TmdbTvDetail {
   backdrop_path: string | null;
   popularity: number;
   keywords: { results: { id: number; name: string }[] };
+  videos?: TmdbVideosResponse;
+}
+
+// Pick a trailer (or fallback teaser) from a TMDB videos response.
+// Preference order: official YouTube Trailer → unofficial YouTube
+// Trailer → YouTube Teaser → null. TMDB returns videos roughly in
+// release order; the type filter is the actual selector. Returns
+// { provider, videoId } or null if nothing usable.
+function pickTrailerFromTmdb(
+  videos: TmdbVideosResponse | undefined,
+): { provider: string; videoId: string } | null {
+  if (!videos?.results || videos.results.length === 0) return null;
+  const youTubeOnly = videos.results.filter((v) => v.site === 'YouTube' && v.key);
+  if (youTubeOnly.length === 0) return null;
+  const officialTrailer = youTubeOnly.find((v) => v.type === 'Trailer' && v.official);
+  const anyTrailer = youTubeOnly.find((v) => v.type === 'Trailer');
+  const teaser = youTubeOnly.find((v) => v.type === 'Teaser');
+  const chosen = officialTrailer ?? anyTrailer ?? teaser;
+  if (!chosen) return null;
+  return { provider: 'youtube', videoId: chosen.key };
 }
 
 interface TmdbWatchProviders {
@@ -133,10 +166,13 @@ async function upsertStreamingProviders(
 // be invoked directly for backfills, ad-hoc tests, or future admin tooling.
 // Returns the upserted title's UUID, or null if the upsert produced no row.
 export async function processTmdbTvShow(showId: number): Promise<string | null> {
+  // append_to_response keeps the videos fetch in the same HTTP call as
+  // the main detail — no extra TMDB request per title.
   const [detail, providers] = await Promise.all([
-    tmdbGet<TmdbTvDetail>(`/tv/${showId}?append_to_response=keywords&language=en-US`),
+    tmdbGet<TmdbTvDetail>(`/tv/${showId}?append_to_response=keywords,videos&language=en-US`),
     tmdbGet<TmdbWatchProviders>(`/tv/${showId}/watch/providers`),
   ]);
+  const trailer = pickTrailerFromTmdb(detail.videos);
 
   const [upserted] = await db
     .insert(titles)
@@ -158,6 +194,8 @@ export async function processTmdbTvShow(showId: number): Promise<string | null> 
       posterUrl: detail.poster_path ? `${TMDB_IMAGE_BASE}${detail.poster_path}` : null,
       backdropUrl: detail.backdrop_path ? `${TMDB_IMAGE_BASE}${detail.backdrop_path}` : null,
       popularityScore: detail.popularity,
+      trailerProvider: trailer?.provider ?? null,
+      trailerVideoId: trailer?.videoId ?? null,
     })
     .onConflictDoUpdate({
       target: [titles.externalId, titles.source],
@@ -167,6 +205,8 @@ export async function processTmdbTvShow(showId: number): Promise<string | null> 
         status: tmdbStatusToEnum(detail.status),
         episodeCount: detail.number_of_episodes || null,
         popularityScore: detail.popularity,
+        trailerProvider: trailer?.provider ?? null,
+        trailerVideoId: trailer?.videoId ?? null,
         updatedAt: new Date(),
       },
     })
