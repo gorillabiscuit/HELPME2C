@@ -44,6 +44,72 @@ function franchiseKey(title: string): string {
   return key;
 }
 
+// Within a franchise group, pick the entry-point representative — the
+// title a new user should be pointed at first. Returns an integer
+// where LOWER = better representative.
+//
+//   0  — series entry (no season suffix at all, e.g. "Attack on Titan")
+//   N  — explicit season/part/cour number
+//   ∞  — "Final Season" / "Final Cour" / "Final Part" (treat as last)
+//
+// Tiebreaker (handled by the caller): engine score.
+//
+// Why prefer no-suffix > S1 > S2 > … > Final: a user discovering the
+// franchise should land on the canonical entry, not on Season 3. The
+// franchise ranks where the engine put it (using the highest in-group
+// score for position); the displayed poster is the entry point.
+const ROMAN_TO_INT: Record<string, number> = {
+  ii: 2,
+  iii: 3,
+  iv: 4,
+  v: 5,
+  vi: 6,
+  vii: 7,
+  viii: 8,
+  ix: 9,
+  x: 10,
+};
+
+function franchiseSpecificity(originalTitle: string, key: string): number {
+  const lower = originalTitle.toLowerCase().trim();
+  // Same as franchiseKey output → no suffix was stripped → series entry.
+  // Strip trailing "(2023)" first so "Hunter x Hunter (2011)" still
+  // counts as a series entry, just versioned.
+  const lowerNoYear = lower.replace(/\s*\(\d{4}\)$/, '');
+  if (lowerNoYear === key) return 0;
+
+  if (/(?:^|\s)(?:the\s+)?final\s+(?:season|cour|part)\b/i.test(lower)) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  // Largest explicit numeric marker wins as the specificity. "Season 3
+  // Part 2" → 3. We're picking representatives across the FAMILY of
+  // entries; using max-number here keeps the ordering monotonic with
+  // how franchises actually number sub-entries.
+  let max = 1;
+  const numPatterns = [
+    /season\s*(\d+)/i,
+    /part\s*(\d+)/i,
+    /cour\s*(\d+)/i,
+    /(\d+)(?:st|nd|rd|th)\s+season/i,
+  ];
+  for (const pat of numPatterns) {
+    const m = lower.match(pat);
+    if (m && m[1]) {
+      const n = parseInt(m[1], 10);
+      if (Number.isFinite(n)) max = Math.max(max, n);
+    }
+  }
+
+  const romanMatch = lower.match(/\s+(ii|iii|iv|v|vi|vii|viii|ix|x)$/i);
+  if (romanMatch && romanMatch[1]) {
+    const n = ROMAN_TO_INT[romanMatch[1].toLowerCase()];
+    if (n) max = Math.max(max, n);
+  }
+
+  return max;
+}
+
 // Read path for pre-computed personal recommendations. Per ADR-0008 the
 // scoring runs offline (Inngest job — apps/web/src/inngest/functions/recommend.ts);
 // per ADR-0013 the cache is a single Postgres row per user with a JSONB
@@ -241,15 +307,14 @@ export const recommendationsRouter = router({
         .from(titles)
         .where(inArray(titles.id, allFilteredIds));
 
-      // Map for O(1) lookup; iterate the ranked filteredItems and emit
-      // one row per franchise (the first encountered wins, which is the
-      // highest-scoring entry per franchise since filteredItems is in
-      // engine-rank order). Titles that have been deleted between cache
-      // write and read are silently dropped — better to show 19 than 20
-      // with a broken link.
+      // Group filteredItems by franchiseKey, picking each group's
+      // entry-point representative (lowest franchiseSpecificity) but
+      // ranking the group by the HIGHEST in-group engine score. Net
+      // effect: the franchise sits where the engine ranked its best
+      // candidate, but the poster the user sees is the canonical
+      // series entry — not "Season 3 Part 2".
       const titleById = new Map(titleRows.map((t) => [t.id, t]));
-      const seenFranchises = new Set<string>();
-      const deduped: Array<{
+      type Representative = {
         id: string;
         title: string;
         mediaType: 'tv' | 'film' | 'anime';
@@ -258,18 +323,40 @@ export const recommendationsRouter = router({
         trailerProvider: string | null;
         trailerVideoId: string | null;
         score: number;
-      }> = [];
+      };
+      type Group = {
+        firstScore: number;
+        bestSpecificity: number;
+        representative: Representative;
+      };
+      const groups = new Map<string, Group>();
       for (const item of filteredItems) {
         const title = titleById.get(item.titleId);
         if (!title) continue;
         const key = franchiseKey(title.title);
-        if (seenFranchises.has(key)) continue;
-        seenFranchises.add(key);
-        deduped.push({ ...title, score: item.score });
-        if (deduped.length >= limit) break;
+        const specificity = franchiseSpecificity(title.title, key);
+        const existing = groups.get(key);
+        if (!existing) {
+          // First encounter — establishes the franchise's rank position
+          // (filteredItems is in engine-rank order, so the first item
+          // for a franchise is its top-scored candidate).
+          groups.set(key, {
+            firstScore: item.score,
+            bestSpecificity: specificity,
+            representative: { ...title, score: item.score },
+          });
+        } else if (specificity < existing.bestSpecificity) {
+          // Less specific = better representative. Keep firstScore so
+          // ranking stays anchored on the engine's top-scored member.
+          existing.bestSpecificity = specificity;
+          existing.representative = { ...title, score: item.score };
+        }
       }
 
-      const items = deduped;
+      const items = Array.from(groups.values())
+        .sort((a, b) => b.firstScore - a.firstScore)
+        .slice(0, limit)
+        .map((g) => g.representative);
 
       return {
         items,
