@@ -15,17 +15,24 @@
  * Season 2", and "Attack on Titan: The Final Season" collapse to a
  * single key.
  *
+ * Returned key is always lowercased and trimmed.
+ *
  * Multi-pass: strips are applied repeatedly until the title stops
  * changing, so compound suffixes like "Attack on Titan Season 3 Part 2"
  * collapse correctly ("Part 2" → "Season 3" → ""). Capped at 6 passes
  * to avoid pathological infinite loops on weird inputs.
  *
+ * "Final Season" / "Final Cour" / "Final Part" is recognised in four
+ * separator forms: bare space, colon (`:`), hyphen-minus (`-`), and
+ * en-dash (`–`, U+2013). An optional leading "The" is allowed in each.
+ *
  * Intentionally conservative — keeps colons and bare trailing numbers
  * intact, so distinct works like "Steins;Gate" vs "Steins;Gate 0" or
  * "Demon Slayer: Entertainment District Arc" don't get collapsed.
  * Tradeoff: under-dedups on titles that use bare numbers as season
- * markers (e.g. "Konosuba 2"). Acceptable for v1; the real fix is
- * a franchise_id column populated from AniList relations.
+ * markers (e.g. "Konosuba 2" stays distinct from "Konosuba"). Acceptable
+ * for v1; the real fix is a franchise_id column populated from AniList
+ * relations.
  */
 export function franchiseKey(title: string): string {
   let key = title.toLowerCase().trim();
@@ -60,9 +67,15 @@ const ROMAN_TO_INT: Record<string, number> = {
  * Within a franchise group, return an integer where LOWER = better
  * representative for first-time discovery.
  *
- *   0  — series entry (no season suffix at all, e.g. "Attack on Titan")
- *   N  — explicit season/part/cour number
- *   ∞  — "Final Season" / "Final Cour" / "Final Part" (treat as last)
+ *   0  — series entry (no season suffix; trailing `(YYYY)` doesn't count
+ *        as a season — "Hunter x Hunter (2011)" is still a series entry)
+ *   N  — explicit season/part/cour number (compound: max of all markers)
+ *   ∞  — `Number.MAX_SAFE_INTEGER` for "Final Season" / "Final Cour" /
+ *        "Final Part" (treat as last)
+ *
+ * Fallback: titles that differ from `key` but match none of the
+ * recognised patterns return 1 (treated as a generic "season 1"). This
+ * shouldn't occur in practice unless input is malformed.
  *
  * Why prefer no-suffix > S1 > S2 > … > Final: a user discovering the
  * franchise should land on the canonical entry, not on Season 3. The
@@ -113,10 +126,10 @@ export function franchiseSpecificity(originalTitle: string, key: string): number
  * Group rows by franchise and return one representative per franchise.
  *
  * Within a franchise, the representative is the row with the LOWEST
- * franchiseSpecificity (i.e. the canonical entry — no season suffix
- * beats Season 1 beats Season 2 etc). When multiple rows tie on
- * specificity, the first one in `rows` wins (caller controls input
- * order — typically already sorted by popularity or engine score).
+ * `franchiseSpecificity` — that function is ordered so series entry (0)
+ * beats Season 1 beats Season 2 beats … beats Final (MAX_SAFE_INTEGER).
+ * When multiple rows tie on specificity (e.g. two "Season 2" rows in
+ * input), the first occurrence in `rows` wins; later ties are dropped.
  *
  * Output preserves the order in which each franchise's representative
  * first appeared in `rows`. So if rows are pre-sorted by popularity,
