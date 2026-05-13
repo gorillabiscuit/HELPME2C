@@ -17,6 +17,7 @@ import {
   users,
   watchEntries,
 } from '@/server/schema';
+import { dedupeByFranchise } from '@/server/lib/franchise';
 import { groupTagsIntoTitleSets } from '@/inngest/lib/group-tags';
 import { PreviewOverlay } from '@/components/preview-overlay';
 import { TitleDetailAddButton } from '@/components/title-detail-add-button';
@@ -233,27 +234,27 @@ export default async function TitleDetailPage({ params }: PageProps) {
       ? null
       : { titleId: id, tags: sourceTagRows.map((r) => ({ tagId: r.tagId, weight: r.weight })) };
 
-  const bridges = sourceTitleTagSet
+  // Overfetch 3× then collapse seasons of the same franchise. Without
+  // this, "Attack on Titan", "AoT Season 2", "AoT Final Season" all
+  // place separately and burn slots on the 6-card grid. Specific-season
+  // bridges are still possible if the theme overlap is strong enough on
+  // a specific season but not others — rare in practice.
+  const BRIDGE_DISPLAY_LIMIT = 6;
+  const rawBridges = sourceTitleTagSet
     ? findCrossMediumBridges(
         sourceTitleTagSet,
         groupTagsIntoTitleSets(candidateTagRows),
         themeRows,
-        6,
+        BRIDGE_DISPLAY_LIMIT * 3,
       )
     : [];
 
-  // Fetch display metadata only for the bridges we'll actually render.
-  // Two parallel SELECTs — title metadata + the names of the themes
-  // referenced by bridgedThemes[0] on each card (for the "shares your
-  // X theme" subtitle).
-  const bridgeTitleIds = bridges.map((b) => b.titleId);
-  const bridgeThemeIds = Array.from(
-    new Set(bridges.flatMap((b) => b.bridgedThemes.slice(0, 1).map((t) => t.themeId))),
-  );
-
-  const [bridgeTitleRows, bridgeThemeRows] = await Promise.all([
-    bridgeTitleIds.length > 0
-      ? db
+  // Fetch display metadata for the overfetched set so we have title
+  // text for franchise dedup before slicing to the display limit.
+  const rawBridgeTitleIds = rawBridges.map((b) => b.titleId);
+  const rawBridgeTitleRows =
+    rawBridgeTitleIds.length > 0
+      ? await db
           .select({
             id: titles.id,
             title: titles.title,
@@ -262,33 +263,38 @@ export default async function TitleDetailPage({ params }: PageProps) {
             posterUrl: titles.posterUrl,
           })
           .from(titles)
-          .where(inArray(titles.id, bridgeTitleIds))
-      : Promise.resolve(
-          [] as Array<{
-            id: string;
-            title: string;
-            mediaType: 'tv' | 'film' | 'anime';
-            releaseYear: number | null;
-            posterUrl: string | null;
-          }>,
-        ),
+          .where(inArray(titles.id, rawBridgeTitleIds))
+      : [];
+  const rawBridgeTitleById = new Map(rawBridgeTitleRows.map((t) => [t.id, t]));
+
+  // Join bridge scores with title metadata, then dedup by franchise
+  // and slice to the display limit. Theme info is attached separately
+  // below (themeName lookup only needs the deduped survivors).
+  const joinedBridges = rawBridges.flatMap((b) => {
+    const meta = rawBridgeTitleById.get(b.titleId);
+    if (!meta) return [];
+    return [{ ...meta, bridgedThemes: b.bridgedThemes }];
+  });
+  const bridges = dedupeByFranchise(joinedBridges).slice(0, BRIDGE_DISPLAY_LIMIT);
+
+  // Theme names for the "Shares the X theme" subtitle, one per card.
+  const bridgeThemeIds = Array.from(
+    new Set(bridges.flatMap((b) => b.bridgedThemes.slice(0, 1).map((t) => t.themeId))),
+  );
+
+  const bridgeThemeRows =
     bridgeThemeIds.length > 0
-      ? db
+      ? await db
           .select({ id: themes.id, name: themes.name })
           .from(themes)
           .where(inArray(themes.id, bridgeThemeIds))
-      : Promise.resolve([] as Array<{ id: string; name: string }>),
-  ]);
-
-  const bridgeTitleById = new Map(bridgeTitleRows.map((t) => [t.id, t]));
+      : [];
   const bridgeThemeNameById = new Map(bridgeThemeRows.map((t) => [t.id, t.name]));
 
-  const bridgeCards = bridges.flatMap((b) => {
-    const meta = bridgeTitleById.get(b.titleId);
-    if (!meta) return [];
+  const bridgeCards = bridges.map((b) => {
     const topTheme = b.bridgedThemes[0];
     const themeName = topTheme ? bridgeThemeNameById.get(topTheme.themeId) : null;
-    return [{ ...meta, themeName }];
+    return { id: b.id, title: b.title, posterUrl: b.posterUrl, themeName };
   });
 
   const yearLabel =
