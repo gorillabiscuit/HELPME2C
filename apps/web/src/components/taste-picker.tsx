@@ -5,6 +5,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { trpc } from '@/lib/trpc';
 import { Input } from '@/components/ui/input';
+import { PreviewOverlay } from '@/components/preview-overlay';
 import { TitleQuickActions } from '@/components/title-quick-actions';
 import { cn } from '@/lib/utils';
 
@@ -28,6 +29,8 @@ interface TitleSummary {
   releaseYear: number | null;
   posterUrl: string | null;
   popularityScore: number | null;
+  trailerProvider: string | null;
+  trailerVideoId: string | null;
 }
 
 interface InitialEntry {
@@ -221,6 +224,11 @@ export function TastePicker({ initialPopular, initialEntries }: TastePickerProps
                         className="object-cover"
                       />
                     ) : null}
+                    <PreviewOverlay
+                      trailerProvider={title.trailerProvider}
+                      trailerVideoId={title.trailerVideoId}
+                      titleText={title.title}
+                    />
                   </div>
                   <h3 className="mt-2 truncate text-sm font-medium text-foreground group-hover:underline">
                     {title.title}

@@ -7,6 +7,7 @@ import { appRouter } from '@/server/router';
 import { createContext } from '@/server/trpc';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PreviewOverlay } from '@/components/preview-overlay';
 import { TitleQuickActions } from '@/components/title-quick-actions';
 import { cn } from '@/lib/utils';
 
@@ -119,6 +120,11 @@ export default async function SearchPage({ searchParams }: PageProps) {
                         fill
                         sizes="(min-width: 1024px) 200px, (min-width: 640px) 33vw, 50vw"
                         className="object-cover"
+                      />
+                      <PreviewOverlay
+                        trailerProvider={title.trailerProvider}
+                        trailerVideoId={title.trailerVideoId}
+                        titleText={title.title}
                       />
                     </div>
                   ) : (

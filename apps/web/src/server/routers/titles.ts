@@ -57,6 +57,8 @@ export const titlesRouter = router({
           releaseYear: titles.releaseYear,
           posterUrl: titles.posterUrl,
           popularityScore: titles.popularityScore,
+          trailerProvider: titles.trailerProvider,
+          trailerVideoId: titles.trailerVideoId,
         })
         .from(titles)
         .where(where)
@@ -100,6 +102,8 @@ export const titlesRouter = router({
           releaseYear: titles.releaseYear,
           posterUrl: titles.posterUrl,
           popularityScore: titles.popularityScore,
+          trailerProvider: titles.trailerProvider,
+          trailerVideoId: titles.trailerVideoId,
         })
         .from(titles)
         .where(where)
