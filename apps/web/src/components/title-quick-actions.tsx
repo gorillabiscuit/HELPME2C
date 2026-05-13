@@ -82,10 +82,13 @@ export function TitleQuickActions({
   const isPending = watchUpsert.isPending || recFeedbackUpsert.isPending;
 
   // Tight layout uses smaller buttons; card layout matches the rec-card
-  // density that was already in production. Both share the same logic.
+  // density that was already in production. Compact buttons stay at
+  // ~28px tall (px-2.5 py-1.5 + text-[11px]) — comfortably above the
+  // WCAG 2.5.8 AA 24px target-size minimum while keeping the dense
+  // grid layout legible.
   const buttonBase =
     size === 'compact'
-      ? 'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-50'
+      ? 'inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-50'
       : 'inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-50';
   const iconSize = size === 'compact' ? 'h-3 w-3' : 'h-3.5 w-3.5';
   const onState = 'border-foreground bg-foreground text-primary-foreground hover:bg-foreground/90';

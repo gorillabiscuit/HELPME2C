@@ -28,13 +28,14 @@ function CardHeader({ className, ...props }: React.ComponentProps<'div'>) {
   );
 }
 
-function CardTitle({ className, ...props }: React.ComponentProps<'div'>) {
+// Renders as <h3> so a Card section header lands in the document
+// outline screen readers can navigate. Cards typically sit under a
+// page <h1>, making <h3> the appropriate level (skipping h2 is OK
+// when no h2 exists at that section depth). If a future surface needs
+// h2 or h4, refactor to accept an `as` prop.
+function CardTitle({ className, ...props }: React.ComponentProps<'h3'>) {
   return (
-    <div
-      data-slot="card-title"
-      className={cn('leading-none font-semibold', className)}
-      {...props}
-    />
+    <h3 data-slot="card-title" className={cn('leading-none font-semibold', className)} {...props} />
   );
 }
 
