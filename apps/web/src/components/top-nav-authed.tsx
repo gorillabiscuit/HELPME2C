@@ -3,15 +3,14 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Show, SignInButton, SignUpButton, UserButton } from '@clerk/nextjs';
+import { UserButton } from '@clerk/nextjs';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import { CreditCard, DownloadCloud, Menu, ShieldCheck, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// Single global nav. Top bar holds the primary "things you do" links;
-// the avatar dropdown holds settings ("things about you"). The right-
-// side dashboard cluster is gone — IA used to be split across two
-// places, that's what this replaces.
+// Authed variant of the global nav. The anon variant (top-nav-anon.tsx) is
+// chosen by the root layout when the user is signed-out, so anon visitors
+// don't pay the @clerk/ui bundle that <UserButton> brings in.
 //
 // Active-state logic: '/' matches exactly (otherwise everything matches
 // it via startsWith); other entries match on prefix so child routes
@@ -35,7 +34,7 @@ function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function TopNav() {
+export function TopNavAuthed() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -49,65 +48,57 @@ export function TopNav() {
           HelpME2C
         </Link>
 
-        <Show when="signed-in">
-          {/* Desktop primary nav — hidden on mobile, replaced by hamburger sheet. */}
-          <nav className="hidden items-center gap-4 text-sm md:flex">
-            {PRIMARY_NAV.map((item) => {
-              const active = isActive(pathname, item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  aria-current={active ? 'page' : undefined}
-                  className={cn(
-                    'rounded text-text-body hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2',
-                    active && 'font-medium text-foreground',
-                  )}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
-        </Show>
+        {/* Desktop primary nav — hidden on mobile, replaced by hamburger sheet. */}
+        <nav className="hidden items-center gap-4 text-sm md:flex">
+          {PRIMARY_NAV.map((item) => {
+            const active = isActive(pathname, item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                aria-current={active ? 'page' : undefined}
+                className={cn(
+                  'rounded text-text-body hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2',
+                  active && 'font-medium text-foreground',
+                )}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
       </div>
 
       <div className="flex items-center gap-2">
-        <Show when="signed-out">
-          <SignInButton />
-          <SignUpButton />
-        </Show>
-        <Show when="signed-in" treatPendingAsSignedOut={false}>
-          {/* Mobile hamburger — only visible <md and only when signed in. */}
-          <button
-            type="button"
-            onClick={() => setMobileOpen(true)}
-            className="rounded-md p-2 text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 md:hidden"
-            aria-label="Open menu"
-          >
-            <Menu className="h-5 w-5" />
-          </button>
+        {/* Mobile hamburger — only visible <md. */}
+        <button
+          type="button"
+          onClick={() => setMobileOpen(true)}
+          className="rounded-md p-2 text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 md:hidden"
+          aria-label="Open menu"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
 
-          <UserButton>
-            <UserButton.MenuItems>
-              <UserButton.Link
-                label="Manage services"
-                labelIcon={<CreditCard className="h-4 w-4" />}
-                href="/settings/providers"
-              />
-              <UserButton.Link
-                label="Import list"
-                labelIcon={<DownloadCloud className="h-4 w-4" />}
-                href="/settings/import"
-              />
-              <UserButton.Link
-                label="Account & privacy"
-                labelIcon={<ShieldCheck className="h-4 w-4" />}
-                href="/settings/account"
-              />
-            </UserButton.MenuItems>
-          </UserButton>
-        </Show>
+        <UserButton>
+          <UserButton.MenuItems>
+            <UserButton.Link
+              label="Manage services"
+              labelIcon={<CreditCard className="h-4 w-4" />}
+              href="/settings/providers"
+            />
+            <UserButton.Link
+              label="Import list"
+              labelIcon={<DownloadCloud className="h-4 w-4" />}
+              href="/settings/import"
+            />
+            <UserButton.Link
+              label="Account & privacy"
+              labelIcon={<ShieldCheck className="h-4 w-4" />}
+              href="/settings/account"
+            />
+          </UserButton.MenuItems>
+        </UserButton>
       </div>
 
       {/* Mobile sheet — slide-from-left drawer for primary nav. Settings

@@ -23,7 +23,7 @@ export function MarketingHero() {
         </li>
       </ul>
       <div className="mt-10">
-        <SignUpButton mode="modal">
+        <SignUpButton>
           <Button size="lg">Get started</Button>
         </SignUpButton>
       </div>
