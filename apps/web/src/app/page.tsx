@@ -1,4 +1,3 @@
-import { Show } from '@clerk/nextjs';
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
@@ -46,14 +45,9 @@ export default async function HomePage() {
         filter: { active: false, providers: [], hiddenCount: 0 },
       };
 
-  return (
-    <>
-      <Show when="signed-out">
-        <MarketingHero />
-      </Show>
-      <Show when="signed-in">
-        <DashboardHome firstName={user?.firstName} recs={recs.items} filter={recs.filter} />
-      </Show>
-    </>
+  return userId ? (
+    <DashboardHome firstName={user?.firstName} recs={recs.items} filter={recs.filter} />
+  ) : (
+    <MarketingHero />
   );
 }
