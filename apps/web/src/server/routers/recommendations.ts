@@ -173,11 +173,12 @@ export const recommendationsRouter = router({
       }
 
       const { payload } = row;
-      // Schema-version guard. v1 is the current shape; anything else means
-      // a writer from a future commit ran ahead of this reader. Returning
-      // [] makes the home page render the "computing" state until the next
-      // cron writes a v1-compatible payload.
-      if (payload.schemaVersion !== 1) {
+      // Schema-version guard. v1 (legacy) lacks reasonHint; v2 carries
+      // it inline. Anything else means a writer from a future commit
+      // ran ahead of this reader — return [] so the dashboard renders
+      // the "computing" state until the next cron writes a recognised
+      // payload.
+      if (payload.schemaVersion !== 1 && payload.schemaVersion !== 2) {
         return { items: [], computedAt: row.computedAt, filtered: false, filter: emptyFilter };
       }
 
@@ -323,6 +324,7 @@ export const recommendationsRouter = router({
         trailerProvider: string | null;
         trailerVideoId: string | null;
         score: number;
+        reasonHint: string | null;
       };
       type Group = {
         firstScore: number;
@@ -335,6 +337,9 @@ export const recommendationsRouter = router({
         if (!title) continue;
         const key = franchiseKey(title.title);
         const specificity = franchiseSpecificity(title.title, key);
+        // reasonHint is v2-only. v1 payloads have it undefined → coerce
+        // to null so the union type stays clean for the client.
+        const reasonHint = item.reasonHint ?? null;
         const existing = groups.get(key);
         if (!existing) {
           // First encounter — establishes the franchise's rank position
@@ -343,13 +348,15 @@ export const recommendationsRouter = router({
           groups.set(key, {
             firstScore: item.score,
             bestSpecificity: specificity,
-            representative: { ...title, score: item.score },
+            representative: { ...title, score: item.score, reasonHint },
           });
         } else if (specificity < existing.bestSpecificity) {
           // Less specific = better representative. Keep firstScore so
           // ranking stays anchored on the engine's top-scored member.
+          // The reasonHint of the new representative wins — it's the
+          // explanation for the title we're actually showing.
           existing.bestSpecificity = specificity;
-          existing.representative = { ...title, score: item.score };
+          existing.representative = { ...title, score: item.score, reasonHint };
         }
       }
 

@@ -72,6 +72,25 @@ export interface RecExplanation {
   readonly sharedBridgeThemes: ReadonlyArray<string>;
 }
 
+/**
+ * Single-user explanation. Returns the same ExplanationReason[] shape
+ * as the per-member arrays in explainGroupRecommendation, sorted by
+ * contribution descending — top reasons first. The caller slices to
+ * top-N for display.
+ *
+ * Pure: no DB, no formatting. Web app resolves tagId/themeId to
+ * display names via its own queries.
+ */
+export function explainRecommendation(
+  taste: UserTasteVector,
+  candidate: TitleTagSet,
+  themeMembership: ReadonlyArray<TagThemeMembership> = [],
+): ExplanationReason[] {
+  const tagThemes = buildTagThemeIndex(themeMembership);
+  const tasteTheme = buildTasteTheme(taste, tagThemes);
+  return explainCandidateScore(taste, candidate, tagThemes, tasteTheme);
+}
+
 /** Per-member breakdown variant of scoreCandidate — accumulates reasons
  * instead of just summing. Keeps logic in lockstep with scoreCandidate
  * by mirroring it line-for-line. */

@@ -1,16 +1,20 @@
 import { eq, inArray, notInArray } from 'drizzle-orm';
 import { cron } from 'inngest';
 import {
+  explainRecommendation,
   extractTasteVector,
   recommendForUser,
   type AnchorPick,
+  type ExplanationReason,
   type RatedTitle,
   type TagThemeMembership,
 } from '@helpme2c/ml';
 import { db } from '@/server/db';
 import {
   type RecommendationsPayload,
+  tags,
   tagThemes,
+  themes,
   titleTags,
   userRecommendations,
   users,
@@ -18,6 +22,42 @@ import {
 } from '@/server/schema';
 import { groupTagsIntoTitleSets } from '../lib/group-tags';
 import { inngest, recommendAllUsersEvent, recommendUserEvent } from '../client';
+
+// How many of the top-ranked recs get a precomputed reason hint. Top 50
+// covers any dedup-induced position shifts the reader does at render
+// time (display top 20, dedup reads 200 candidates → top 50 buffer is
+// generous). Items past this rank still get displayed; they just lack
+// a reason subtitle. Cheap to extend later if needed.
+const EXPLAIN_DEPTH = 50;
+
+// Build a one-line "Why this rec?" string from the engine's top
+// ExplanationReason for a single rec. Returns null when no reason
+// crosses a meaningful contribution floor (avoids surfacing noise).
+//
+// Tag names come from the `tags` table, theme names from the `themes`
+// table; both Maps are passed in (built once per cron run).
+function formatReasonHint(
+  reasons: ReadonlyArray<ExplanationReason>,
+  tagNames: ReadonlyMap<string, string>,
+  themeNames: ReadonlyMap<string, string>,
+): string | null {
+  if (reasons.length === 0) return null;
+  const top = reasons[0];
+  if (!top) return null;
+  if (top.kind === 'direct-tag') {
+    const name = tagNames.get(top.tagId);
+    if (!name) return null;
+    return `Because you like ${name.toLowerCase()}`;
+  }
+  // theme-bridge — surface the theme name + (optionally) what the
+  // user's interest is that bridges into it.
+  if (top.themeId) {
+    const themeName = themeNames.get(top.themeId);
+    if (!themeName) return null;
+    return `Matches your ${themeName.toLowerCase()} interest`;
+  }
+  return null;
+}
 
 // Top-N cap matches the M4 plan agreed 2026-05-08.
 const REC_LIMIT = 200;
@@ -80,7 +120,7 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
   const ratings: RatedTitle[] = ratingEntries;
 
   const userTitleIds = userEntries.map((e) => e.titleId);
-  const emptyPayload: RecommendationsPayload = { schemaVersion: 1, items: [] };
+  const emptyPayload: RecommendationsPayload = { schemaVersion: 2, items: [] };
 
   // Cold-start: no signal to score on. Write empty recs, skip ML + candidate
   // fetch entirely. The empty user_titles_ids array would also break the
@@ -136,10 +176,47 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
   const taste = extractTasteVector({ anchors, ratings }, userTitles);
   const recs = recommendForUser(taste, candidates, REC_LIMIT, themeMembership);
 
-  const payload: RecommendationsPayload = {
-    schemaVersion: 1,
-    items: recs.map((r) => ({ titleId: r.titleId, score: r.score })),
-  };
+  // Resolve tag + theme names for the explain pass. Both tables are
+  // small (~few hundred rows each); single SELECT per cron run is
+  // cheap. The maps stay in scope only for this user's compute.
+  const candidatesById = new Map(candidates.map((c) => [c.titleId, c]));
+  const explainTitleIds = recs.slice(0, EXPLAIN_DEPTH).map((r) => r.titleId);
+  const referencedTagIds = new Set<string>();
+  for (const titleId of explainTitleIds) {
+    const c = candidatesById.get(titleId);
+    if (c) for (const t of c.tags) referencedTagIds.add(t.tagId);
+  }
+  // Tags the user has in their taste also need names (theme-bridge
+  // reasons reference them via bridgedFromTagIds, though the headline
+  // currently doesn't). Add for completeness — query cost is one IN
+  // list either way.
+  for (const tagId of taste.keys()) referencedTagIds.add(tagId);
+
+  const tagNames = new Map<string, string>();
+  if (referencedTagIds.size > 0) {
+    const tagRows = await db
+      .select({ id: tags.id, name: tags.name })
+      .from(tags)
+      .where(inArray(tags.id, Array.from(referencedTagIds)));
+    for (const t of tagRows) tagNames.set(t.id, t.name);
+  }
+
+  const themeNames = new Map<string, string>();
+  const themeRows2 = await db.select({ id: themes.id, name: themes.name }).from(themes);
+  for (const t of themeRows2) themeNames.set(t.id, t.name);
+
+  const items = recs.map((r, i) => {
+    if (i >= EXPLAIN_DEPTH) {
+      return { titleId: r.titleId, score: r.score, reasonHint: null };
+    }
+    const candidate = candidatesById.get(r.titleId);
+    if (!candidate) return { titleId: r.titleId, score: r.score, reasonHint: null };
+    const reasons = explainRecommendation(taste, candidate, themeMembership);
+    const reasonHint = formatReasonHint(reasons, tagNames, themeNames);
+    return { titleId: r.titleId, score: r.score, reasonHint };
+  });
+
+  const payload: RecommendationsPayload = { schemaVersion: 2, items };
 
   await db
     .insert(userRecommendations)

@@ -6,9 +6,37 @@ import { users } from './users';
 // detect old payloads and trigger a recompute without a column migration.
 // Validated at the application layer (the Inngest job writer + the tRPC
 // reader); Drizzle's $type<> annotation surfaces this shape at the TS level.
+//
+// v2 (current): items carry an optional `reasonHint` — a pre-formatted
+// "Why this rec?" string (e.g. "Because you like dark crime") computed
+// at engine time from the taste vector and stored denormalised so the
+// read path stays simple. `reasonHint` is nullable because cold-start
+// filler items + the long tail below the explain budget don't carry
+// one; the UI just hides the subtitle when null.
+//
+// v1 (legacy): items are { titleId, score }. The reader falls back to
+// no reasonHint when it sees a v1 payload; the next cron writes v2.
+export interface RecommendationItemV2 {
+  readonly titleId: string;
+  readonly score: number;
+  readonly reasonHint: string | null;
+}
+
 export interface RecommendationsPayload {
-  readonly schemaVersion: 1;
-  readonly items: ReadonlyArray<{ readonly titleId: string; readonly score: number }>;
+  readonly schemaVersion: 2;
+  readonly items: ReadonlyArray<RecommendationItemV2>;
+}
+
+// Forward-compat helper for the reader — accepts either v1 or v2 in
+// the JSONB column. The reader maps both into the v2 shape with
+// reasonHint=null for legacy rows.
+export interface RecommendationsPayloadAny {
+  readonly schemaVersion: 1 | 2;
+  readonly items: ReadonlyArray<{
+    readonly titleId: string;
+    readonly score: number;
+    readonly reasonHint?: string | null;
+  }>;
 }
 
 // Pre-computed personal recommendations cache per ADR-0013.
@@ -42,7 +70,7 @@ export const userRecommendations = pgTable('user_recommendations', {
     .primaryKey()
     .references(() => users.id, { onDelete: 'cascade' }),
 
-  payload: jsonb('payload').$type<RecommendationsPayload>().notNull(),
+  payload: jsonb('payload').$type<RecommendationsPayloadAny>().notNull(),
 
   // When the Inngest compute job last wrote this row. Used by the read
   // path to decide whether to recommend on stale data ("computed Xh ago")

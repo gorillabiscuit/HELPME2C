@@ -21,6 +21,7 @@ interface RecItem {
   posterUrl: string | null;
   trailerProvider: string | null;
   trailerVideoId: string | null;
+  reasonHint: string | null;
 }
 
 interface FilterProvider {
@@ -198,6 +199,11 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
                     .filter((s): s is string => Boolean(s))
                     .join(' · ')}
                 </p>
+                {rec.reasonHint ? (
+                  <p className="mt-1 line-clamp-2 text-xs italic text-text-body">
+                    {rec.reasonHint}
+                  </p>
+                ) : null}
               </Link>
               <RecCardActions titleId={rec.id} />
             </li>
