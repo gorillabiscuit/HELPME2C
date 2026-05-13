@@ -1,6 +1,7 @@
 import { and, eq, ilike, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { mediaTypeEnum, titles } from '../schema';
+import { dedupeByFranchise } from '../lib/franchise';
 import { protectedProcedure, router } from '../trpc';
 
 // Auto-synced with the Drizzle pgEnum values, same single-source-of-truth
@@ -46,24 +47,82 @@ export const titlesRouter = router({
         .optional(),
     )
     .query(async ({ ctx, input }) => {
-      const where = input?.mediaType ? eq(titles.mediaType, input.mediaType) : undefined;
+      const limit = input?.limit ?? 16;
 
-      return ctx.db
-        .select({
-          id: titles.id,
-          title: titles.title,
-          originalTitle: titles.originalTitle,
-          mediaType: titles.mediaType,
-          releaseYear: titles.releaseYear,
-          posterUrl: titles.posterUrl,
-          popularityScore: titles.popularityScore,
-          trailerProvider: titles.trailerProvider,
-          trailerVideoId: titles.trailerVideoId,
-        })
-        .from(titles)
-        .where(where)
-        .orderBy(sql`${titles.popularityScore} DESC NULLS LAST, ${titles.title} ASC`)
-        .limit(input?.limit ?? 16);
+      // Two cross-cutting concerns on this read path:
+      //
+      //   1. Franchise dedup. Without it, "Attack on Titan", "AoT Season
+      //      2", "AoT: The Final Season" all surface separately in the
+      //      cold-start picker, burning grid slots on one franchise.
+      //      Same helper as recommendations.list — see ../lib/franchise.
+      //
+      //   2. Media-type balance. popularityScore scales differ across
+      //      sources (AniList tends to swamp TMDB), so a single ranked
+      //      SELECT returns mostly anime even when the catalog has
+      //      plenty of TV/film. When no explicit mediaType is requested,
+      //      stratify: pull per-type top-N, dedup each, round-robin
+      //      interleave to fill the grid with all three.
+
+      const projection = {
+        id: titles.id,
+        title: titles.title,
+        originalTitle: titles.originalTitle,
+        mediaType: titles.mediaType,
+        releaseYear: titles.releaseYear,
+        posterUrl: titles.posterUrl,
+        popularityScore: titles.popularityScore,
+        trailerProvider: titles.trailerProvider,
+        trailerVideoId: titles.trailerVideoId,
+      } as const;
+
+      // Caller specified a single mediaType — stratification doesn't
+      // apply, just dedup + cap. Overfetch 3× so dedup has room to find
+      // representatives without leaving the grid short.
+      if (input?.mediaType) {
+        const rows = await ctx.db
+          .select(projection)
+          .from(titles)
+          .where(eq(titles.mediaType, input.mediaType))
+          .orderBy(sql`${titles.popularityScore} DESC NULLS LAST, ${titles.title} ASC`)
+          .limit(limit * 3);
+        return dedupeByFranchise(rows).slice(0, limit);
+      }
+
+      // No filter — stratify across all three media types. Overfetch
+      // 2× per type before dedup so each bucket has enough survivors to
+      // contribute its share to the round-robin merge.
+      const perType = limit * 2;
+      const mediaTypes = ['tv', 'film', 'anime'] as const;
+      const buckets = await Promise.all(
+        mediaTypes.map((mt) =>
+          ctx.db
+            .select(projection)
+            .from(titles)
+            .where(eq(titles.mediaType, mt))
+            .orderBy(sql`${titles.popularityScore} DESC NULLS LAST, ${titles.title} ASC`)
+            .limit(perType),
+        ),
+      );
+
+      // Dedup each bucket independently. Franchises don't cross media
+      // types in practice (anime adaptations live as separate AniList
+      // rows from their live-action versions; ignoring cross-type
+      // dedup is correct AND keeps the algorithm simple).
+      const dedupedBuckets = buckets.map((bucket) => dedupeByFranchise(bucket));
+
+      // Round-robin interleave: tv[0], film[0], anime[0], tv[1], ...
+      // Empty buckets are skipped naturally — if the catalog has no TV
+      // titles yet, the merge falls through to film + anime.
+      const merged: (typeof dedupedBuckets)[number] = [];
+      const maxRows = Math.max(...dedupedBuckets.map((b) => b.length));
+      for (let i = 0; i < maxRows && merged.length < limit; i++) {
+        for (const bucket of dedupedBuckets) {
+          if (merged.length >= limit) break;
+          const row = bucket[i];
+          if (row) merged.push(row);
+        }
+      }
+      return merged;
     }),
 
   search: protectedProcedure
