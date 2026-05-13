@@ -1,18 +1,23 @@
-import { and, eq, desc } from 'drizzle-orm';
+import { and, eq, desc, inArray, ne } from 'drizzle-orm';
+import Link from 'next/link';
 import { headers } from 'next/headers';
 import Image from 'next/image';
 import { notFound, redirect } from 'next/navigation';
 import { auth } from '@clerk/nextjs/server';
 import { z } from 'zod';
+import { findCrossMediumBridges, type TitleTagSet } from '@helpme2c/ml';
 import { db } from '@/server/db';
 import {
   streamingAvailability,
+  tagThemes,
   tags,
+  themes,
   titleTags,
   titles,
   users,
   watchEntries,
 } from '@/server/schema';
+import { groupTagsIntoTitleSets } from '@/inngest/lib/group-tags';
 import { PreviewOverlay } from '@/components/preview-overlay';
 import { TitleDetailAddButton } from '@/components/title-detail-add-button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -179,6 +184,113 @@ export default async function TitleDetailPage({ params }: PageProps) {
     .where(and(eq(users.clerkId, clerkUserId), eq(watchEntries.titleId, id)))
     .limit(1);
 
+  // Cross-medium theme bridges per PROJECT.md §moats and packages/ml's
+  // findCrossMediumBridges. The point: surface the moat (cross-medium
+  // taxonomy) as a visible feature on every title page, not just as a
+  // silent ranking signal. Anyone landing on a TV/film page gets pointed
+  // at anime that shares its themes, and vice versa.
+  //
+  // Opposite-medium mapping is deliberately coarse — anime↔live-action
+  // (where "live-action" = tv + film). TV-to-film recs are NOT cross-
+  // medium under the moat's definition.
+  //
+  // Cost: one tag-rows SELECT scoped to opposite-medium titles, plus a
+  // small fanout. Theme-membership table is small (~86 rows v1). For
+  // Phase 1A scale (~2k titles) the in-memory scoring path mirrors
+  // recommend.ts's pattern and runs in <100ms.
+  const oppositeMediumIds: Array<'tv' | 'film' | 'anime'> =
+    title.mediaType === 'anime' ? ['tv', 'film'] : ['anime'];
+
+  const [sourceTagRows, candidateTagRows, themeRows] = await Promise.all([
+    db
+      .select({
+        titleId: titleTags.titleId,
+        tagId: titleTags.tagId,
+        weight: titleTags.weight,
+      })
+      .from(titleTags)
+      .where(eq(titleTags.titleId, id)),
+    db
+      .select({
+        titleId: titleTags.titleId,
+        tagId: titleTags.tagId,
+        weight: titleTags.weight,
+      })
+      .from(titleTags)
+      .innerJoin(titles, eq(titleTags.titleId, titles.id))
+      .where(and(inArray(titles.mediaType, oppositeMediumIds), ne(titles.id, id))),
+    db
+      .select({
+        tagId: tagThemes.tagId,
+        themeId: tagThemes.themeId,
+        strength: tagThemes.strength,
+      })
+      .from(tagThemes),
+  ]);
+
+  const sourceTitleTagSet: TitleTagSet | null =
+    sourceTagRows.length === 0
+      ? null
+      : { titleId: id, tags: sourceTagRows.map((r) => ({ tagId: r.tagId, weight: r.weight })) };
+
+  const bridges = sourceTitleTagSet
+    ? findCrossMediumBridges(
+        sourceTitleTagSet,
+        groupTagsIntoTitleSets(candidateTagRows),
+        themeRows,
+        6,
+      )
+    : [];
+
+  // Fetch display metadata only for the bridges we'll actually render.
+  // Two parallel SELECTs — title metadata + the names of the themes
+  // referenced by bridgedThemes[0] on each card (for the "shares your
+  // X theme" subtitle).
+  const bridgeTitleIds = bridges.map((b) => b.titleId);
+  const bridgeThemeIds = Array.from(
+    new Set(bridges.flatMap((b) => b.bridgedThemes.slice(0, 1).map((t) => t.themeId))),
+  );
+
+  const [bridgeTitleRows, bridgeThemeRows] = await Promise.all([
+    bridgeTitleIds.length > 0
+      ? db
+          .select({
+            id: titles.id,
+            title: titles.title,
+            mediaType: titles.mediaType,
+            releaseYear: titles.releaseYear,
+            posterUrl: titles.posterUrl,
+          })
+          .from(titles)
+          .where(inArray(titles.id, bridgeTitleIds))
+      : Promise.resolve(
+          [] as Array<{
+            id: string;
+            title: string;
+            mediaType: 'tv' | 'film' | 'anime';
+            releaseYear: number | null;
+            posterUrl: string | null;
+          }>,
+        ),
+    bridgeThemeIds.length > 0
+      ? db
+          .select({ id: themes.id, name: themes.name })
+          .from(themes)
+          .where(inArray(themes.id, bridgeThemeIds))
+      : Promise.resolve([] as Array<{ id: string; name: string }>),
+  ]);
+
+  const bridgeTitleById = new Map(bridgeTitleRows.map((t) => [t.id, t]));
+  const bridgeThemeNameById = new Map(bridgeThemeRows.map((t) => [t.id, t.name]));
+
+  const bridgeCards = bridges.flatMap((b) => {
+    const meta = bridgeTitleById.get(b.titleId);
+    if (!meta) return [];
+    const topTheme = b.bridgedThemes[0];
+    const themeName = topTheme ? bridgeThemeNameById.get(topTheme.themeId) : null;
+    return [{ ...meta, themeName }];
+  });
+
   const yearLabel =
     title.releaseYear && title.endYear
       ? `${title.releaseYear}–${title.endYear}`
@@ -265,6 +377,52 @@ export default async function TitleDetailPage({ params }: PageProps) {
                 </span>
               ))}
             </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {bridgeCards.length > 0 ? (
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle>
+              {title.mediaType === 'anime'
+                ? 'If you liked this — live-action with the same themes'
+                : 'If you liked this — anime with the same themes'}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+              {bridgeCards.map((b) => (
+                <li key={b.id}>
+                  <Link
+                    href={`/titles/${b.id}`}
+                    className="group block rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+                  >
+                    {b.posterUrl ? (
+                      <div className="relative aspect-[2/3] overflow-hidden rounded-md border border-border bg-muted">
+                        <Image
+                          src={b.posterUrl}
+                          alt=""
+                          fill
+                          sizes="(min-width: 640px) 200px, 50vw"
+                          className="object-cover transition-transform group-hover:scale-[1.02]"
+                        />
+                      </div>
+                    ) : (
+                      <div className="aspect-[2/3] rounded-md border border-border bg-muted" />
+                    )}
+                    <p className="mt-2 line-clamp-2 text-sm font-medium text-foreground">
+                      {b.title}
+                    </p>
+                    {b.themeName ? (
+                      <p className="mt-0.5 line-clamp-1 text-xs italic text-text-body">
+                        Shares the {b.themeName.toLowerCase()} theme
+                      </p>
+                    ) : null}
+                  </Link>
+                </li>
+              ))}
+            </ul>
           </CardContent>
         </Card>
       ) : null}
