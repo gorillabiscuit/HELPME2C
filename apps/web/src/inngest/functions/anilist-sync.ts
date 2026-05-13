@@ -45,6 +45,10 @@ interface AniListMedia {
   };
   bannerImage: string | null;
   popularity: number;
+  // AniList's trailer field — present when they know of one. `site` is
+  // 'youtube' (lowercased) for YouTube trailers; we normalise on
+  // 'youtube' before storage.
+  trailer: { id: string | null; site: string | null } | null;
   tags: Array<{
     id: number;
     name: string;
@@ -95,6 +99,10 @@ const PAGE_QUERY = /* GraphQL */ `
         }
         bannerImage
         popularity
+        trailer {
+          id
+          site
+        }
         tags {
           id
           name
@@ -216,6 +224,13 @@ export async function processAnilistMedia(media: AniListMedia): Promise<string |
   const synopsis = media.description ? stripHtml(media.description) : null;
   const status = anilistStatusToEnum(media.status);
 
+  // AniList's trailer.site is the host name; we only support YouTube
+  // embeds in the preview UI today, so anything else (dailymotion,
+  // niconico) is treated as no trailer until we add that player.
+  const trailerVideoId =
+    media.trailer?.id && media.trailer.site?.toLowerCase() === 'youtube' ? media.trailer.id : null;
+  const trailerProvider = trailerVideoId ? 'youtube' : null;
+
   const [upserted] = await db
     .insert(titles)
     .values({
@@ -238,6 +253,8 @@ export async function processAnilistMedia(media: AniListMedia): Promise<string |
       backdropUrl: media.bannerImage,
       popularityScore: media.popularity,
       idMal: media.idMal,
+      trailerProvider,
+      trailerVideoId,
     })
     .onConflictDoUpdate({
       target: [titles.externalId, titles.source],
@@ -248,6 +265,8 @@ export async function processAnilistMedia(media: AniListMedia): Promise<string |
         episodeCount: media.episodes,
         popularityScore: media.popularity,
         idMal: media.idMal,
+        trailerProvider,
+        trailerVideoId,
         updatedAt: new Date(),
       },
     })

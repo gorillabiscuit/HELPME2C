@@ -13,6 +13,7 @@ import {
   users,
   watchEntries,
 } from '@/server/schema';
+import { PreviewOverlay } from '@/components/preview-overlay';
 import { TitleDetailAddButton } from '@/components/title-detail-add-button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -191,7 +192,7 @@ export default async function TitleDetailPage({ params }: PageProps) {
     <main className="mx-auto max-w-3xl px-6 py-12">
       <div className="grid grid-cols-1 gap-8 sm:grid-cols-[200px_1fr]">
         {title.posterUrl ? (
-          <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-border bg-muted">
+          <div className="group relative aspect-[2/3] overflow-hidden rounded-lg border border-border bg-muted">
             <Image
               src={title.posterUrl}
               alt={`${title.title} poster`}
@@ -199,6 +200,11 @@ export default async function TitleDetailPage({ params }: PageProps) {
               sizes="(min-width: 640px) 200px, 100vw"
               className="object-cover"
               priority
+            />
+            <PreviewOverlay
+              trailerProvider={title.trailerProvider}
+              trailerVideoId={title.trailerVideoId}
+              titleText={title.title}
             />
           </div>
         ) : (

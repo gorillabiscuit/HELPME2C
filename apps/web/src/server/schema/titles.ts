@@ -46,6 +46,13 @@ export const titles = pgTable(
     // Lets MAL imports (M8) match by MAL anime id without a separate
     // mapping table. Null on TMDB rows. Indexed for the lookup.
     idMal: integer('id_mal'),
+    // Trailer for the preview-on-hover feature. Provider names the host
+    // (currently 'youtube' for both TMDB + AniList trailers); video_id
+    // is the embeddable identifier (YouTube watch ?v= value). Both null
+    // when no trailer is known. Set at sync time; the UI checks for
+    // both fields before rendering the preview overlay.
+    trailerProvider: text('trailer_provider'),
+    trailerVideoId: text('trailer_video_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

@@ -224,6 +224,8 @@ export const recommendationsRouter = router({
           mediaType: titles.mediaType,
           releaseYear: titles.releaseYear,
           posterUrl: titles.posterUrl,
+          trailerProvider: titles.trailerProvider,
+          trailerVideoId: titles.trailerVideoId,
         })
         .from(titles)
         .where(inArray(titles.id, allFilteredIds));
@@ -242,6 +244,8 @@ export const recommendationsRouter = router({
         mediaType: 'tv' | 'film' | 'anime';
         releaseYear: number | null;
         posterUrl: string | null;
+        trailerProvider: string | null;
+        trailerVideoId: string | null;
         score: number;
       }> = [];
       for (const item of filteredItems) {

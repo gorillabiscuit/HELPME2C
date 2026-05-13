@@ -20,6 +20,8 @@ interface TitleSummary {
   releaseYear: number | null;
   posterUrl: string | null;
   popularityScore: number | null;
+  trailerProvider: string | null;
+  trailerVideoId: string | null;
 }
 
 interface TasteEntry {

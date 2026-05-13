@@ -2,6 +2,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { Star, Users } from 'lucide-react';
 import { FirstVisitCallout } from '@/components/first-visit-callout';
+import { PreviewOverlay } from '@/components/preview-overlay';
 import { RecCardActions } from '@/components/rec-card-actions';
 
 type MediaType = 'tv' | 'film' | 'anime';
@@ -18,6 +19,8 @@ interface RecItem {
   mediaType: MediaType;
   releaseYear: number | null;
   posterUrl: string | null;
+  trailerProvider: string | null;
+  trailerVideoId: string | null;
 }
 
 interface FilterProvider {
@@ -177,6 +180,11 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
                       // First row (4 cards on lg, 3 on sm, 2 on mobile) is
                       // above the fold on most viewports — preload for LCP.
                       priority={i < 4}
+                    />
+                    <PreviewOverlay
+                      trailerProvider={rec.trailerProvider}
+                      trailerVideoId={rec.trailerVideoId}
+                      titleText={rec.title}
                     />
                   </div>
                 ) : (

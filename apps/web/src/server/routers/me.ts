@@ -64,6 +64,27 @@ export const meRouter = router({
       }
       return row;
     }),
+
+  // Whether trailer-preview modals start with audio on. Mirrors the
+  // schema field on users.preview_audio_enabled. The modal also has a
+  // per-session mute toggle that doesn't write back here.
+  setPreviewAudioEnabled: protectedProcedure
+    .input(z.object({ enabled: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const [row] = await ctx.db
+        .update(users)
+        .set({ previewAudioEnabled: input.enabled, updatedAt: new Date() })
+        .where(eq(users.clerkId, ctx.userId))
+        .returning({ previewAudioEnabled: users.previewAudioEnabled });
+
+      if (!row) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'User row not found — was me.ensure called for this session?',
+        });
+      }
+      return row;
+    }),
 });
 
 export { privacySchema };

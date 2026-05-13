@@ -6,6 +6,7 @@ import { users } from '@/server/schema';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { AccountDeleteForm } from '@/components/account-delete-form';
 import { DefaultPrivacyForm } from '@/components/default-privacy-form';
+import { PreviewAudioForm } from '@/components/preview-audio-form';
 
 // /settings/account — DSAR self-serve surface per ADR-0012 §7.
 // Article 15 + 20 (export) and Article 17 (deletion) live here. Cookie
@@ -20,12 +21,16 @@ export default async function AccountSettingsPage() {
   // via SQL by a future feature flag), treat it as 'private' for the
   // current UI — safer than silently exposing it as 'public'.
   const [userRow] = await db
-    .select({ defaultPrivacy: users.defaultPrivacy })
+    .select({
+      defaultPrivacy: users.defaultPrivacy,
+      previewAudioEnabled: users.previewAudioEnabled,
+    })
     .from(users)
     .where(eq(users.clerkId, userId))
     .limit(1);
   const initialDefault: 'public' | 'private' =
     userRow?.defaultPrivacy === 'public' ? 'public' : 'private';
+  const initialPreviewAudio = userRow?.previewAudioEnabled ?? true;
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-12">
@@ -46,6 +51,15 @@ export default async function AccountSettingsPage() {
             &ldquo;Friends only&rdquo; arrives later, with the social-graph features.
           </p>
           <DefaultPrivacyForm initialDefault={initialDefault} />
+        </CardContent>
+      </Card>
+
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle>Trailer previews</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <PreviewAudioForm initialEnabled={initialPreviewAudio} />
         </CardContent>
       </Card>
 

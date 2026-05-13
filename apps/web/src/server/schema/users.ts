@@ -23,6 +23,11 @@ export const users = pgTable('users', {
   // pick one explicitly. Existing entries are NOT retroactively updated when
   // this changes — per-entry privacy is the source of truth.
   defaultPrivacy: privacyLevelEnum('default_privacy').notNull().default('private'),
+  // Whether trailer-preview modals start with audio on. Defaults to true
+  // because the user is in a discovery flow and the audio is part of
+  // the preview. Users who'd rather browse silently flip this in
+  // /settings/account.
+  previewAudioEnabled: boolean('preview_audio_enabled').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
