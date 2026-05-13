@@ -77,7 +77,7 @@ export default async function GroupDetailPage({ params }: PageProps) {
 
       <header className="mb-8 flex flex-wrap items-baseline justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">{group.name}</h1>
+          <h1 className="text-4xl font-semibold tracking-tight">{group.name}</h1>
           <p className="mt-2 text-sm text-text-body">
             {group.members.length} {group.members.length === 1 ? 'member' : 'members'}
             {group.isOwner ? ' · you own this group' : ''}

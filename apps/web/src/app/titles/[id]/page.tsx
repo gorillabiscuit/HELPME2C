@@ -206,7 +206,7 @@ export default async function TitleDetailPage({ params }: PageProps) {
         )}
 
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">{title.title}</h1>
+          <h1 className="text-4xl font-semibold tracking-tight">{title.title}</h1>
           {title.originalTitle && title.originalTitle !== title.title ? (
             <p className="mt-1 text-sm text-muted-foreground">{title.originalTitle}</p>
           ) : null}
@@ -218,7 +218,7 @@ export default async function TitleDetailPage({ params }: PageProps) {
           </p>
 
           {title.synopsis ? (
-            <p className="mt-4 text-sm leading-relaxed text-foreground">{title.synopsis}</p>
+            <p className="mt-4 text-base leading-relaxed text-foreground">{title.synopsis}</p>
           ) : null}
 
           <div className="mt-6">
