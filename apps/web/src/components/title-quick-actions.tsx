@@ -23,6 +23,11 @@ interface TitleQuickActionsProps {
   // Visual density. "card" = standard rec-card layout (default).
   // "compact" = smaller buttons for tight grids.
   size?: 'card' | 'compact';
+  // Optional: fires after any state-changing mutation succeeds. The
+  // /taste Add tab + onboarding picker use this to fade the card out
+  // and replace it with the next title — keeps the rating flow moving
+  // without making the user re-locate the next card after each action.
+  onActionComplete?: () => void;
 }
 
 // Single source of truth for "what can I do with this title?" Used on:
@@ -45,6 +50,7 @@ export function TitleQuickActions({
   titleId,
   currentState,
   size = 'card',
+  onActionComplete,
 }: TitleQuickActionsProps) {
   const router = useRouter();
   const [ratingOpen, setRatingOpen] = useState(false);
@@ -53,10 +59,14 @@ export function TitleQuickActions({
     onSuccess: () => {
       setRatingOpen(false);
       router.refresh();
+      onActionComplete?.();
     },
   });
   const recFeedbackUpsert = trpc.recFeedback.upsert.useMutation({
-    onSuccess: () => router.refresh(),
+    onSuccess: () => {
+      router.refresh();
+      onActionComplete?.();
+    },
   });
 
   const isWatched = currentState?.status === 'completed';
@@ -162,7 +172,6 @@ export function TitleQuickActions({
                   n === existingRating
                     ? 'border-foreground bg-foreground text-primary-foreground'
                     : 'border-border bg-white text-foreground hover:bg-foreground hover:text-primary-foreground',
-                  n >= 9 && n !== existingRating && 'border-foreground/60',
                 )}
               >
                 {n}
