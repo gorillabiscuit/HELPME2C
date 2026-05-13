@@ -34,6 +34,12 @@ interface InitialEntry {
 interface OnboardingFlowProps {
   initialPopular: TitleSummary[];
   initialEntries: InitialEntry[];
+  /** Which step to show on mount. `'intro'` is the post-signup landing
+   * (value-prop screen → Let's go button → picker). `'picker'` skips
+   * the intro for users arriving via a deliberate "start picking" CTA
+   * elsewhere in the app (e.g. the empty-dashboard "Pick favourites"
+   * button — they've already opted in by clicking). Default `'intro'`. */
+  initialPhase?: 'intro' | 'picker';
 }
 
 const MEDIA_TYPE_LABEL: Record<string, string> = {
@@ -48,12 +54,17 @@ const SEARCH_DEBOUNCE_MS = 250;
 // acts on it. Matches the CSS transition below.
 const TRANSITION_OUT_MS = 220;
 
-export function OnboardingFlow({ initialPopular, initialEntries }: OnboardingFlowProps) {
+export function OnboardingFlow({
+  initialPopular,
+  initialEntries,
+  initialPhase = 'intro',
+}: OnboardingFlowProps) {
   const router = useRouter();
 
   // Two-step flow: intro (value prop) → picker. The intro is the first
-  // thing a new signed-up user sees after age-check.
-  const [phase, setPhase] = useState<'intro' | 'picker'>('intro');
+  // thing a new signed-up user sees after age-check; entries from
+  // "Pick favourites" pass initialPhase='picker' to skip it.
+  const [phase, setPhase] = useState<'intro' | 'picker'>(initialPhase);
 
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
