@@ -5,14 +5,20 @@ import { describe, expect, it } from 'vitest';
 // and import directly. For v1 the duplicate is acceptable since the
 // regex set is small and stable.
 function franchiseKey(title: string): string {
-  return title
-    .toLowerCase()
-    .trim()
-    .replace(/\s*\(\d{4}\)$/, '')
-    .replace(/\s+(?:season|cour|part|s)\s*\d+$/i, '')
-    .replace(/\s+\d+(?:st|nd|rd|th)\s+season$/i, '')
-    .replace(/\s+(?:ii|iii|iv|v|vi|vii|viii|ix|x)$/i, '')
-    .trim();
+  let key = title.toLowerCase().trim();
+  for (let pass = 0; pass < 6; pass++) {
+    const previous = key;
+    key = key
+      .replace(/\s*\(\d{4}\)$/, '')
+      .replace(/\s*[:\-–]\s*(?:the\s+)?final\s+(?:season|cour|part)$/i, '')
+      .replace(/\s+(?:the\s+)?final\s+(?:season|cour|part)$/i, '')
+      .replace(/\s+(?:season|cour|part|s)\s*\d+$/i, '')
+      .replace(/\s+\d+(?:st|nd|rd|th)\s+season$/i, '')
+      .replace(/\s+(?:ii|iii|iv|v|vi|vii|viii|ix|x)$/i, '')
+      .trim();
+    if (key === previous) break;
+  }
+  return key;
 }
 
 describe('franchiseKey', () => {
@@ -55,5 +61,29 @@ describe('franchiseKey', () => {
 
   it('preserves case-insensitive matching', () => {
     expect(franchiseKey('JUJUTSU KAISEN season 2')).toBe(franchiseKey('jujutsu kaisen'));
+  });
+
+  it('collapses compound "Season N Part M" via multi-pass', () => {
+    expect(franchiseKey('Attack on Titan Season 3 Part 2')).toBe(franchiseKey('Attack on Titan'));
+  });
+
+  it('collapses "Final Season"', () => {
+    expect(franchiseKey('Attack on Titan Final Season')).toBe(franchiseKey('Attack on Titan'));
+  });
+
+  it('collapses "Final Season Part N"', () => {
+    expect(franchiseKey('Attack on Titan Final Season Part 2')).toBe(
+      franchiseKey('Attack on Titan'),
+    );
+  });
+
+  it('collapses "The Final Season" prefix variant', () => {
+    expect(franchiseKey('Attack on Titan: The Final Season')).toBe(franchiseKey('Attack on Titan'));
+  });
+
+  it('collapses ": The Final Season" with later Part suffix', () => {
+    expect(franchiseKey('Attack on Titan: The Final Season Part 1')).toBe(
+      franchiseKey('Attack on Titan'),
+    );
   });
 });

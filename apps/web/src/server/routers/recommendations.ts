@@ -16,6 +16,11 @@ import { protectedProcedure, router } from '../trpc';
 // the same franchise (e.g. "Jujutsu Kaisen" + "Jujutsu Kaisen Season 2")
 // only shows up once in the dashboard list.
 //
+// Multi-pass: strips are applied repeatedly until the title stops
+// changing, so compound suffixes like "Attack on Titan Season 3 Part 2"
+// collapse correctly ("Part 2" → "Season 3" → ""). Capped at 6 passes
+// just to avoid pathological infinite loops on weird inputs.
+//
 // Intentionally conservative — keeps colons and bare trailing numbers
 // intact, so distinct works like "Steins;Gate" vs "Steins;Gate 0" or
 // "Demon Slayer: Entertainment District Arc" don't get collapsed.
@@ -23,14 +28,20 @@ import { protectedProcedure, router } from '../trpc';
 // markers (e.g. "Konosuba 2"). Acceptable for v1; the real fix is
 // a franchise_id column populated from AniList relations.
 function franchiseKey(title: string): string {
-  return title
-    .toLowerCase()
-    .trim()
-    .replace(/\s*\(\d{4}\)$/, '') // strip trailing "(2023)"
-    .replace(/\s+(?:season|cour|part|s)\s*\d+$/i, '') // "X Season 2", "X S2", "X Part 3"
-    .replace(/\s+\d+(?:st|nd|rd|th)\s+season$/i, '') // "X 2nd Season"
-    .replace(/\s+(?:ii|iii|iv|v|vi|vii|viii|ix|x)$/i, '') // "X II", "X III"
-    .trim();
+  let key = title.toLowerCase().trim();
+  for (let pass = 0; pass < 6; pass++) {
+    const previous = key;
+    key = key
+      .replace(/\s*\(\d{4}\)$/, '') // " (2023)"
+      .replace(/\s*[:\-–]\s*(?:the\s+)?final\s+(?:season|cour|part)$/i, '') // ": The Final Season", " - Final Cour"
+      .replace(/\s+(?:the\s+)?final\s+(?:season|cour|part)$/i, '') // " The Final Season", " Final Part"
+      .replace(/\s+(?:season|cour|part|s)\s*\d+$/i, '') // " Season 2", " S2", " Part 3", " Cour 1"
+      .replace(/\s+\d+(?:st|nd|rd|th)\s+season$/i, '') // " 2nd Season"
+      .replace(/\s+(?:ii|iii|iv|v|vi|vii|viii|ix|x)$/i, '') // " II", " III"
+      .trim();
+    if (key === previous) break;
+  }
+  return key;
 }
 
 // Read path for pre-computed personal recommendations. Per ADR-0008 the
