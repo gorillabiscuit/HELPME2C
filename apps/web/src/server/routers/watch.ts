@@ -11,7 +11,7 @@ import {
   watchEntryKindEnum,
   watchStatusEnum,
 } from '../schema';
-import { franchiseKey, franchiseSpecificity } from '../lib/franchise';
+import { franchiseDisplayName, franchiseKey, franchiseSpecificity } from '../lib/franchise';
 import { resolveInternalUserId } from '../lib/resolve-user';
 import { protectedProcedure, router } from '../trpc';
 import { inngest, recommendUserEvent } from '@/inngest/client';
@@ -497,7 +497,7 @@ export const watchRouter = router({
 
     if (byFranchise.size < 2) return null;
 
-    // Pick two distinct franchises at random; one season from each.
+    // Pick two distinct franchises at random.
     const franchiseKeys = Array.from(byFranchise.keys());
     // Fisher-Yates partial shuffle: only need the first two slots.
     for (let i = 0; i < 2; i++) {
@@ -506,10 +506,38 @@ export const watchRouter = router({
       franchiseKeys[i] = franchiseKeys[j] as string;
       franchiseKeys[j] = tmp;
     }
+
+    // Within each franchise, pick the lowest-specificity rated season
+    // (the most-canonical one the user has actually rated). The Elo
+    // update goes to THAT entry's watch_entries row. Display uses
+    // `franchiseDisplayName` so "Attack on Titan Final Season" appears
+    // as "Attack on Titan" — the comparison is at the franchise level,
+    // not the specific-season level (per user feedback 2026-05-14).
+    const pickCanonical = (bucket: Row[]): Row => {
+      let best = bucket[0] as Row;
+      let bestSpec = franchiseSpecificity(best.title.title, franchiseKey(best.title.title));
+      for (let i = 1; i < bucket.length; i++) {
+        const row = bucket[i] as Row;
+        const spec = franchiseSpecificity(row.title.title, franchiseKey(row.title.title));
+        if (spec < bestSpec) {
+          best = row;
+          bestSpec = spec;
+        }
+      }
+      return best;
+    };
     const aBucket = byFranchise.get(franchiseKeys[0] as string) as Row[];
     const bBucket = byFranchise.get(franchiseKeys[1] as string) as Row[];
-    const a = aBucket[Math.floor(Math.random() * aBucket.length)] as Row;
-    const b = bBucket[Math.floor(Math.random() * bBucket.length)] as Row;
+    const aRaw = pickCanonical(aBucket);
+    const bRaw = pickCanonical(bBucket);
+    const a = {
+      ...aRaw,
+      title: { ...aRaw.title, title: franchiseDisplayName(aRaw.title.title) },
+    };
+    const b = {
+      ...bRaw,
+      title: { ...bRaw.title, title: franchiseDisplayName(bRaw.title.title) },
+    };
     return { a, b };
   }),
 

@@ -5,6 +5,23 @@ import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import { ChevronDown, ChevronUp, GripVertical, Minus, Plus, X } from 'lucide-react';
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { trpc } from '@/lib/trpc';
 import { RatingFace } from '@/components/rating-face';
 import { cn } from '@/lib/utils';
@@ -107,21 +124,37 @@ export function LibraryRankedView({ mediumFilter = 'all' }: { mediumFilter?: Med
   const tasteQuery = trpc.watch.taste.useQuery();
   const setRankedOrder = trpc.watch.setRankedOrder.useMutation({
     onSuccess: () => {
+      // After commit, server is the source of truth. Clear the local
+      // draft so any subsequent re-render uses fresh tasteQuery.data.
+      setDraftOrder(null);
       router.refresh();
       tasteQuery.refetch();
     },
   });
   const removeMany = trpc.watch.removeMany.useMutation({
     onSuccess: () => {
+      // Clear the local drag-state draft so the server's new list
+      // wins on re-render. Without this, a user who drag-reorders
+      // and THEN removes a row sees the stale draft (which still
+      // contains the removed item).
+      setDraftOrder(null);
       router.refresh();
       tasteQuery.refetch();
     },
   });
 
   const [draftOrder, setDraftOrder] = useState<TasteFranchise[] | null>(null);
-  const [dragIdx, setDragIdx] = useState<number | null>(null);
   // Open accordion state keyed by franchiseKey so it survives refetch.
   const [openKeys, setOpenKeys] = useState<Set<string>>(new Set());
+
+  // @dnd-kit sensors. PointerSensor handles mouse + touch with a tiny
+  // distance threshold so a click on a button doesn't accidentally
+  // start a drag. KeyboardSensor maps arrow keys to drag for full
+  // keyboard a11y.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   const allFranchises: TasteFranchise[] = draftOrder ?? tasteQuery.data ?? [];
   const franchises =
@@ -142,42 +175,25 @@ export function LibraryRankedView({ mediumFilter = 'all' }: { mediumFilter?: Med
     );
   }
 
-  const onDragStart = (idx: number) => {
-    setDragIdx(idx);
-    if (!draftOrder) setDraftOrder(franchises.slice());
-  };
-
-  const onDragOver = (e: React.DragEvent, overIdx: number) => {
-    e.preventDefault();
-    if (dragIdx === null || dragIdx === overIdx) return;
-    setDraftOrder((current) => {
-      const list = (current ?? franchises).slice();
-      const [moved] = list.splice(dragIdx, 1);
-      if (moved) list.splice(overIdx, 0, moved);
-      setDragIdx(overIdx);
-      return list;
-    });
-  };
-
   const commitOrder = (next: TasteFranchise[]) => {
     setRankedOrder.mutate({ orderedTitleIds: next.map((f) => f.representative.titleId) });
   };
 
-  const onDrop = () => {
-    if (!draftOrder) return;
-    commitOrder(draftOrder);
-    setDragIdx(null);
+  const onDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const fromIdx = franchises.findIndex((f) => f.franchiseKey === active.id);
+    const toIdx = franchises.findIndex((f) => f.franchiseKey === over.id);
+    if (fromIdx < 0 || toIdx < 0) return;
+    const next = arrayMove(franchises, fromIdx, toIdx);
+    setDraftOrder(next);
+    commitOrder(next);
   };
 
   const moveBy = (idx: number, delta: -1 | 1) => {
     const target = idx + delta;
     if (target < 0 || target >= franchises.length) return;
-    const next = franchises.slice();
-    const moved = next[idx];
-    const swap = next[target];
-    if (!moved || !swap) return;
-    next[idx] = swap;
-    next[target] = moved;
+    const next = arrayMove(franchises, idx, target);
     setDraftOrder(next);
     commitOrder(next);
   };
@@ -233,176 +249,252 @@ export function LibraryRankedView({ mediumFilter = 'all' }: { mediumFilter?: Med
           </p>
         </div>
       ) : null}
-      <ol className="divide-y divide-border rounded-lg border border-border">
-        {franchises.map((f, i) => {
-          const isOpen = openKeys.has(f.franchiseKey);
-          const hasMultiple = f.seasonCount > 1;
-          const displayRating = displayRatings[i];
-          const meanLabel =
-            displayRating !== undefined && displayRating > 0
-              ? `${displayRating.toFixed(1)}/10`
-              : null;
-          return (
-            <li key={f.franchiseKey} className="bg-card">
-              <div
-                draggable={!filterActive}
-                onDragStart={filterActive ? undefined : () => onDragStart(i)}
-                onDragOver={filterActive ? undefined : (e) => onDragOver(e, i)}
-                onDrop={filterActive ? undefined : onDrop}
-                onDragEnd={filterActive ? undefined : () => setDragIdx(null)}
-                className={cn(
-                  'flex items-center gap-3 px-3 py-2 transition-colors',
-                  dragIdx === i ? 'bg-muted opacity-70' : 'hover:bg-muted/40',
-                )}
-              >
-                <GripVertical
-                  className={cn(
-                    'h-4 w-4 flex-none text-muted-foreground',
-                    filterActive ? 'cursor-not-allowed opacity-30' : 'cursor-grab',
-                  )}
-                  aria-hidden="true"
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <SortableContext
+          items={franchises.map((f) => f.franchiseKey)}
+          strategy={verticalListSortingStrategy}
+          disabled={filterActive}
+        >
+          <ol className="divide-y divide-border rounded-lg border border-border">
+            {franchises.map((f, i) => {
+              const displayRating = displayRatings[i];
+              const meanLabel =
+                displayRating !== undefined && displayRating > 0
+                  ? `${displayRating.toFixed(1)}/10`
+                  : null;
+              return (
+                <SortableFranchiseRow
+                  key={f.franchiseKey}
+                  franchise={f}
+                  position={i + 1}
+                  isOpen={openKeys.has(f.franchiseKey)}
+                  meanLabel={meanLabel}
+                  displayRating={displayRating}
+                  filterActive={filterActive}
+                  isFirst={i === 0}
+                  isLast={i === franchises.length - 1}
+                  reorderPending={setRankedOrder.isPending}
+                  removePending={removeMany.isPending}
+                  onToggle={() => toggleOpen(f.franchiseKey)}
+                  onMoveUp={() => moveBy(i, -1)}
+                  onMoveDown={() => moveBy(i, 1)}
+                  onRemoveFranchise={() => removeFranchise(f)}
+                  onRemoveSeason={removeSeason}
                 />
-                <span className="w-8 flex-none text-sm font-medium text-muted-foreground">
-                  {i + 1}
-                </span>
-                {f.representative.title.posterUrl ? (
-                  <Image
-                    src={f.representative.title.posterUrl}
-                    alt=""
-                    width={36}
-                    height={54}
-                    className="aspect-[2/3] flex-none rounded border border-border bg-muted object-cover"
-                  />
-                ) : (
-                  <div className="aspect-[2/3] w-9 flex-none rounded border border-border bg-muted" />
-                )}
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-foreground">
-                    {f.representative.title.title}
-                    {hasMultiple ? (
-                      <span className="ml-2 text-xs font-normal text-muted-foreground">
-                        · {f.seasonCount} seasons
-                      </span>
-                    ) : null}
-                  </p>
-                  <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                    <span>
-                      {[
-                        MEDIA_TYPE_LABEL[f.representative.title.mediaType],
-                        f.representative.title.releaseYear?.toString(),
-                        meanLabel,
-                      ]
-                        .filter((s): s is string => Boolean(s))
-                        .join(' · ')}
-                    </span>
-                    {displayRating !== undefined && displayRating > 0 ? (
-                      <RatingFace rating={displayRating} size="sm" />
-                    ) : null}
-                  </p>
-                </div>
-                <div className="flex flex-none items-center gap-1">
-                  {hasMultiple ? (
-                    <button
-                      type="button"
-                      onClick={() => toggleOpen(f.franchiseKey)}
-                      aria-label={
-                        isOpen
-                          ? `Collapse ${f.representative.title.title}`
-                          : `Expand ${f.representative.title.title}`
-                      }
-                      aria-expanded={isOpen}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
-                    >
-                      {isOpen ? (
-                        <Minus className="h-4 w-4" aria-hidden="true" />
-                      ) : (
-                        <Plus className="h-4 w-4" aria-hidden="true" />
-                      )}
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    onClick={() => moveBy(i, -1)}
-                    disabled={i === 0 || setRankedOrder.isPending || filterActive}
-                    aria-label={`Move ${f.representative.title.title} up`}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-30"
-                  >
-                    <ChevronUp className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => moveBy(i, 1)}
-                    disabled={
-                      i === franchises.length - 1 || setRankedOrder.isPending || filterActive
-                    }
-                    aria-label={`Move ${f.representative.title.title} down`}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-30"
-                  >
-                    <ChevronDown className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => removeFranchise(f)}
-                    disabled={removeMany.isPending}
-                    aria-label={`Remove ${f.representative.title.title}`}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-30"
-                  >
-                    <X className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                </div>
-              </div>
-              {hasMultiple && isOpen ? (
-                <ul className="border-t border-border bg-muted/30">
-                  {f.seasons.map((season) => (
-                    <li
-                      key={season.titleId}
-                      className="flex items-center gap-3 px-3 py-2 pl-14 text-sm"
-                    >
-                      {season.title.posterUrl ? (
-                        <Image
-                          src={season.title.posterUrl}
-                          alt=""
-                          width={28}
-                          height={42}
-                          className="aspect-[2/3] flex-none rounded border border-border bg-muted object-cover"
-                        />
-                      ) : (
-                        <div className="aspect-[2/3] w-7 flex-none rounded border border-border bg-muted" />
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm text-foreground">{season.title.title}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {[
-                            season.title.releaseYear?.toString(),
-                            season.rating !== null ? `${season.rating}/10` : null,
-                          ]
-                            .filter((s): s is string => Boolean(s))
-                            .join(' · ')}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => removeSeason(season)}
-                        disabled={removeMany.isPending}
-                        aria-label={`Remove ${season.title.title}`}
-                        className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-30"
-                      >
-                        <X className="h-3.5 w-3.5" aria-hidden="true" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </li>
-          );
-        })}
-      </ol>
+              );
+            })}
+          </ol>
+        </SortableContext>
+      </DndContext>
       {setRankedOrder.isPending || removeMany.isPending ? (
         <p className="mt-2 text-xs text-muted-foreground" aria-live="polite">
           Saving…
         </p>
       ) : null}
     </div>
+  );
+}
+
+interface SortableFranchiseRowProps {
+  franchise: TasteFranchise;
+  position: number;
+  isOpen: boolean;
+  meanLabel: string | null;
+  displayRating: number | undefined;
+  filterActive: boolean;
+  isFirst: boolean;
+  isLast: boolean;
+  reorderPending: boolean;
+  removePending: boolean;
+  onToggle: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onRemoveFranchise: () => void;
+  onRemoveSeason: (season: TasteEntry) => void;
+}
+
+function SortableFranchiseRow({
+  franchise: f,
+  position,
+  isOpen,
+  meanLabel,
+  displayRating,
+  filterActive,
+  isFirst,
+  isLast,
+  reorderPending,
+  removePending,
+  onToggle,
+  onMoveUp,
+  onMoveDown,
+  onRemoveFranchise,
+  onRemoveSeason,
+}: SortableFranchiseRowProps) {
+  const hasMultiple = f.seasonCount > 1;
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: f.franchiseKey,
+    disabled: filterActive,
+  });
+
+  // CSS transform = @dnd-kit's live translation as the user drags.
+  // SortableContext + verticalListSortingStrategy automatically shifts
+  // neighbouring items aside so a visible gap appears where the dragged
+  // item will land (the drop indicator pattern the user asked for).
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+    zIndex: isDragging ? 10 : 0,
+    position: 'relative',
+  };
+
+  return (
+    <li ref={setNodeRef} style={style} className="bg-card">
+      <div
+        className={cn(
+          'flex items-center gap-3 px-3 py-2 transition-colors',
+          isDragging ? 'bg-muted shadow-lg' : 'hover:bg-muted/40',
+        )}
+      >
+        {/* Listeners attach ONLY to the grip handle, so drag never starts
+            from a button click. */}
+        <button
+          type="button"
+          {...attributes}
+          {...listeners}
+          aria-label={`Drag ${f.representative.title.title} to reorder`}
+          disabled={filterActive}
+          className={cn(
+            'flex h-8 w-5 flex-none cursor-grab touch-none items-center justify-center text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-30',
+          )}
+        >
+          <GripVertical className="h-4 w-4" aria-hidden="true" />
+        </button>
+        <span className="w-8 flex-none text-sm font-medium text-muted-foreground">{position}</span>
+        {f.representative.title.posterUrl ? (
+          <Image
+            src={f.representative.title.posterUrl}
+            alt=""
+            width={36}
+            height={54}
+            className="aspect-[2/3] flex-none rounded border border-border bg-muted object-cover"
+          />
+        ) : (
+          <div className="aspect-[2/3] w-9 flex-none rounded border border-border bg-muted" />
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-foreground">
+            {f.representative.title.title}
+            {hasMultiple ? (
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                · {f.seasonCount} seasons
+              </span>
+            ) : null}
+          </p>
+          <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+            <span>
+              {[
+                MEDIA_TYPE_LABEL[f.representative.title.mediaType],
+                f.representative.title.releaseYear?.toString(),
+                meanLabel,
+              ]
+                .filter((s): s is string => Boolean(s))
+                .join(' · ')}
+            </span>
+            {displayRating !== undefined && displayRating > 0 ? (
+              <RatingFace rating={displayRating} size="sm" />
+            ) : null}
+          </p>
+        </div>
+        <div className="flex flex-none items-center gap-1">
+          {hasMultiple ? (
+            <button
+              type="button"
+              onClick={onToggle}
+              aria-label={
+                isOpen
+                  ? `Collapse ${f.representative.title.title}`
+                  : `Expand ${f.representative.title.title}`
+              }
+              aria-expanded={isOpen}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+            >
+              {isOpen ? (
+                <Minus className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <Plus className="h-4 w-4" aria-hidden="true" />
+              )}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onMoveUp}
+            disabled={isFirst || reorderPending || filterActive}
+            aria-label={`Move ${f.representative.title.title} up`}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-30"
+          >
+            <ChevronUp className="h-4 w-4" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            onClick={onMoveDown}
+            disabled={isLast || reorderPending || filterActive}
+            aria-label={`Move ${f.representative.title.title} down`}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-30"
+          >
+            <ChevronDown className="h-4 w-4" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            onClick={onRemoveFranchise}
+            disabled={removePending}
+            aria-label={`Remove ${f.representative.title.title}`}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-30"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+      {hasMultiple && isOpen ? (
+        <ul className="border-t border-border bg-muted/30">
+          {f.seasons.map((season) => (
+            <li key={season.titleId} className="flex items-center gap-3 px-3 py-2 pl-14 text-sm">
+              {season.title.posterUrl ? (
+                <Image
+                  src={season.title.posterUrl}
+                  alt=""
+                  width={28}
+                  height={42}
+                  className="aspect-[2/3] flex-none rounded border border-border bg-muted object-cover"
+                />
+              ) : (
+                <div className="aspect-[2/3] w-7 flex-none rounded border border-border bg-muted" />
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm text-foreground">{season.title.title}</p>
+                <p className="text-xs text-muted-foreground">
+                  {[
+                    season.title.releaseYear?.toString(),
+                    season.rating !== null ? `${season.rating}/10` : null,
+                  ]
+                    .filter((s): s is string => Boolean(s))
+                    .join(' · ')}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onRemoveSeason(season)}
+                disabled={removePending}
+                aria-label={`Remove ${season.title.title}`}
+                className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-30"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </li>
   );
 }
 

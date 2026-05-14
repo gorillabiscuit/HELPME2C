@@ -77,8 +77,11 @@ export default async function LibraryPage({ searchParams }: LibraryPageProps) {
       <header className="mb-6">
         <h1 className="text-4xl font-semibold tracking-tight">Library</h1>
         <p className="mt-2 text-base text-text-body">
-          Everything you&apos;re tracking — what you&apos;ve watched, what you&apos;re watching, and
-          what you want to watch next. Ratings here shape your recommendations.
+          {view === 'all'
+            ? 'Every show you’re tracking, sorted by recent activity. Update status, episode progress, or rating per row.'
+            : view === 'ranked'
+              ? 'Your rated shows in preference order. Drag or use the arrows to reorder. Top of the list = strongest taste signal.'
+              : 'Pairwise comparison — pick the show you’d rather watch from each pair. Sharpens your ranking without you having to drag everything yourself.'}
         </p>
       </header>
 

@@ -164,9 +164,7 @@ export function LibraryEditDialog({
               onChange={(e) => setRating(e.target.value)}
               placeholder="—"
             />
-            <p className="text-xs text-muted-foreground">
-              1-3 disliked · 4-6 mixed · 7-9 liked · 10 loved
-            </p>
+            <p className="text-xs text-muted-foreground">1-3 disliked · 4-6 mixed · 7-10 liked</p>
           </div>
 
           {hasEpisodes ? (

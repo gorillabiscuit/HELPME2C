@@ -51,6 +51,33 @@ export function franchiseKey(title: string): string {
   return key;
 }
 
+/**
+ * Strip the season/cour/part suffix from a title while preserving the
+ * original casing. Used wherever the franchise NAME (not the SQL/group
+ * key) should be displayed — e.g., the Compare view's "Attack on Titan
+ * Final Season" should display as "Attack on Titan" so the comparison
+ * is franchise-vs-franchise rather than franchise-vs-specific-season.
+ *
+ * Same strip patterns as `franchiseKey`, just without the toLowerCase
+ * step. The regexes are case-insensitive so the strip works either way.
+ */
+export function franchiseDisplayName(title: string): string {
+  let display = title.trim();
+  for (let pass = 0; pass < 6; pass++) {
+    const previous = display;
+    display = display
+      .replace(/\s*\(\d{4}\)$/, '')
+      .replace(/\s*[:\-–]\s*(?:the\s+)?final\s+(?:season|cour|part)$/i, '')
+      .replace(/\s+(?:the\s+)?final\s+(?:season|cour|part)$/i, '')
+      .replace(/\s+(?:season|cour|part|s)\s*\d+$/i, '')
+      .replace(/\s+\d+(?:st|nd|rd|th)\s+season$/i, '')
+      .replace(/\s+(?:ii|iii|iv|v|vi|vii|viii|ix|x)$/i, '')
+      .trim();
+    if (display === previous) break;
+  }
+  return display;
+}
+
 const ROMAN_TO_INT: Record<string, number> = {
   ii: 2,
   iii: 3,
