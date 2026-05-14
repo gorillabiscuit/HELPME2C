@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { ChevronDown, ChevronUp, GripVertical, Shuffle, Star } from 'lucide-react';
+import { ChevronDown, ChevronRight, ChevronUp, GripVertical, Shuffle, Star, X } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { Button } from '@/components/ui/button';
 import { TastePicker } from '@/components/taste-picker';
@@ -36,6 +36,19 @@ interface TasteEntry {
     releaseYear: number | null;
     posterUrl: string | null;
   };
+}
+
+// Franchise-grouped taste shape returned by watch.taste per ADR-0023.
+// One row per franchise; each carries the canonical representative's
+// display data + the seasons list (sorted chronologically).
+interface TasteFranchise {
+  franchiseKey: string;
+  representative: TasteEntry;
+  manualRank: number | null;
+  eloScore: number | null;
+  meanRating: number;
+  seasonCount: number;
+  seasons: TasteEntry[];
 }
 
 type WatchStatus = 'watching' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_watch';
@@ -164,19 +177,30 @@ function RankedView() {
       tasteQuery.refetch();
     },
   });
+  const removeMany = trpc.watch.removeMany.useMutation({
+    onSuccess: () => {
+      router.refresh();
+      tasteQuery.refetch();
+    },
+  });
 
-  // Local ordering state — initialised from the server data, then mutated
-  // by drag operations. Server is the source of truth; we send the new
-  // ordered list on drop and refetch.
-  const [draftOrder, setDraftOrder] = useState<TasteEntry[] | null>(null);
+  // Local ordering state mirrors the franchise-level list. Drag-and-
+  // reorder operates on franchises, NOT on individual seasons — the
+  // setRankedOrder mutation sends each franchise's representative
+  // titleId. Per-season seasons stay sorted chronologically inside
+  // each accordion regardless of drag.
+  const [draftOrder, setDraftOrder] = useState<TasteFranchise[] | null>(null);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
+  // Which franchise rows are expanded. Keyed by franchiseKey so the
+  // open state survives a refetch that swaps the array identity.
+  const [openKeys, setOpenKeys] = useState<Set<string>>(new Set());
 
-  const entries: TasteEntry[] = draftOrder ?? tasteQuery.data ?? [];
+  const franchises: TasteFranchise[] = draftOrder ?? tasteQuery.data ?? [];
 
   if (tasteQuery.isLoading) {
     return <p className="text-sm text-text-body">Loading your taste…</p>;
   }
-  if (entries.length === 0) {
+  if (franchises.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-border px-6 py-12 text-center">
         <p className="text-base text-text-body">
@@ -189,14 +213,14 @@ function RankedView() {
 
   const onDragStart = (idx: number) => {
     setDragIdx(idx);
-    if (!draftOrder) setDraftOrder(entries.slice());
+    if (!draftOrder) setDraftOrder(franchises.slice());
   };
 
   const onDragOver = (e: React.DragEvent, overIdx: number) => {
     e.preventDefault();
     if (dragIdx === null || dragIdx === overIdx) return;
     setDraftOrder((current) => {
-      const list = (current ?? entries).slice();
+      const list = (current ?? franchises).slice();
       const [moved] = list.splice(dragIdx, 1);
       if (moved) list.splice(overIdx, 0, moved);
       setDragIdx(overIdx);
@@ -204,25 +228,51 @@ function RankedView() {
     });
   };
 
+  const commitOrder = (next: TasteFranchise[]) => {
+    setRankedOrder.mutate({ orderedTitleIds: next.map((f) => f.representative.titleId) });
+  };
+
   const onDrop = () => {
     if (!draftOrder) return;
-    setRankedOrder.mutate({ orderedTitleIds: draftOrder.map((e) => e.titleId) });
+    commitOrder(draftOrder);
     setDragIdx(null);
   };
 
-  // Keyboard alternative to drag — move-up / move-down buttons per row.
-  // Operates on the live order (entries), commits via setRankedOrder.
   const moveBy = (idx: number, delta: -1 | 1) => {
     const target = idx + delta;
-    if (target < 0 || target >= entries.length) return;
-    const next = entries.slice();
+    if (target < 0 || target >= franchises.length) return;
+    const next = franchises.slice();
     const moved = next[idx];
     const swap = next[target];
     if (!moved || !swap) return;
     next[idx] = swap;
     next[target] = moved;
     setDraftOrder(next);
-    setRankedOrder.mutate({ orderedTitleIds: next.map((e) => e.titleId) });
+    commitOrder(next);
+  };
+
+  const toggleOpen = (key: string) => {
+    setOpenKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const removeFranchise = (f: TasteFranchise) => {
+    const titleList = f.seasons.map((s) => s.title.title).join(', ');
+    const label =
+      f.seasonCount > 1
+        ? `${f.representative.title.title} (${f.seasonCount} seasons)`
+        : f.representative.title.title;
+    if (!confirm(`Remove ${label} from your taste? This deletes:\n\n${titleList}`)) return;
+    removeMany.mutate({ titleIds: f.seasons.map((s) => s.titleId) });
+  };
+
+  const removeSeason = (season: TasteEntry) => {
+    if (!confirm(`Remove ${season.title.title} from your taste?`)) return;
+    removeMany.mutate({ titleIds: [season.titleId] });
   };
 
   return (
@@ -232,73 +282,163 @@ function RankedView() {
         access. Top of the list = strongest taste signal. Changes save automatically.
       </p>
       <ol className="divide-y divide-border rounded-lg border border-border">
-        {entries.map((entry, i) => (
-          <li
-            key={entry.titleId}
-            draggable
-            onDragStart={() => onDragStart(i)}
-            onDragOver={(e) => onDragOver(e, i)}
-            onDrop={onDrop}
-            onDragEnd={() => setDragIdx(null)}
-            className={cn(
-              'flex items-center gap-3 px-3 py-2 transition-colors',
-              dragIdx === i ? 'bg-muted opacity-70' : 'hover:bg-muted/40',
-            )}
-          >
-            <GripVertical
-              className="h-4 w-4 flex-none cursor-grab text-muted-foreground"
-              aria-hidden="true"
-            />
-            <span className="w-8 flex-none text-sm font-medium text-muted-foreground">{i + 1}</span>
-            {entry.title.posterUrl ? (
-              <Image
-                src={entry.title.posterUrl}
-                alt=""
-                width={36}
-                height={54}
-                className="aspect-[2/3] flex-none rounded border border-border bg-muted object-cover"
-              />
-            ) : (
-              <div className="aspect-[2/3] w-9 flex-none rounded border border-border bg-muted" />
-            )}
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-foreground">{entry.title.title}</p>
-              <p className="text-xs text-muted-foreground">
-                {[
-                  MEDIA_TYPE_LABEL[entry.title.mediaType],
-                  entry.title.releaseYear?.toString(),
-                  entry.rating !== null ? `${entry.rating}/10` : null,
-                ]
-                  .filter((s): s is string => Boolean(s))
-                  .join(' · ')}
-              </p>
-            </div>
-            <div className="flex flex-none items-center gap-1">
-              <button
-                type="button"
-                onClick={() => moveBy(i, -1)}
-                disabled={i === 0 || setRankedOrder.isPending}
-                aria-label={`Move ${entry.title.title} up`}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-30"
+        {franchises.map((f, i) => {
+          const isOpen = openKeys.has(f.franchiseKey);
+          const hasMultiple = f.seasonCount > 1;
+          const meanLabel =
+            f.meanRating > 0
+              ? f.meanRating === Math.round(f.meanRating)
+                ? `${f.meanRating}/10`
+                : `${f.meanRating.toFixed(1)}/10`
+              : null;
+          return (
+            <li key={f.franchiseKey} className="bg-card">
+              <div
+                draggable
+                onDragStart={() => onDragStart(i)}
+                onDragOver={(e) => onDragOver(e, i)}
+                onDrop={onDrop}
+                onDragEnd={() => setDragIdx(null)}
+                className={cn(
+                  'flex items-center gap-3 px-3 py-2 transition-colors',
+                  dragIdx === i ? 'bg-muted opacity-70' : 'hover:bg-muted/40',
+                )}
               >
-                <ChevronUp className="h-4 w-4" aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                onClick={() => moveBy(i, 1)}
-                disabled={i === entries.length - 1 || setRankedOrder.isPending}
-                aria-label={`Move ${entry.title.title} down`}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-30"
-              >
-                <ChevronDown className="h-4 w-4" aria-hidden="true" />
-              </button>
-            </div>
-          </li>
-        ))}
+                <GripVertical
+                  className="h-4 w-4 flex-none cursor-grab text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <span className="w-8 flex-none text-sm font-medium text-muted-foreground">
+                  {i + 1}
+                </span>
+                {f.representative.title.posterUrl ? (
+                  <Image
+                    src={f.representative.title.posterUrl}
+                    alt=""
+                    width={36}
+                    height={54}
+                    className="aspect-[2/3] flex-none rounded border border-border bg-muted object-cover"
+                  />
+                ) : (
+                  <div className="aspect-[2/3] w-9 flex-none rounded border border-border bg-muted" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground">
+                    {f.representative.title.title}
+                    {hasMultiple ? (
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">
+                        · {f.seasonCount} seasons
+                      </span>
+                    ) : null}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {[
+                      MEDIA_TYPE_LABEL[f.representative.title.mediaType],
+                      f.representative.title.releaseYear?.toString(),
+                      meanLabel,
+                    ]
+                      .filter((s): s is string => Boolean(s))
+                      .join(' · ')}
+                  </p>
+                </div>
+                <div className="flex flex-none items-center gap-1">
+                  {hasMultiple ? (
+                    <button
+                      type="button"
+                      onClick={() => toggleOpen(f.franchiseKey)}
+                      aria-label={
+                        isOpen
+                          ? `Collapse ${f.representative.title.title}`
+                          : `Expand ${f.representative.title.title}`
+                      }
+                      aria-expanded={isOpen}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+                    >
+                      {isOpen ? (
+                        <ChevronDown className="h-4 w-4" aria-hidden="true" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                      )}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => moveBy(i, -1)}
+                    disabled={i === 0 || setRankedOrder.isPending}
+                    aria-label={`Move ${f.representative.title.title} up`}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-30"
+                  >
+                    <ChevronUp className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => moveBy(i, 1)}
+                    disabled={i === franchises.length - 1 || setRankedOrder.isPending}
+                    aria-label={`Move ${f.representative.title.title} down`}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-30"
+                  >
+                    <ChevronDown className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeFranchise(f)}
+                    disabled={removeMany.isPending}
+                    aria-label={`Remove ${f.representative.title.title}`}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-30"
+                  >
+                    <X className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+              {hasMultiple && isOpen ? (
+                <ul className="border-t border-border bg-muted/30">
+                  {f.seasons.map((season) => (
+                    <li
+                      key={season.titleId}
+                      className="flex items-center gap-3 px-3 py-2 pl-14 text-sm"
+                    >
+                      {season.title.posterUrl ? (
+                        <Image
+                          src={season.title.posterUrl}
+                          alt=""
+                          width={28}
+                          height={42}
+                          className="aspect-[2/3] flex-none rounded border border-border bg-muted object-cover"
+                        />
+                      ) : (
+                        <div className="aspect-[2/3] w-7 flex-none rounded border border-border bg-muted" />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm text-foreground">{season.title.title}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {[
+                            season.title.releaseYear?.toString(),
+                            season.rating !== null ? `${season.rating}/10` : null,
+                          ]
+                            .filter((s): s is string => Boolean(s))
+                            .join(' · ')}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeSeason(season)}
+                        disabled={removeMany.isPending}
+                        aria-label={`Remove ${season.title.title}`}
+                        className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-30"
+                      >
+                        <X className="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </li>
+          );
+        })}
       </ol>
-      {setRankedOrder.isPending ? (
+      {setRankedOrder.isPending || removeMany.isPending ? (
         <p className="mt-2 text-xs text-muted-foreground" aria-live="polite">
-          Saving order…
+          Saving…
         </p>
       ) : null}
     </div>

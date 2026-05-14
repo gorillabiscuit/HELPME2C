@@ -15,9 +15,11 @@ import {
   groupRecommendations,
   groups,
   tagThemes,
+  titles,
   titleTags,
   watchEntries,
 } from '@/server/schema';
+import { aggregateByFranchise } from '@/server/lib/franchise';
 import { groupTagsIntoTitleSets } from '../lib/group-tags';
 import { inngest, recommendAllGroupsEvent, recommendGroupEvent } from '../client';
 
@@ -71,15 +73,18 @@ export async function recomputeGroupRecommendations(
     return { recCount: 0 };
   }
 
-  // Pull every member's history in one query.
+  // Pull every member's history in one query. Joins titles for the
+  // text needed to compute franchiseKey at aggregation time (ADR-0023).
   const allEntries = await db
     .select({
       userId: watchEntries.userId,
       titleId: watchEntries.titleId,
+      title: titles.title,
       kind: watchEntries.kind,
       rating: watchEntries.rating,
     })
     .from(watchEntries)
+    .innerJoin(titles, eq(watchEntries.titleId, titles.id))
     .where(inArray(watchEntries.userId, memberIds));
 
   // Group entries by userId so we can build per-member history blocks.
@@ -137,15 +142,32 @@ export async function recomputeGroupRecommendations(
   const memberTitles = groupTagsIntoTitleSets(memberTitleTagRows);
   const candidates = groupTagsIntoTitleSets(candidateTagRows);
 
-  // Build per-member taste vectors.
+  // Build per-member taste vectors. ADR-0023: aggregate each member's
+  // rated entries by franchise (mean rating per franchise) so the
+  // group rec engine sees franchise-level signal, matching the
+  // personal-rec pipeline. A member with three rated AoT seasons
+  // contributes the same franchise weight as a member with one.
   const groupMembersForML: GroupMember[] = memberIds.map((userId) => {
     const userEntries = entriesByUser.get(userId) ?? [];
+    const ratedEntries = userEntries.flatMap((e) =>
+      e.kind === 'tracking' && e.rating !== null
+        ? [{ titleId: e.titleId, title: e.title, rating: e.rating }]
+        : [],
+    );
+    const franchiseRows = aggregateByFranchise(ratedEntries);
+    const ratings: RatedTitle[] = franchiseRows.map((f) => ({
+      titleId: f.representativeTitleId,
+      rating: f.meanRating,
+    }));
+
+    // Legacy anchors (kind='anchor') predate the rated-taste model.
+    // They contribute as anchor picks alongside the franchise-aggregated
+    // ratings — passed through individually since they're explicit
+    // signal rather than collapsible rating signal.
     const anchors: AnchorPick[] = userEntries
       .filter((e) => e.kind === 'anchor')
       .map((e) => ({ titleId: e.titleId }));
-    const ratings: RatedTitle[] = userEntries.flatMap((e) =>
-      e.kind === 'tracking' && e.rating !== null ? [{ titleId: e.titleId, rating: e.rating }] : [],
-    );
+
     const taste = extractTasteVector({ anchors, ratings }, memberTitles);
     return { userId, taste };
   });

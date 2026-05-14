@@ -123,6 +123,87 @@ export function franchiseSpecificity(originalTitle: string, key: string): number
 }
 
 /**
+ * Group rated entries by franchise and aggregate to one row per franchise.
+ * Used by the rec engine input pipeline (per ADR-0023) so a user with
+ * multiple rated seasons of the same franchise contributes the SAME
+ * signal weight as a user with one rated season.
+ *
+ * Each input row carries a rating and a title text. Output rows carry:
+ *   - `representativeTitleId`: titleId of the entry with the lowest
+ *     `franchiseSpecificity` value in the group (i.e. the canonical
+ *     entry — series entry beats Season 1 beats Season 2 etc).
+ *     Used as the synthetic franchise identifier passed to
+ *     extractTasteVector. Ties on specificity break to the FIRST
+ *     row in input order (mirrors `dedupeByFranchise`).
+ *   - `meanRating`: arithmetic mean of the rated seasons' ratings, no
+ *     rounding. Caller is responsible for any display rounding.
+ *   - `seasonTitleIds`: every titleId in the group, in input order.
+ *     Useful for callers that want to union season tags or correlate
+ *     back to the user's history.
+ *
+ * Result order matches the input order of each franchise's FIRST
+ * appearance. Subsequent rows for an already-seen franchise extend
+ * the existing group rather than create a new one.
+ *
+ * Empty input returns an empty array. Duplicate `titleId` values in
+ * input are NOT deduped — they count toward `meanRating` per occurrence
+ * and appear in `seasonTitleIds` per occurrence; callers should pass
+ * unique titleIds.
+ */
+export interface AggregatedFranchise {
+  readonly representativeTitleId: string;
+  readonly meanRating: number;
+  readonly seasonTitleIds: ReadonlyArray<string>;
+}
+
+export function aggregateByFranchise(
+  rows: ReadonlyArray<{ titleId: string; title: string; rating: number }>,
+): AggregatedFranchise[] {
+  // groups: franchiseKey -> mutable aggregator. Tracks both the best
+  // representative seen so far AND the running rating list for mean.
+  const groups = new Map<
+    string,
+    {
+      representativeTitleId: string;
+      representativeSpecificity: number;
+      ratingSum: number;
+      seasonTitleIds: string[];
+      position: number;
+    }
+  >();
+
+  rows.forEach((row, index) => {
+    const key = franchiseKey(row.title);
+    const specificity = franchiseSpecificity(row.title, key);
+    const existing = groups.get(key);
+    if (!existing) {
+      groups.set(key, {
+        representativeTitleId: row.titleId,
+        representativeSpecificity: specificity,
+        ratingSum: row.rating,
+        seasonTitleIds: [row.titleId],
+        position: index,
+      });
+      return;
+    }
+    existing.ratingSum += row.rating;
+    existing.seasonTitleIds.push(row.titleId);
+    if (specificity < existing.representativeSpecificity) {
+      existing.representativeTitleId = row.titleId;
+      existing.representativeSpecificity = specificity;
+    }
+  });
+
+  return Array.from(groups.values())
+    .sort((a, b) => a.position - b.position)
+    .map((g) => ({
+      representativeTitleId: g.representativeTitleId,
+      meanRating: g.ratingSum / g.seasonTitleIds.length,
+      seasonTitleIds: g.seasonTitleIds,
+    }));
+}
+
+/**
  * Group rows by franchise and return one representative per franchise.
  *
  * Within a franchise, the representative is the row with the LOWEST

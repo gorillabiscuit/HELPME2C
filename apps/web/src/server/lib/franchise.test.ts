@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { franchiseKey, franchiseSpecificity, dedupeByFranchise } from './franchise';
+import {
+  franchiseKey,
+  franchiseSpecificity,
+  dedupeByFranchise,
+  aggregateByFranchise,
+} from './franchise';
 
 // Fixture conventions:
 //   - `row(title, extras)` builds a minimal { title } row, optionally
@@ -374,5 +379,191 @@ describe('dedupeByFranchise — generic over T extends { title: string }', () =>
     const result = dedupeByFranchise(rows);
 
     expect(result[0]).toBe(seriesEntry);
+  });
+});
+
+// ----- aggregateByFranchise --------------------------------------------
+
+// Fixture builder for aggregate inputs. Keeps `titleId` and `rating`
+// explicit so each test reads as a tiny table.
+const rated = (
+  titleId: string,
+  title: string,
+  rating: number,
+): { titleId: string; title: string; rating: number } => ({ titleId, title, rating });
+
+describe('aggregateByFranchise — base cases', () => {
+  it('returns an empty array for an empty input', () => {
+    expect(aggregateByFranchise([])).toEqual([]);
+  });
+
+  it('returns a single aggregated row for a single rated entry', () => {
+    const result = aggregateByFranchise([rated('aot-s1', 'Attack on Titan', 8)]);
+
+    expect(result.length).toBe(1);
+    expect(result[0]).toEqual({
+      representativeTitleId: 'aot-s1',
+      meanRating: 8,
+      seasonTitleIds: ['aot-s1'],
+    });
+  });
+});
+
+describe('aggregateByFranchise — meanRating arithmetic', () => {
+  it('uses the entry rating directly when only one entry contributes', () => {
+    const result = aggregateByFranchise([rated('aot-s1', 'Attack on Titan', 7)]);
+
+    expect(result[0]?.meanRating).toBe(7);
+  });
+
+  it('returns the arithmetic mean across multiple seasons of one franchise', () => {
+    const result = aggregateByFranchise([
+      rated('aot-s1', 'Attack on Titan', 8),
+      rated('aot-s2', 'Attack on Titan Season 2', 10),
+    ]);
+
+    expect(result.length).toBe(1);
+    expect(result[0]?.meanRating).toBe(9);
+  });
+
+  it('produces a non-integer mean when the ratings do not divide evenly', () => {
+    // 10 + 7 = 17, /2 = 8.5
+    const result = aggregateByFranchise([
+      rated('aot-s1', 'Attack on Titan', 10),
+      rated('aot-s2', 'Attack on Titan Season 2', 7),
+    ]);
+
+    expect(result[0]?.meanRating).toBe(8.5);
+  });
+
+  it('computes each franchise mean independently when multiple franchises are present', () => {
+    const result = aggregateByFranchise([
+      rated('aot-s1', 'Attack on Titan', 8),
+      rated('aot-s2', 'Attack on Titan Season 2', 10),
+      rated('sg-1', 'Steins;Gate', 9),
+      rated('sg-2', 'Steins;Gate', 5),
+    ]);
+
+    const byRep = new Map(result.map((r) => [r.representativeTitleId, r.meanRating]));
+    expect(byRep.get('aot-s1')).toBe(9);
+    expect(byRep.get('sg-1')).toBe(7);
+  });
+});
+
+describe('aggregateByFranchise — representative selection', () => {
+  it('picks the series entry over a numbered season as the representative', () => {
+    const result = aggregateByFranchise([
+      rated('aot-s2', 'Attack on Titan Season 2', 8),
+      rated('aot-s1', 'Attack on Titan', 9),
+    ]);
+
+    expect(result[0]?.representativeTitleId).toBe('aot-s1');
+  });
+
+  it('picks the lowest-numbered season as the representative when no series entry is present', () => {
+    const result = aggregateByFranchise([
+      rated('aot-s3', 'Attack on Titan Season 3', 7),
+      rated('aot-s1', 'Attack on Titan Season 1', 8),
+      rated('aot-s2', 'Attack on Titan Season 2', 9),
+    ]);
+
+    expect(result[0]?.representativeTitleId).toBe('aot-s1');
+  });
+
+  it('does not pick "Final Season" as the representative when an earlier season is in the group', () => {
+    // Final Season specificity = MAX_SAFE_INTEGER, so it must lose to Season 2.
+    const result = aggregateByFranchise([
+      rated('aot-final', 'Attack on Titan: The Final Season', 10),
+      rated('aot-s2', 'Attack on Titan Season 2', 8),
+    ]);
+
+    expect(result[0]?.representativeTitleId).toBe('aot-s2');
+  });
+
+  it('picks the same representative regardless of input order', () => {
+    const orderA = aggregateByFranchise([
+      rated('aot-s1', 'Attack on Titan Season 1', 8),
+      rated('aot-s2', 'Attack on Titan Season 2', 9),
+      rated('aot-s3', 'Attack on Titan Season 3', 7),
+    ]);
+    const orderB = aggregateByFranchise([
+      rated('aot-s3', 'Attack on Titan Season 3', 7),
+      rated('aot-s2', 'Attack on Titan Season 2', 9),
+      rated('aot-s1', 'Attack on Titan Season 1', 8),
+    ]);
+
+    expect(orderA[0]?.representativeTitleId).toBe('aot-s1');
+    expect(orderB[0]?.representativeTitleId).toBe('aot-s1');
+  });
+});
+
+describe('aggregateByFranchise — seasonTitleIds', () => {
+  it('preserves every titleId from the franchise group', () => {
+    const result = aggregateByFranchise([
+      rated('aot-s1', 'Attack on Titan', 8),
+      rated('aot-s2', 'Attack on Titan Season 2', 9),
+      rated('aot-s3', 'Attack on Titan Season 3', 7),
+    ]);
+
+    expect(result[0]?.seasonTitleIds).toEqual(['aot-s1', 'aot-s2', 'aot-s3']);
+  });
+
+  it('preserves the input order of titleIds within a franchise (not the franchise-specificity order)', () => {
+    // Input order is s2 → s1 → s3; seasonTitleIds must reflect that, even
+    // though the representative will be s1.
+    const result = aggregateByFranchise([
+      rated('aot-s2', 'Attack on Titan Season 2', 9),
+      rated('aot-s1', 'Attack on Titan Season 1', 8),
+      rated('aot-s3', 'Attack on Titan Season 3', 7),
+    ]);
+
+    expect(result[0]?.seasonTitleIds).toEqual(['aot-s2', 'aot-s1', 'aot-s3']);
+  });
+
+  it('returns a single-element seasonTitleIds for a franchise with one entry', () => {
+    const result = aggregateByFranchise([rated('sg-1', 'Steins;Gate', 9)]);
+
+    expect(result[0]?.seasonTitleIds).toEqual(['sg-1']);
+  });
+});
+
+describe('aggregateByFranchise — output ordering across franchises', () => {
+  it('emits franchises in the order each franchise first appeared in the input', () => {
+    const result = aggregateByFranchise([
+      rated('cb-1', 'Cowboy Bebop', 9),
+      rated('aot-s2', 'Attack on Titan Season 2', 8),
+      rated('sg-1', 'Steins;Gate', 10),
+    ]);
+
+    expect(result.map((r) => r.representativeTitleId)).toEqual(['cb-1', 'aot-s2', 'sg-1']);
+  });
+
+  it('keeps a scattered franchise at the position of its first appearance', () => {
+    // "attack on titan" first appears at index 1, even though more
+    // rows for it appear at indices 3 and 4. It must stay at position 1
+    // in the output.
+    const result = aggregateByFranchise([
+      rated('cb-1', 'Cowboy Bebop', 9),
+      rated('aot-s2', 'Attack on Titan Season 2', 8),
+      rated('sg-1', 'Steins;Gate', 10),
+      rated('aot-s1', 'Attack on Titan', 9),
+      rated('aot-s3', 'Attack on Titan Season 3', 7),
+    ]);
+
+    expect(result.length).toBe(3);
+    expect(result.map((r) => r.representativeTitleId)).toEqual(['cb-1', 'aot-s1', 'sg-1']);
+  });
+
+  it('keeps the franchise position fixed even when a better representative arrives later in input', () => {
+    // The franchise is anchored at index 0 (Season 2 first-seen), but
+    // the series entry at index 2 wins as representative. Output[0]
+    // is still the AoT row.
+    const result = aggregateByFranchise([
+      rated('aot-s2', 'Attack on Titan Season 2', 8),
+      rated('cb-1', 'Cowboy Bebop', 9),
+      rated('aot-s1', 'Attack on Titan', 10),
+    ]);
+
+    expect(result.map((r) => r.representativeTitleId)).toEqual(['aot-s1', 'cb-1']);
   });
 });

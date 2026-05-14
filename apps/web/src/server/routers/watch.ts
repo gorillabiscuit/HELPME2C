@@ -11,6 +11,7 @@ import {
   watchEntryKindEnum,
   watchStatusEnum,
 } from '../schema';
+import { franchiseKey, franchiseSpecificity } from '../lib/franchise';
 import { resolveInternalUserId } from '../lib/resolve-user';
 import { protectedProcedure, router } from '../trpc';
 import { inngest, recommendUserEvent } from '@/inngest/client';
@@ -213,11 +214,19 @@ export const watchRouter = router({
   // (manual_rank if set) → (elo_score if set) → (rating). Includes title
   // metadata for inline rendering. Used by the /taste page's ranked
   // view + as the candidate pool for pairwise comparisons.
+  // Returns the user's rated taste grouped by FRANCHISE per ADR-0023.
+  // One row per franchise; each carries the canonical representative's
+  // display data + a `seasons` array of all the user's rated entries
+  // in that franchise sorted by releaseYear ASC.
+  //
+  // Franchises sort by representative's manual_rank ASC NULLS LAST,
+  // then by mean rating DESC, then by representative titleId for
+  // determinism. Seasons within a franchise sort by release year.
   taste: protectedProcedure.query(async ({ ctx }) => {
     const internalUserId = await resolveInternalUserId(ctx.db, ctx.userId);
     if (!internalUserId) return [];
 
-    return ctx.db
+    const rows = await ctx.db
       .select({
         titleId: watchEntries.titleId,
         rating: watchEntries.rating,
@@ -234,16 +243,72 @@ export const watchRouter = router({
       })
       .from(watchEntries)
       .innerJoin(titles, eq(watchEntries.titleId, titles.id))
-      .where(and(eq(watchEntries.userId, internalUserId), isNotNull(watchEntries.rating)))
-      .orderBy(
-        // Custom ordering: manual_rank ASC NULLS LAST, then elo DESC NULLS LAST,
-        // then rating DESC. Drizzle's helper doesn't expose this combo cleanly
-        // so we drop to a sql template — sortable + indexable since both
-        // columns are simple types.
-        sql`${watchEntries.manualRank} ASC NULLS LAST`,
-        sql`${watchEntries.eloScore} DESC NULLS LAST`,
-        desc(watchEntries.rating),
-      );
+      .where(and(eq(watchEntries.userId, internalUserId), isNotNull(watchEntries.rating)));
+
+    // Group by franchise. The representative is the lowest-specificity
+    // entry; the franchise's manual_rank / eloScore come from that row.
+    type RowEntry = (typeof rows)[number];
+    type Group = {
+      franchiseKey: string;
+      representative: RowEntry;
+      representativeSpecificity: number;
+      seasons: RowEntry[];
+    };
+    const groups = new Map<string, Group>();
+    for (const row of rows) {
+      const key = franchiseKey(row.title.title);
+      const specificity = franchiseSpecificity(row.title.title, key);
+      const existing = groups.get(key);
+      if (!existing) {
+        groups.set(key, {
+          franchiseKey: key,
+          representative: row,
+          representativeSpecificity: specificity,
+          seasons: [row],
+        });
+        continue;
+      }
+      existing.seasons.push(row);
+      if (specificity < existing.representativeSpecificity) {
+        existing.representative = row;
+        existing.representativeSpecificity = specificity;
+      }
+    }
+
+    return Array.from(groups.values())
+      .map((g) => {
+        const ratings = g.seasons.flatMap((s) => (s.rating !== null ? [s.rating] : []));
+        const meanRating =
+          ratings.length > 0 ? ratings.reduce((a, b) => a + b, 0) / ratings.length : 0;
+        // Within-franchise: chronological (oldest first).
+        const seasonsSorted = g.seasons.slice().sort((a, b) => {
+          const ya = a.title.releaseYear ?? Number.MAX_SAFE_INTEGER;
+          const yb = b.title.releaseYear ?? Number.MAX_SAFE_INTEGER;
+          if (ya !== yb) return ya - yb;
+          return a.title.title.localeCompare(b.title.title);
+        });
+        return {
+          franchiseKey: g.franchiseKey,
+          representative: g.representative,
+          manualRank: g.representative.manualRank,
+          eloScore: g.representative.eloScore,
+          meanRating,
+          seasonCount: g.seasons.length,
+          seasons: seasonsSorted,
+        };
+      })
+      .sort((a, b) => {
+        // manual_rank ASC NULLS LAST
+        if (a.manualRank === null && b.manualRank !== null) return 1;
+        if (a.manualRank !== null && b.manualRank === null) return -1;
+        if (a.manualRank !== null && b.manualRank !== null && a.manualRank !== b.manualRank) {
+          return a.manualRank - b.manualRank;
+        }
+        // mean rating DESC
+        if (a.meanRating !== b.meanRating) return b.meanRating - a.meanRating;
+        // Stable tie-break on representative titleId
+        return a.representative.titleId.localeCompare(b.representative.titleId);
+      });
   }),
 
   // Bulk-set manual_rank by reading the new ordered titleId list.
@@ -442,6 +507,32 @@ export const watchRouter = router({
 
       // Only recompute when something actually got removed. result.length
       // can be 0 if the entry was already gone (idempotent remove path).
+      if (result.length > 0) {
+        await triggerRecomputeSafely(internalUserId);
+      }
+      return { removed: result.length };
+    }),
+
+  // Bulk-remove. Used by the franchise-row Remove button in /taste —
+  // a single click should delete every season of the franchise the
+  // user has rated, not require N round-trips. Idempotent like
+  // remove(); zeroes through unrecognised ids without error.
+  removeMany: protectedProcedure
+    .input(z.object({ titleIds: z.array(titleIdSchema).min(1).max(100) }))
+    .mutation(async ({ ctx, input }) => {
+      const internalUserId = await resolveInternalUserId(ctx.db, ctx.userId);
+      if (!internalUserId) return { removed: 0 };
+
+      const result = await ctx.db
+        .delete(watchEntries)
+        .where(
+          and(
+            eq(watchEntries.userId, internalUserId),
+            inArray(watchEntries.titleId, input.titleIds),
+          ),
+        )
+        .returning({ id: watchEntries.id });
+
       if (result.length > 0) {
         await triggerRecomputeSafely(internalUserId);
       }

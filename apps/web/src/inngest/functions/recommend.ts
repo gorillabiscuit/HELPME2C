@@ -15,11 +15,13 @@ import {
   tags,
   tagThemes,
   themes,
+  titles,
   titleTags,
   userRecommendations,
   users,
   watchEntries,
 } from '@/server/schema';
+import { aggregateByFranchise } from '@/server/lib/franchise';
 import { groupTagsIntoTitleSets } from '../lib/group-tags';
 import { inngest, recommendAllUsersEvent, recommendUserEvent } from '../client';
 
@@ -91,33 +93,52 @@ function effectiveRating(rating: number, eloScore: number | null): number {
 }
 
 export async function recomputeUserRecommendations(userId: string): Promise<{ recCount: number }> {
+  // Join titles so we can compute franchiseKey on each entry's title text.
+  // Per ADR-0023, the engine input is aggregated by franchise (mean rating
+  // per franchise) instead of one-row-per-watch_entry, so a user with
+  // multiple rated seasons of the same franchise contributes the same
+  // signal weight as a user with one rated season — no triple-counting.
   const userEntries = await db
     .select({
       titleId: watchEntries.titleId,
+      title: titles.title,
       kind: watchEntries.kind,
       rating: watchEntries.rating,
       eloScore: watchEntries.eloScore,
     })
     .from(watchEntries)
+    .innerJoin(titles, eq(watchEntries.titleId, titles.id))
     .where(eq(watchEntries.userId, userId));
 
   // Rated-taste model: "your taste" is the set of rated entries. Each
   // entry's effective rating is the user's 1-10 score, adjusted by Elo
-  // from pairwise comparisons (if any). High-rated entries (≥ 9
-  // effective) get treated as anchors — the engine's anchor signal is
-  // high-weight, suitable for "this defines my taste" titles.
+  // from pairwise comparisons (if any). High-rated FRANCHISES (≥ 9
+  // mean effective rating) become anchors.
   const anchorThreshold = 9;
-  const ratingEntries = userEntries.flatMap((e) =>
+  const ratedEntries = userEntries.flatMap((e) =>
     e.rating !== null
-      ? [{ titleId: e.titleId, rating: effectiveRating(e.rating, e.eloScore) }]
+      ? [
+          {
+            titleId: e.titleId,
+            title: e.title,
+            rating: effectiveRating(e.rating, e.eloScore),
+          },
+        ]
       : [],
   );
 
-  const anchors: AnchorPick[] = ratingEntries
-    .filter((r) => r.rating >= anchorThreshold)
-    .map((r) => ({ titleId: r.titleId }));
+  // ADR-0023: collapse to one synthetic row per franchise. The
+  // representative is the lowest-specificity rated entry in each group;
+  // its titleId is what the engine sees, its tags are what get scored.
+  const franchiseRows = aggregateByFranchise(ratedEntries);
 
-  const ratings: RatedTitle[] = ratingEntries;
+  const ratings: RatedTitle[] = franchiseRows.map((f) => ({
+    titleId: f.representativeTitleId,
+    rating: f.meanRating,
+  }));
+  const anchors: AnchorPick[] = franchiseRows
+    .filter((f) => f.meanRating >= anchorThreshold)
+    .map((f) => ({ titleId: f.representativeTitleId }));
 
   const userTitleIds = userEntries.map((e) => e.titleId);
   const emptyPayload: RecommendationsPayload = { schemaVersion: 2, items: [] };
