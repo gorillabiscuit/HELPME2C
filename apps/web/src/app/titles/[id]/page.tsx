@@ -20,6 +20,7 @@ import {
 import { dedupeByFranchise } from '@/server/lib/franchise';
 import { groupTagsIntoTitleSets } from '@/inngest/lib/group-tags';
 import { PreviewOverlay } from '@/components/preview-overlay';
+import { RecCardActions } from '@/components/rec-card-actions';
 import { TitleDetailAddButton } from '@/components/title-detail-add-button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -261,6 +262,8 @@ export default async function TitleDetailPage({ params }: PageProps) {
             mediaType: titles.mediaType,
             releaseYear: titles.releaseYear,
             posterUrl: titles.posterUrl,
+            trailerProvider: titles.trailerProvider,
+            trailerVideoId: titles.trailerVideoId,
           })
           .from(titles)
           .where(inArray(titles.id, rawBridgeTitleIds))
@@ -294,7 +297,14 @@ export default async function TitleDetailPage({ params }: PageProps) {
   const bridgeCards = bridges.map((b) => {
     const topTheme = b.bridgedThemes[0];
     const themeName = topTheme ? bridgeThemeNameById.get(topTheme.themeId) : null;
-    return { id: b.id, title: b.title, posterUrl: b.posterUrl, themeName };
+    return {
+      id: b.id,
+      title: b.title,
+      posterUrl: b.posterUrl,
+      trailerProvider: b.trailerProvider,
+      trailerVideoId: b.trailerVideoId,
+      themeName,
+    };
   });
 
   const yearLabel =
@@ -413,6 +423,11 @@ export default async function TitleDetailPage({ params }: PageProps) {
                           sizes="(min-width: 640px) 200px, 50vw"
                           className="object-cover transition-transform group-hover:scale-[1.02]"
                         />
+                        <PreviewOverlay
+                          trailerProvider={b.trailerProvider}
+                          trailerVideoId={b.trailerVideoId}
+                          titleText={b.title}
+                        />
                       </div>
                     ) : (
                       <div className="aspect-[2/3] rounded-md border border-border bg-muted" />
@@ -426,6 +441,7 @@ export default async function TitleDetailPage({ params }: PageProps) {
                       </p>
                     ) : null}
                   </Link>
+                  <RecCardActions titleId={b.id} />
                 </li>
               ))}
             </ul>
