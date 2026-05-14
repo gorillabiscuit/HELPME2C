@@ -30,7 +30,10 @@ const MEDIA_TYPE_LABEL: Record<MediaType, string> = {
 // /search already exists for that. Could be merged later if alpha
 // testers want one-stop "browse + search" here.
 export function LibraryDiscoverView() {
-  const popularQuery = trpc.titles.popular.useQuery({ limit: 24 });
+  const popularQuery = trpc.titles.popular.useQuery({
+    limit: 24,
+    excludeUserEntries: true,
+  });
   const [hidden, setHidden] = useState<Set<string>>(new Set());
 
   if (popularQuery.isLoading) {
