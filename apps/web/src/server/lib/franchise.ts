@@ -40,10 +40,19 @@ export function franchiseKey(title: string): string {
     const previous = key;
     key = key
       .replace(/\s*\(\d{4}\)$/, '') // " (2023)"
-      .replace(/\s*[:\-–]\s*(?:the\s+)?final\s+(?:season|cour|part)$/i, '') // ": The Final Season", " - Final Cour"
-      .replace(/\s+(?:the\s+)?final\s+(?:season|cour|part)$/i, '') // " The Final Season", " Final Part"
-      .replace(/\s+(?:season|cour|part|s)\s*\d+$/i, '') // " Season 2", " S2", " Part 3", " Cour 1"
-      .replace(/\s+\d+(?:st|nd|rd|th)\s+season$/i, '') // " 2nd Season"
+      // "Final Season" / "Final Cour" / "Final Part" + ANYTHING following.
+      // Catches "The Final Season", "Final Season THE FINAL CHAPTERS",
+      // "Final Season: Subtitle" etc. The \b after the season-word stops
+      // us matching "season" as a prefix of a longer word.
+      .replace(/\s*[:\-–]\s*(?:the\s+)?final\s+(?:season|cour|part)\b.*$/i, '')
+      .replace(/\s+(?:the\s+)?final\s+(?:season|cour|part)\b.*$/i, '')
+      // "Season N" / "Part N" / "Cour N" / "SN" + ANYTHING following.
+      // The trailing `.*$` (after \b) catches subtitles, additional
+      // suffixes like " Part 2", or arc descriptors after the season
+      // identifier — "Attack on Titan Season 3 Part 2", "JJK Season 3:
+      // The Subtitle", "Final Season THE FINAL CHAPTERS" all reduce.
+      .replace(/\s+(?:season|cour|part|s)\s*\d+\b.*$/i, '')
+      .replace(/\s+\d+(?:st|nd|rd|th)\s+season\b.*$/i, '') // " 2nd Season" + anything
       .replace(/\s+(?:ii|iii|iv|v|vi|vii|viii|ix|x)$/i, '') // " II", " III"
       .trim();
     if (key === previous) break;
@@ -67,10 +76,10 @@ export function franchiseDisplayName(title: string): string {
     const previous = display;
     display = display
       .replace(/\s*\(\d{4}\)$/, '')
-      .replace(/\s*[:\-–]\s*(?:the\s+)?final\s+(?:season|cour|part)$/i, '')
-      .replace(/\s+(?:the\s+)?final\s+(?:season|cour|part)$/i, '')
-      .replace(/\s+(?:season|cour|part|s)\s*\d+$/i, '')
-      .replace(/\s+\d+(?:st|nd|rd|th)\s+season$/i, '')
+      .replace(/\s*[:\-–]\s*(?:the\s+)?final\s+(?:season|cour|part)\b.*$/i, '')
+      .replace(/\s+(?:the\s+)?final\s+(?:season|cour|part)\b.*$/i, '')
+      .replace(/\s+(?:season|cour|part|s)\s*\d+\b.*$/i, '')
+      .replace(/\s+\d+(?:st|nd|rd|th)\s+season\b.*$/i, '')
       .replace(/\s+(?:ii|iii|iv|v|vi|vii|viii|ix|x)$/i, '')
       .trim();
     if (display === previous) break;

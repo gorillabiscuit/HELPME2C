@@ -135,6 +135,28 @@ describe('franchiseKey — multi-pass collapse on compound suffixes', () => {
   });
 });
 
+describe('franchiseKey — suffix-after-season-marker handling', () => {
+  // Real AniList titles often append a subtitle / chapter / arc name
+  // after the season identifier. Earlier regex (with $ anchor right
+  // after the marker) missed all of these because the suffix appears
+  // BEFORE the end-of-string.
+  it('collapses "Title Season N: Subtitle" to the franchise root', () => {
+    expect(franchiseKey('JUJUTSU KAISEN Season 3: The Subtitle')).toBe('jujutsu kaisen');
+  });
+
+  it('collapses "Title Final Season THE FINAL CHAPTERS"', () => {
+    expect(franchiseKey('Attack on Titan Final Season THE FINAL CHAPTERS')).toBe('attack on titan');
+  });
+
+  it('collapses "Title Final Season: Subtitle"', () => {
+    expect(franchiseKey('Attack on Titan Final Season: The Conclusion')).toBe('attack on titan');
+  });
+
+  it('collapses "Title Season 3 The Arc Name"', () => {
+    expect(franchiseKey('Demon Slayer Season 3 Swordsmith Village Arc')).toBe('demon slayer');
+  });
+});
+
 describe('franchiseKey — preservation (must NOT strip)', () => {
   it('preserves "Steins;Gate" as-is', () => {
     expect(franchiseKey('Steins;Gate')).toBe('steins;gate');

@@ -21,7 +21,7 @@ import {
   users,
   watchEntries,
 } from '@/server/schema';
-import { aggregateByFranchise } from '@/server/lib/franchise';
+import { aggregateByFranchise, franchiseKey } from '@/server/lib/franchise';
 import { groupTagsIntoTitleSets } from '../lib/group-tags';
 import { inngest, recommendAllUsersEvent, recommendUserEvent } from '../client';
 
@@ -181,8 +181,36 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
     .from(titleTags)
     .where(notInArray(titleTags.titleId, userTitleIds));
 
+  // Franchise-level exclusion. notInArray above only catches the exact
+  // titles the user has rated; OTHER seasons of the same franchise
+  // (which the user implicitly "has" via the franchise-as-unit-of-taste
+  // contract in ADR-0023) would still be candidates. Result: recs like
+  // "Attack on Titan Final Season" appearing for a user who already has
+  // "Attack on Titan" rated. Exclude them.
+  //
+  // Compute the set of franchise keys in the user's library, then fetch
+  // candidate title texts to compute franchiseKey on each and filter.
+  // Phase 1A scale (~2k titles) makes the JS filter cheap.
+  const userFranchiseKeys = new Set(userEntries.map((e) => franchiseKey(e.title)));
+  const candidateTitleIds = Array.from(new Set(candidateTagRows.map((r) => r.titleId)));
+  const candidateTitleTexts =
+    candidateTitleIds.length > 0
+      ? await db
+          .select({ id: titles.id, title: titles.title })
+          .from(titles)
+          .where(inArray(titles.id, candidateTitleIds))
+      : [];
+  const sameFranchiseCandidateIds = new Set(
+    candidateTitleTexts
+      .filter((t) => userFranchiseKeys.has(franchiseKey(t.title)))
+      .map((t) => t.id),
+  );
+  const filteredCandidateTagRows = candidateTagRows.filter(
+    (r) => !sameFranchiseCandidateIds.has(r.titleId),
+  );
+
   const userTitles = groupTagsIntoTitleSets(userTitleTagRows);
-  const candidates = groupTagsIntoTitleSets(candidateTagRows);
+  const candidates = groupTagsIntoTitleSets(filteredCandidateTagRows);
 
   // Cross-medium theme bridge — see packages/ml/src/recommendation.ts §JSDoc
   // and apps/web/src/server/schema/themes.ts for the editorial substrate.
