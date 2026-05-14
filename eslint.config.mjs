@@ -72,9 +72,15 @@ export default tseslint.config(
       ],
     },
   },
-  // Config files and project scripts may use console.
+  // Config files and project scripts may use console. Covers both the
+  // root-level scripts/ dir and per-package script dirs (e.g.
+  // apps/web/scripts/ for one-off DB ops, db-wipe, etc).
   {
-    files: ['**/*.config.{js,mjs,cjs,ts}', 'scripts/**/*.{js,mjs,cjs,ts}'],
+    files: [
+      '**/*.config.{js,mjs,cjs,ts}',
+      'scripts/**/*.{js,mjs,cjs,ts}',
+      '**/scripts/**/*.{js,mjs,cjs,ts}',
+    ],
     rules: {
       'no-console': 'off',
     },
