@@ -486,6 +486,7 @@ function ExpandedSeasonsList({
   fallbackSeasons: TasteEntry[];
 }) {
   const seasonsQuery = trpc.watch.franchiseSeasons.useQuery({ franchiseKey: key });
+  const [showAll, setShowAll] = useState(false);
 
   // While loading, render the rated-only fallback. After the query
   // resolves, use catalog data IF it covers at least as many rows as
@@ -494,9 +495,21 @@ function ExpandedSeasonsList({
     seasonsQuery.data !== undefined && seasonsQuery.data.length >= fallbackSeasons.length;
 
   if (useCatalog) {
+    const allRows = seasonsQuery.data!;
+    // Long franchises (Doctor Who has 13+ seasons) would produce huge
+    // accordions. Cap at 20 by default; the user opens the rest via
+    // "Show all N seasons." Rated seasons always render — they bubble
+    // to the front of the catalog query's release-year sort if they
+    // happen to be older, but in pathological cases we want to make
+    // sure the user's rated entries are never hidden behind the cap.
+    const SHOW_LIMIT = 20;
+    const ratedRows = allRows.filter((row) => row.entry !== null);
+    const unratedRows = allRows.filter((row) => row.entry === null);
+    const visibleRows = showAll ? allRows : [...ratedRows, ...unratedRows].slice(0, SHOW_LIMIT);
+    const hiddenCount = allRows.length - visibleRows.length;
     return (
       <ul className="border-t border-border bg-muted/30">
-        {seasonsQuery.data!.map((row) => {
+        {visibleRows.map((row) => {
           const rated = row.entry !== null;
           const tasteEntry: TasteEntry | null = rated
             ? {
@@ -562,6 +575,17 @@ function ExpandedSeasonsList({
             </li>
           );
         })}
+        {hiddenCount > 0 ? (
+          <li className="px-3 py-2 pl-14 text-sm">
+            <button
+              type="button"
+              onClick={() => setShowAll(true)}
+              className="text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+            >
+              Show all {allRows.length} seasons ({hiddenCount} more)
+            </button>
+          </li>
+        ) : null}
       </ul>
     );
   }

@@ -1,33 +1,34 @@
 import { Frown, Smile } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// Per ADR-0024: ratings 1-10 carry bipolar semantics. Iconography
-// makes the extremes visible — a frown at the low end and a smile
-// at the high end. Mid-range (4-6) gets no icon to avoid cluttering
-// the "mixed" zone with a neutral face that adds little info.
+// Per ADR-0024: ratings 1-10 carry bipolar semantics. Iconography on
+// the picker shows ONLY the two extremes — a frown on 1, a smile on
+// 10. Everything in between (2-9) gets no icon. Earlier versions
+// labelled three buckets (disliked / mixed / liked) which the user
+// found visually noisy; just bookending the scale is enough.
 //
-//   1-3  → Frown (destructive-toned)
-//   4-6  → (no icon — mixed/neutral)
-//   7-10 → Smile (foreground)
+//   1     → Frown (destructive-toned)
+//   2-9   → (no icon)
+//   10    → Smile (foreground)
 
-export type RatingBucket = 'disliked' | 'mixed' | 'liked';
+export type RatingBucket = 'hated' | 'middle' | 'loved';
 
 export function bucketForRating(rating: number): RatingBucket {
-  if (rating >= 7) return 'liked';
-  if (rating >= 4) return 'mixed';
-  return 'disliked';
+  if (rating >= 10) return 'loved';
+  if (rating <= 1) return 'hated';
+  return 'middle';
 }
 
 const BUCKET_LABEL: Record<RatingBucket, string> = {
-  disliked: 'Disliked',
-  mixed: 'Mixed',
-  liked: 'Liked',
+  hated: 'Hated it',
+  middle: '',
+  loved: 'Loved it',
 };
 
 const BUCKET_ICON_CLASS: Record<RatingBucket, string> = {
-  disliked: 'text-destructive',
-  mixed: 'text-muted-foreground',
-  liked: 'text-foreground',
+  hated: 'text-destructive',
+  middle: 'text-muted-foreground',
+  loved: 'text-foreground',
 };
 
 interface RatingFaceProps {
@@ -51,10 +52,9 @@ export function RatingFace({
   className,
 }: RatingFaceProps) {
   const bucket = bucketForRating(rating);
-  // Mixed (4-6) renders no icon — keeps the visual quiet for the
-  // ambiguous middle. Only the extremes get face-iconography.
-  if (bucket === 'mixed') return null;
-  const Icon = bucket === 'disliked' ? Frown : Smile;
+  // Only render at the two extremes; middle (2-9) gets no icon.
+  if (bucket === 'middle') return null;
+  const Icon = bucket === 'hated' ? Frown : Smile;
   const iconClass = cn(
     inheritColor ? 'text-current' : BUCKET_ICON_CLASS[bucket],
     size === 'sm' ? 'h-4 w-4' : 'h-5 w-5',

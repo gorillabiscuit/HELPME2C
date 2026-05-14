@@ -159,7 +159,7 @@ export function TitleQuickActions({
           <p className="mb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
             {existingRating !== null
               ? `Currently ${existingRating}/10 — change it?`
-              : 'How would you rate it? 1-3 disliked · 4-6 mixed · 7-10 liked'}
+              : 'How would you rate it? 1 = hated · 10 = loved'}
           </p>
           <div className="flex flex-wrap items-center gap-1">
             {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
