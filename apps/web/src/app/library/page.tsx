@@ -8,6 +8,7 @@ import { LibraryEditDialog } from '@/components/library-edit-dialog';
 import { LibraryRemoveButton } from '@/components/library-remove-button';
 import { LibraryRankedView } from '@/components/library-ranked-view';
 import { LibraryCompareView } from '@/components/library-compare-view';
+import { LibraryDiscoverView } from '@/components/library-discover-view';
 import { RatingFace } from '@/components/rating-face';
 import { cn } from '@/lib/utils';
 
@@ -30,12 +31,13 @@ const MEDIA_TYPE_LABEL: Record<string, string> = {
   anime: 'Anime',
 };
 
-type ViewMode = 'all' | 'ranked' | 'compare';
+type ViewMode = 'all' | 'ranked' | 'compare' | 'discover';
 
 const VIEW_LABEL: Record<ViewMode, string> = {
   all: 'All',
   ranked: 'Ranked',
   compare: 'Compare',
+  discover: 'Discover',
 };
 
 interface LibraryPageProps {
@@ -64,7 +66,9 @@ export default async function LibraryPage({ searchParams }: LibraryPageProps) {
 
   const params = await searchParams;
   const view: ViewMode =
-    params.view === 'ranked' || params.view === 'compare' ? params.view : 'all';
+    params.view === 'ranked' || params.view === 'compare' || params.view === 'discover'
+      ? params.view
+      : 'all';
   const filter: AllFilter =
     params.filter === 'watched' || params.filter === 'unwatched' ? params.filter : 'all';
   const medium: Medium =
@@ -81,7 +85,9 @@ export default async function LibraryPage({ searchParams }: LibraryPageProps) {
             ? 'Every show you’re tracking, sorted by recent activity. Update status, episode progress, or rating per row.'
             : view === 'ranked'
               ? 'Your rated shows in preference order. Drag or use the arrows to reorder. Top of the list = strongest taste signal.'
-              : 'Pairwise comparison — pick the show you’d rather watch from each pair. Sharpens your ranking without you having to drag everything yourself.'}
+              : view === 'compare'
+                ? 'Pairwise comparison — pick the show you’d rather watch from each pair. Sharpens your ranking without you having to drag everything yourself.'
+                : 'Browse popular shows and rate the ones you’ve seen. The more you rate, the sharper your recommendations get.'}
         </p>
       </header>
 
@@ -90,12 +96,13 @@ export default async function LibraryPage({ searchParams }: LibraryPageProps) {
       {view === 'all' ? <AllView filter={filter} /> : null}
       {view === 'ranked' ? <LibraryRankedView mediumFilter={medium} /> : null}
       {view === 'compare' ? <LibraryCompareView /> : null}
+      {view === 'discover' ? <LibraryDiscoverView /> : null}
     </main>
   );
 }
 
 function ViewTabs({ current }: { current: ViewMode }) {
-  const tabs: ViewMode[] = ['all', 'ranked', 'compare'];
+  const tabs: ViewMode[] = ['all', 'ranked', 'compare', 'discover'];
   return (
     <div
       role="tablist"

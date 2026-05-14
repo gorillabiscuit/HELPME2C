@@ -64,10 +64,10 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
             point for your personal recommendations. If you just picked, give us a moment.
           </p>
           <Link
-            href="/onboarding?start=pick"
+            href="/library?view=discover"
             className="mt-6 inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
           >
-            Pick favourites
+            Browse popular shows
           </Link>
         </div>
       </main>
@@ -141,7 +141,7 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
           </span>
         </Link>
         <Link
-          href="/library?view=ranked"
+          href="/library?view=discover"
           className="group flex items-start gap-4 rounded-lg border border-border bg-white p-5 transition hover:border-input hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
         >
           <span className="flex h-10 w-10 flex-none items-center justify-center rounded-md bg-primary/10 text-primary">
@@ -150,7 +150,8 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
           <span className="min-w-0">
             <span className="block text-base font-semibold text-foreground">Want better recs?</span>
             <span className="mt-1 block text-sm text-text-body">
-              Rate more shows you&apos;ve watched — every rating sharpens what we suggest next.
+              Rate more shows — browse popular titles and tell us which ones you&apos;ve loved or
+              hated.
             </span>
           </span>
         </Link>
