@@ -137,13 +137,20 @@ async function AllView({ filter }: { filter: AllFilter }) {
   const caller = appRouter.createCaller(await createContext());
   const allEntries = await caller.watch.list();
 
-  // Watched = entries marked completed. Unwatched = everything else
-  // (watching / on_hold / plan_to_watch / dropped / null status). The
-  // user's "watched" mental model is "I've seen this end to end" —
-  // dropped doesn't qualify (you dropped it BEFORE finishing).
+  // Watched = entries marked completed OR favourites (kind='anchor').
+  // A favourite means "I love this" which implies you've seen it; without
+  // this branch, legacy anchor entries leak into the Unwatched filter
+  // despite carrying a 10/10 rating. Dropped doesn't qualify as watched
+  // (you dropped it BEFORE finishing).
+  //
+  // Unwatched = the inverse: anything that isn't a favourite and isn't
+  // marked completed. So plan-to-watch / watching / on-hold / dropped /
+  // null-status-with-no-rating fall here.
+  const isWatched = (entry: { status: string | null; kind: string }) =>
+    entry.status === 'completed' || entry.kind === 'anchor';
   const entries = allEntries.filter(({ entry }) => {
-    if (filter === 'watched') return entry.status === 'completed';
-    if (filter === 'unwatched') return entry.status !== 'completed';
+    if (filter === 'watched') return isWatched(entry);
+    if (filter === 'unwatched') return !isWatched(entry);
     return true;
   });
 
