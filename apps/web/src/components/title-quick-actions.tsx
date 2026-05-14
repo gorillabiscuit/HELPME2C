@@ -98,12 +98,15 @@ export function TitleQuickActions({
     recFeedbackUpsert.mutate({ titleId, dismissed: true });
   };
 
-  // "Don't know it" is a pure client-side dismiss — no DB mutation.
-  // The card vanishes for the rest of the session via onActionComplete;
-  // no signal (positive or negative) is recorded so the taste vector
-  // stays honest about what the user has opinions on.
+  // "Don't know it" records a soft signal on rec_feedback.unfamiliar
+  // (per the schema added 2026-05-15). NOT used for engine exclusion
+  // — the user explicitly wanted these tracked but still surfaceable
+  // for future recs (maybe they'll recognise the title later, or
+  // we'll learn things from the aggregate "X% of users don't know
+  // this show" pattern). The card hides locally via onActionComplete
+  // so the user moves on to the next one.
   const onDontKnow = () => {
-    onActionComplete?.();
+    recFeedbackUpsert.mutate({ titleId, unfamiliar: true });
   };
 
   const isPending = watchUpsert.isPending || recFeedbackUpsert.isPending;
