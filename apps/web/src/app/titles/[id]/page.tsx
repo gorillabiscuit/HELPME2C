@@ -186,23 +186,18 @@ export default async function TitleDetailPage({ params }: PageProps) {
     .where(and(eq(users.clerkId, clerkUserId), eq(watchEntries.titleId, id)))
     .limit(1);
 
-  // Cross-medium theme bridges per PROJECT.md §moats and packages/ml's
-  // findCrossMediumBridges. The point: surface the moat (cross-medium
-  // taxonomy) as a visible feature on every title page, not just as a
-  // silent ranking signal. Anyone landing on a TV/film page gets pointed
-  // at anime that shares its themes, and vice versa.
+  // Theme-similarity bridges. Per user feedback 2026-05-14, we DROPPED
+  // the original "anime ↔ live-action only" framing — it set an
+  // expectation the data couldn't fulfill (catalog has way more anime
+  // than live-action, so anime-source pages returned all-anime cards
+  // anyway). The thing that's actually valuable is "more shows with
+  // the same themes" regardless of medium. Anime → anime is fine.
+  // Live-action → anime still works (the moat the theme taxonomy was
+  // designed for); it just isn't FORCED.
   //
-  // Opposite-medium mapping is deliberately coarse — anime↔live-action
-  // (where "live-action" = tv + film). TV-to-film recs are NOT cross-
-  // medium under the moat's definition.
-  //
-  // Cost: one tag-rows SELECT scoped to opposite-medium titles, plus a
-  // small fanout. Theme-membership table is small (~86 rows v1). For
-  // Phase 1A scale (~2k titles) the in-memory scoring path mirrors
-  // recommend.ts's pattern and runs in <100ms.
-  const oppositeMediumIds: Array<'tv' | 'film' | 'anime'> =
-    title.mediaType === 'anime' ? ['tv', 'film'] : ['anime'];
-
+  // The candidate pool excludes the source title itself. Each card
+  // displays its own medium label so the user knows what they're
+  // looking at.
   const [sourceTagRows, candidateTagRows, themeRows] = await Promise.all([
     db
       .select({
@@ -220,7 +215,7 @@ export default async function TitleDetailPage({ params }: PageProps) {
       })
       .from(titleTags)
       .innerJoin(titles, eq(titleTags.titleId, titles.id))
-      .where(and(inArray(titles.mediaType, oppositeMediumIds), ne(titles.id, id))),
+      .where(ne(titles.id, id)),
     db
       .select({
         tagId: tagThemes.tagId,
@@ -300,6 +295,7 @@ export default async function TitleDetailPage({ params }: PageProps) {
     return {
       id: b.id,
       title: b.title,
+      mediaType: b.mediaType,
       posterUrl: b.posterUrl,
       trailerProvider: b.trailerProvider,
       trailerVideoId: b.trailerVideoId,
@@ -400,11 +396,7 @@ export default async function TitleDetailPage({ params }: PageProps) {
       {bridgeCards.length > 0 ? (
         <Card className="mt-6">
           <CardHeader>
-            <CardTitle>
-              {title.mediaType === 'anime'
-                ? 'If you liked this — live-action with the same themes'
-                : 'If you liked this — anime with the same themes'}
-            </CardTitle>
+            <CardTitle>More shows with the same themes</CardTitle>
           </CardHeader>
           <CardContent>
             <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3">
@@ -435,11 +427,10 @@ export default async function TitleDetailPage({ params }: PageProps) {
                     <p className="mt-2 line-clamp-2 text-sm font-medium text-foreground">
                       {b.title}
                     </p>
-                    {b.themeName ? (
-                      <p className="mt-0.5 line-clamp-1 text-xs italic text-text-body">
-                        Shares the {b.themeName.toLowerCase()} theme
-                      </p>
-                    ) : null}
+                    <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
+                      {MEDIA_TYPE_LABEL[b.mediaType] ?? b.mediaType}
+                      {b.themeName ? ` · Shares the ${b.themeName.toLowerCase()} theme` : ''}
+                    </p>
                   </Link>
                   <RecCardActions titleId={b.id} />
                 </li>
