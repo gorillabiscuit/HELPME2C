@@ -453,19 +453,20 @@ export const watchRouter = router({
       };
     }),
 
-  // Returns two rated titles for the user to compare. v1 strategy:
-  // sample two at random from rated entries. Future improvements
-  // (pair-by-Elo-closeness, avoid recent repeats) are deferred —
-  // random is enough for the first cut.
+  // Returns two rated titles for the user to compare. Per ADR-0023
+  // the franchise is the unit of taste, so the pair must come from
+  // DIFFERENT franchises — comparing "Attack on Titan S1" vs "AoT S2"
+  // is not a meaningful taste signal.
+  //
+  // Strategy: fetch all rated entries (Phase 1A scale = dozens, not
+  // thousands), group by franchiseKey, pick two distinct franchises
+  // at random, pick one representative entry from each. Returns null
+  // when the user has rated entries from fewer than 2 distinct
+  // franchises.
   getPairwisePair: protectedProcedure.query(async ({ ctx }) => {
     const internalUserId = await resolveInternalUserId(ctx.db, ctx.userId);
     if (!internalUserId) return null;
 
-    // ORDER BY RANDOM() + LIMIT 2 is the simplest correct approach.
-    // For Phase 1A scale (a user's rated set is in the dozens, not
-    // thousands) the table-scan cost is negligible. Above ~10k rated
-    // titles per user we'd switch to a TABLESAMPLE or maintain a
-    // shuffled cursor.
     const rows = await ctx.db
       .select({
         titleId: watchEntries.titleId,
@@ -479,12 +480,36 @@ export const watchRouter = router({
       })
       .from(watchEntries)
       .innerJoin(titles, eq(watchEntries.titleId, titles.id))
-      .where(and(eq(watchEntries.userId, internalUserId), isNotNull(watchEntries.rating)))
-      .orderBy(sql`RANDOM()`)
-      .limit(2);
+      .where(and(eq(watchEntries.userId, internalUserId), isNotNull(watchEntries.rating)));
 
-    const [a, b] = rows;
-    if (!a || !b) return null;
+    // Bucket rated entries by franchise.
+    type Row = (typeof rows)[number];
+    const byFranchise = new Map<string, Row[]>();
+    for (const row of rows) {
+      const key = franchiseKey(row.title.title);
+      let bucket = byFranchise.get(key);
+      if (!bucket) {
+        bucket = [];
+        byFranchise.set(key, bucket);
+      }
+      bucket.push(row);
+    }
+
+    if (byFranchise.size < 2) return null;
+
+    // Pick two distinct franchises at random; one season from each.
+    const franchiseKeys = Array.from(byFranchise.keys());
+    // Fisher-Yates partial shuffle: only need the first two slots.
+    for (let i = 0; i < 2; i++) {
+      const j = i + Math.floor(Math.random() * (franchiseKeys.length - i));
+      const tmp = franchiseKeys[i] as string;
+      franchiseKeys[i] = franchiseKeys[j] as string;
+      franchiseKeys[j] = tmp;
+    }
+    const aBucket = byFranchise.get(franchiseKeys[0] as string) as Row[];
+    const bBucket = byFranchise.get(franchiseKeys[1] as string) as Row[];
+    const a = aBucket[Math.floor(Math.random() * aBucket.length)] as Row;
+    const b = bBucket[Math.floor(Math.random() * bBucket.length)] as Row;
     return { a, b };
   }),
 

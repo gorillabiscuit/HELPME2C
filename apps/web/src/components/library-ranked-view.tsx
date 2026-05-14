@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { ChevronDown, ChevronRight, ChevronUp, GripVertical, X } from 'lucide-react';
+import Link from 'next/link';
+import { ChevronDown, ChevronUp, GripVertical, Minus, Plus, X } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 
@@ -40,6 +41,58 @@ const MEDIA_TYPE_LABEL: Record<MediaType, string> = {
   anime: 'Anime',
 };
 
+// How far below the tier integer the bottom-most franchise in a tier
+// drifts. 0.9 means a tier of N franchises spans from tier.0 down to
+// tier - 0.9 (just barely above the next tier down). Keeps the visual
+// "all my 10s" property intact while differentiating rank position.
+const TIER_RANGE = 0.9;
+
+// Distribute display ratings across each integer rating tier based on
+// rank position. Input order = rank order. Output[i] is the display
+// rating for franchise i.
+function computeRankedDisplayRatings(franchises: ReadonlyArray<TasteFranchise>): number[] {
+  // tier integer → list of positions (rank indices) of franchises in
+  // that tier, in rank order.
+  const positionsByTier = new Map<number, number[]>();
+  franchises.forEach((f, i) => {
+    const tier = Math.round(f.meanRating);
+    let bucket = positionsByTier.get(tier);
+    if (!bucket) {
+      bucket = [];
+      positionsByTier.set(tier, bucket);
+    }
+    bucket.push(i);
+  });
+
+  const display = new Array<number>(franchises.length).fill(0);
+  for (const [tier, positions] of positionsByTier) {
+    if (positions.length === 1) {
+      // Single franchise in tier — show its mean as-is, no shift.
+      const i = positions[0]!;
+      display[i] = franchises[i]!.meanRating;
+      continue;
+    }
+    positions.forEach((i, posInTier) => {
+      const shift = (posInTier / (positions.length - 1)) * TIER_RANGE;
+      display[i] = tier - shift;
+    });
+  }
+  return display;
+}
+
+// Media-type filter for the Ranked view. v1 of "rank by category" —
+// real genre filtering needs schema/data work (the catalog doesn't
+// carry first-class genre tags yet). Medium filter is the smallest
+// useful slice today: see only your anime, only your TV, etc.
+type MediumFilter = 'all' | MediaType;
+
+const MEDIUM_FILTER_LABEL: Record<MediumFilter, string> = {
+  all: 'All',
+  tv: 'TV',
+  film: 'Film',
+  anime: 'Anime',
+};
+
 // Ranked view (formerly /taste Ranked tab — folded into library per the
 // 2026-05-14 surface-merge decision). Drag-to-reorder list of the user's
 // rated franchises with per-franchise + per-season Remove buttons.
@@ -48,7 +101,7 @@ const MEDIA_TYPE_LABEL: Record<MediaType, string> = {
 // (release-year ASC) season list. Single-season franchises render flat.
 // Drag operates on franchise rows only; within-franchise ordering is
 // hidden because it's not meaningful taste signal (per ADR-0023).
-export function LibraryRankedView() {
+export function LibraryRankedView({ mediumFilter = 'all' }: { mediumFilter?: MediumFilter }) {
   const router = useRouter();
   const tasteQuery = trpc.watch.taste.useQuery();
   const setRankedOrder = trpc.watch.setRankedOrder.useMutation({
@@ -69,12 +122,16 @@ export function LibraryRankedView() {
   // Open accordion state keyed by franchiseKey so it survives refetch.
   const [openKeys, setOpenKeys] = useState<Set<string>>(new Set());
 
-  const franchises: TasteFranchise[] = draftOrder ?? tasteQuery.data ?? [];
+  const allFranchises: TasteFranchise[] = draftOrder ?? tasteQuery.data ?? [];
+  const franchises =
+    mediumFilter === 'all'
+      ? allFranchises
+      : allFranchises.filter((f) => f.representative.title.mediaType === mediumFilter);
 
   if (tasteQuery.isLoading) {
     return <p className="text-sm text-text-body">Loading your taste…</p>;
   }
-  if (franchises.length === 0) {
+  if (allFranchises.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-border px-6 py-12 text-center">
         <p className="text-base text-text-body">
@@ -148,37 +205,60 @@ export function LibraryRankedView() {
     removeMany.mutate({ titleIds: [season.titleId] });
   };
 
+  // Display rating distributes franchises within each integer rating
+  // tier so a stack of "10/10" rated franchises shows as 10.0, 9.8,
+  // 9.6, 9.4, ... reflecting their rank order. User still rates 1-10;
+  // the fractional version is purely a display interpolation. Single-
+  // franchise tiers display their mean as-is (no shift to make).
+  const displayRatings = computeRankedDisplayRatings(franchises);
+
+  const filterActive = mediumFilter !== 'all';
+
   return (
     <div>
       <p className="mb-4 text-sm text-text-body">
-        Drag titles up or down to reorder — or use the arrow buttons for keyboard access. Top of the
-        list = strongest taste signal. Changes save automatically.
+        {filterActive
+          ? 'Showing only your ' +
+            MEDIUM_FILTER_LABEL[mediumFilter].toLowerCase() +
+            ' ratings. Clear the filter below to reorder.'
+          : 'Drag titles up or down to reorder — or use the arrow buttons for keyboard access. Top of the list = strongest taste signal. Changes save automatically.'}
       </p>
+      <MediumFilterChips current={mediumFilter} />
+      {franchises.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border px-6 py-12 text-center">
+          <p className="text-sm text-text-body">
+            No rated {MEDIUM_FILTER_LABEL[mediumFilter].toLowerCase()} titles. Try a different
+            filter.
+          </p>
+        </div>
+      ) : null}
       <ol className="divide-y divide-border rounded-lg border border-border">
         {franchises.map((f, i) => {
           const isOpen = openKeys.has(f.franchiseKey);
           const hasMultiple = f.seasonCount > 1;
+          const displayRating = displayRatings[i];
           const meanLabel =
-            f.meanRating > 0
-              ? f.meanRating === Math.round(f.meanRating)
-                ? `${f.meanRating}/10`
-                : `${f.meanRating.toFixed(1)}/10`
+            displayRating !== undefined && displayRating > 0
+              ? `${displayRating.toFixed(1)}/10`
               : null;
           return (
             <li key={f.franchiseKey} className="bg-card">
               <div
-                draggable
-                onDragStart={() => onDragStart(i)}
-                onDragOver={(e) => onDragOver(e, i)}
-                onDrop={onDrop}
-                onDragEnd={() => setDragIdx(null)}
+                draggable={!filterActive}
+                onDragStart={filterActive ? undefined : () => onDragStart(i)}
+                onDragOver={filterActive ? undefined : (e) => onDragOver(e, i)}
+                onDrop={filterActive ? undefined : onDrop}
+                onDragEnd={filterActive ? undefined : () => setDragIdx(null)}
                 className={cn(
                   'flex items-center gap-3 px-3 py-2 transition-colors',
                   dragIdx === i ? 'bg-muted opacity-70' : 'hover:bg-muted/40',
                 )}
               >
                 <GripVertical
-                  className="h-4 w-4 flex-none cursor-grab text-muted-foreground"
+                  className={cn(
+                    'h-4 w-4 flex-none text-muted-foreground',
+                    filterActive ? 'cursor-not-allowed opacity-30' : 'cursor-grab',
+                  )}
                   aria-hidden="true"
                 />
                 <span className="w-8 flex-none text-sm font-medium text-muted-foreground">
@@ -228,16 +308,16 @@ export function LibraryRankedView() {
                       className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
                     >
                       {isOpen ? (
-                        <ChevronDown className="h-4 w-4" aria-hidden="true" />
+                        <Minus className="h-4 w-4" aria-hidden="true" />
                       ) : (
-                        <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                        <Plus className="h-4 w-4" aria-hidden="true" />
                       )}
                     </button>
                   ) : null}
                   <button
                     type="button"
                     onClick={() => moveBy(i, -1)}
-                    disabled={i === 0 || setRankedOrder.isPending}
+                    disabled={i === 0 || setRankedOrder.isPending || filterActive}
                     aria-label={`Move ${f.representative.title.title} up`}
                     className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-30"
                   >
@@ -246,7 +326,9 @@ export function LibraryRankedView() {
                   <button
                     type="button"
                     onClick={() => moveBy(i, 1)}
-                    disabled={i === franchises.length - 1 || setRankedOrder.isPending}
+                    disabled={
+                      i === franchises.length - 1 || setRankedOrder.isPending || filterActive
+                    }
                     aria-label={`Move ${f.representative.title.title} down`}
                     className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-30"
                   >
@@ -314,6 +396,33 @@ export function LibraryRankedView() {
           Saving…
         </p>
       ) : null}
+    </div>
+  );
+}
+
+function MediumFilterChips({ current }: { current: MediumFilter }) {
+  const chips: MediumFilter[] = ['all', 'tv', 'film', 'anime'];
+  return (
+    <div className="mb-4 flex flex-wrap gap-2">
+      {chips.map((chip) => {
+        const href =
+          chip === 'all' ? '/library?view=ranked' : `/library?view=ranked&medium=${chip}`;
+        const active = chip === current;
+        return (
+          <Link
+            key={chip}
+            href={href}
+            className={cn(
+              'inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2',
+              active
+                ? 'border-foreground bg-foreground text-background'
+                : 'border-border bg-card text-text-body hover:bg-muted hover:text-foreground',
+            )}
+          >
+            {MEDIUM_FILTER_LABEL[chip]}
+          </Link>
+        );
+      })}
     </div>
   );
 }

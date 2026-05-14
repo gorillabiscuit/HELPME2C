@@ -49,7 +49,10 @@ export function LibraryCompareView() {
         Which one do you prefer? Click the poster you&apos;d rather watch — we&apos;ll use that to
         adjust your ranking. Keep going for as long as you want.
       </p>
-      <div className="grid grid-cols-2 gap-6">
+      {/* Posters capped at ~220px each — the bigger version overwhelmed
+          the viewport. User can still read the title + year below; the
+          poster is just the visual cue for "which one?" */}
+      <div className="mx-auto grid max-w-md grid-cols-2 gap-4">
         <ComparisonCard
           title={pair.a.title}
           onPick={() => onPick(pair.a.titleId, pair.b.titleId)}
