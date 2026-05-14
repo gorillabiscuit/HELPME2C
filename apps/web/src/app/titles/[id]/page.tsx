@@ -1,5 +1,4 @@
-import { and, eq, desc, inArray, ne } from 'drizzle-orm';
-import Link from 'next/link';
+import { and, eq, desc, inArray, notInArray, sql } from 'drizzle-orm';
 import { headers } from 'next/headers';
 import Image from 'next/image';
 import { notFound, redirect } from 'next/navigation';
@@ -17,10 +16,10 @@ import {
   users,
   watchEntries,
 } from '@/server/schema';
-import { dedupeByFranchise } from '@/server/lib/franchise';
+import { dedupeByFranchise, franchiseKey } from '@/server/lib/franchise';
 import { groupTagsIntoTitleSets } from '@/inngest/lib/group-tags';
+import { BridgeCard } from '@/components/bridge-card';
 import { PreviewOverlay } from '@/components/preview-overlay';
-import { RecCardActions } from '@/components/rec-card-actions';
 import { TitleDetailAddButton } from '@/components/title-detail-add-button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -188,16 +187,39 @@ export default async function TitleDetailPage({ params }: PageProps) {
 
   // Theme-similarity bridges. Per user feedback 2026-05-14, we DROPPED
   // the original "anime ↔ live-action only" framing — it set an
-  // expectation the data couldn't fulfill (catalog has way more anime
-  // than live-action, so anime-source pages returned all-anime cards
-  // anyway). The thing that's actually valuable is "more shows with
-  // the same themes" regardless of medium. Anime → anime is fine.
-  // Live-action → anime still works (the moat the theme taxonomy was
-  // designed for); it just isn't FORCED.
+  // expectation the data couldn't fulfill. The valuable thing is
+  // "more shows with the same themes" regardless of medium.
   //
-  // The candidate pool excludes the source title itself. Each card
-  // displays its own medium label so the user knows what they're
-  // looking at.
+  // Candidate pool exclusions:
+  //   - the source title itself
+  //   - OTHER seasons of the same franchise (Jujutsu Kaisen S3's page
+  //     shouldn't suggest JJK S1 as a "similar themes" rec — same show)
+  //   - titles the current user has already touched (watching, planned,
+  //     completed, dropped — anything in watch_entries). No point
+  //     suggesting something they already have on their list.
+  const sourceFranchiseKey = franchiseKey(title.title);
+
+  // Find every title in the source's franchise. Pre-filter via LIKE
+  // narrows the catalog scan; JS franchiseKey check is authoritative.
+  const escapedKey = sourceFranchiseKey.replace(/[%_\\]/g, (c) => '\\' + c);
+  const sameFranchiseCandidates = await db
+    .select({ id: titles.id, title: titles.title })
+    .from(titles)
+    .where(sql`LOWER(${titles.title}) LIKE ${`${escapedKey}%`}`);
+  const sameFranchiseIds = sameFranchiseCandidates
+    .filter((t) => franchiseKey(t.title) === sourceFranchiseKey)
+    .map((t) => t.id);
+
+  // Find every title the current user has touched.
+  const userTouchedRows = await db
+    .select({ titleId: watchEntries.titleId })
+    .from(watchEntries)
+    .innerJoin(users, eq(watchEntries.userId, users.id))
+    .where(eq(users.clerkId, clerkUserId));
+  const userTouchedIds = userTouchedRows.map((r) => r.titleId);
+
+  const excludedIds = Array.from(new Set([id, ...sameFranchiseIds, ...userTouchedIds]));
+
   const [sourceTagRows, candidateTagRows, themeRows] = await Promise.all([
     db
       .select({
@@ -215,7 +237,7 @@ export default async function TitleDetailPage({ params }: PageProps) {
       })
       .from(titleTags)
       .innerJoin(titles, eq(titleTags.titleId, titles.id))
-      .where(ne(titles.id, id)),
+      .where(notInArray(titles.id, excludedIds)),
     db
       .select({
         tagId: tagThemes.tagId,
@@ -401,39 +423,16 @@ export default async function TitleDetailPage({ params }: PageProps) {
           <CardContent>
             <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3">
               {bridgeCards.map((b) => (
-                <li key={b.id}>
-                  <Link
-                    href={`/titles/${b.id}`}
-                    className="group block rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
-                  >
-                    {b.posterUrl ? (
-                      <div className="relative aspect-[2/3] overflow-hidden rounded-md border border-border bg-muted">
-                        <Image
-                          src={b.posterUrl}
-                          alt=""
-                          fill
-                          sizes="(min-width: 640px) 200px, 50vw"
-                          className="object-cover transition-transform group-hover:scale-[1.02]"
-                        />
-                        <PreviewOverlay
-                          trailerProvider={b.trailerProvider}
-                          trailerVideoId={b.trailerVideoId}
-                          titleText={b.title}
-                        />
-                      </div>
-                    ) : (
-                      <div className="aspect-[2/3] rounded-md border border-border bg-muted" />
-                    )}
-                    <p className="mt-2 line-clamp-2 text-sm font-medium text-foreground">
-                      {b.title}
-                    </p>
-                    <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
-                      {MEDIA_TYPE_LABEL[b.mediaType] ?? b.mediaType}
-                      {b.themeName ? ` · Shares the ${b.themeName.toLowerCase()} theme` : ''}
-                    </p>
-                  </Link>
-                  <RecCardActions titleId={b.id} />
-                </li>
+                <BridgeCard
+                  key={b.id}
+                  id={b.id}
+                  title={b.title}
+                  mediaType={b.mediaType}
+                  posterUrl={b.posterUrl}
+                  trailerProvider={b.trailerProvider}
+                  trailerVideoId={b.trailerVideoId}
+                  themeName={b.themeName ?? null}
+                />
               ))}
             </ul>
           </CardContent>
