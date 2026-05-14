@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bookmark, Check, X } from 'lucide-react';
+import { Bookmark, Check, HelpCircle, X } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { RatingFace } from '@/components/rating-face';
 import { cn } from '@/lib/utils';
@@ -42,6 +42,14 @@ interface TitleQuickActionsProps {
 //   - Want to watch → tracking + status=plan_to_watch.
 //   - Not interested → records dismissal in rec_feedback so the engine
 //                      suppresses the title; doesn't add a library entry.
+//   - Don't know it → pure client-side dismiss. No mutation, no signal
+//                     recorded — just slides the card out of view so the
+//                     next one takes its place. Distinct from "Not
+//                     interested" (which is negative signal): "Don't
+//                     know it" means the user has no opinion because
+//                     they don't recognise the show. Critical for the
+//                     onboarding flow where forcing a judgment on an
+//                     unfamiliar show was polluting the taste vector.
 //
 // State-aware reflection: if currentState shows the title is already
 // in library with status=completed and a rating, the Watched it button
@@ -88,6 +96,14 @@ export function TitleQuickActions({
 
   const onNotInterested = () => {
     recFeedbackUpsert.mutate({ titleId, dismissed: true });
+  };
+
+  // "Don't know it" is a pure client-side dismiss — no DB mutation.
+  // The card vanishes for the rest of the session via onActionComplete;
+  // no signal (positive or negative) is recorded so the taste vector
+  // stays honest about what the user has opinions on.
+  const onDontKnow = () => {
+    onActionComplete?.();
   };
 
   const isPending = watchUpsert.isPending || recFeedbackUpsert.isPending;
@@ -152,6 +168,24 @@ export function TitleQuickActions({
           <X className={iconSize} aria-hidden="true" />
           <span>Not interested</span>
         </button>
+        {/* Only render Don't-know-it when the parent has wired
+            onActionComplete — otherwise the click would be a silent
+            no-op (no DB mutation, no card hide). Dashboard rec cards
+            don't currently support per-card hiding so the button stays
+            absent there. Onboarding/Discover/Bridges all pass
+            onActionComplete and get the button. */}
+        {onActionComplete ? (
+          <button
+            type="button"
+            onClick={onDontKnow}
+            disabled={isPending}
+            title="Skip this one — show me a different show. No signal recorded."
+            className={cn(buttonBase, offState)}
+          >
+            <HelpCircle className={iconSize} aria-hidden="true" />
+            <span>Don&apos;t know it</span>
+          </button>
+        ) : null}
       </div>
 
       {ratingOpen ? (
