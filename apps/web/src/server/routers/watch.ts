@@ -453,6 +453,75 @@ export const watchRouter = router({
       };
     }),
 
+  // Lists ALL catalog seasons of a franchise (rated and unrated) with
+  // the user's rating per season if any. Used by the ranked-list
+  // accordion on /library?view=ranked — when a multi-season franchise
+  // is expanded, this endpoint hydrates the season list including
+  // ones the user hasn't rated yet ("Not rated" placeholders).
+  //
+  // SQL pre-filter via LOWER(title) LIKE 'franchiseKey%' narrows the
+  // catalog scan; JS franchiseKey check on the result set is the
+  // authoritative filter (handles "Hunter x Hunter (2011)" → same
+  // franchise as "Hunter x Hunter" etc).
+  franchiseSeasons: protectedProcedure
+    .input(z.object({ franchiseKey: z.string().min(1).max(200) }))
+    .query(async ({ ctx, input }) => {
+      const internalUserId = await resolveInternalUserId(ctx.db, ctx.userId);
+      if (!internalUserId) return [];
+
+      // Escape SQL LIKE wildcards then pre-filter to titles whose text
+      // starts with the franchise key. False positives are filtered in
+      // JS by re-running franchiseKey on each candidate.
+      const escaped = input.franchiseKey.replace(/[%_\\]/g, (c) => '\\' + c);
+      const candidates = await ctx.db
+        .select({
+          id: titles.id,
+          title: titles.title,
+          mediaType: titles.mediaType,
+          releaseYear: titles.releaseYear,
+          posterUrl: titles.posterUrl,
+        })
+        .from(titles)
+        .where(sql`LOWER(${titles.title}) LIKE ${`${escaped}%`}`);
+
+      const seasonsInFranchise = candidates.filter(
+        (t) => franchiseKey(t.title) === input.franchiseKey,
+      );
+
+      // Pull the user's entries for any of these seasons in one query.
+      const titleIds = seasonsInFranchise.map((t) => t.id);
+      const userEntries =
+        titleIds.length > 0
+          ? await ctx.db
+              .select({
+                titleId: watchEntries.titleId,
+                rating: watchEntries.rating,
+                eloScore: watchEntries.eloScore,
+                status: watchEntries.status,
+              })
+              .from(watchEntries)
+              .where(
+                and(
+                  eq(watchEntries.userId, internalUserId),
+                  inArray(watchEntries.titleId, titleIds),
+                ),
+              )
+          : [];
+      const entryByTitleId = new Map(userEntries.map((e) => [e.titleId, e]));
+
+      return seasonsInFranchise
+        .map((t) => ({
+          title: t,
+          entry: entryByTitleId.get(t.id) ?? null,
+        }))
+        .sort((a, b) => {
+          const ya = a.title.releaseYear ?? Number.MAX_SAFE_INTEGER;
+          const yb = b.title.releaseYear ?? Number.MAX_SAFE_INTEGER;
+          if (ya !== yb) return ya - yb;
+          return a.title.title.localeCompare(b.title.title);
+        });
+    }),
+
   // Returns two rated titles for the user to compare. Per ADR-0023
   // the franchise is the unit of taste, so the pair must come from
   // DIFFERENT franchises — comparing "Attack on Titan S1" vs "AoT S2"

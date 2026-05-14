@@ -456,45 +456,157 @@ function SortableFranchiseRow({
         </div>
       </div>
       {hasMultiple && isOpen ? (
-        <ul className="border-t border-border bg-muted/30">
-          {f.seasons.map((season) => (
-            <li key={season.titleId} className="flex items-center gap-3 px-3 py-2 pl-14 text-sm">
-              {season.title.posterUrl ? (
+        <ExpandedSeasonsList
+          franchiseKey={f.franchiseKey}
+          onRemoveSeason={onRemoveSeason}
+          removePending={removePending}
+          fallbackSeasons={f.seasons}
+        />
+      ) : null}
+    </li>
+  );
+}
+
+// Renders the catalog's full season list for a franchise — including
+// seasons the user hasn't rated ("Not rated" placeholders). Lazy-
+// fetches via watch.franchiseSeasons on accordion expand so we don't
+// pay the catalog scan on every page render. Falls back to the rated-
+// only `fallbackSeasons` if the query is still loading or returns
+// fewer rows than the user has rated (shouldn't happen but defends
+// against unexpected catalog gaps).
+function ExpandedSeasonsList({
+  franchiseKey: key,
+  onRemoveSeason,
+  removePending,
+  fallbackSeasons,
+}: {
+  franchiseKey: string;
+  onRemoveSeason: (season: TasteEntry) => void;
+  removePending: boolean;
+  fallbackSeasons: TasteEntry[];
+}) {
+  const seasonsQuery = trpc.watch.franchiseSeasons.useQuery({ franchiseKey: key });
+
+  // While loading, render the rated-only fallback. After the query
+  // resolves, use catalog data IF it covers at least as many rows as
+  // the rated set (otherwise something's off — fall back).
+  const useCatalog =
+    seasonsQuery.data !== undefined && seasonsQuery.data.length >= fallbackSeasons.length;
+
+  if (useCatalog) {
+    return (
+      <ul className="border-t border-border bg-muted/30">
+        {seasonsQuery.data!.map((row) => {
+          const rated = row.entry !== null;
+          const tasteEntry: TasteEntry | null = rated
+            ? {
+                titleId: row.title.id,
+                rating: row.entry!.rating,
+                eloScore: row.entry!.eloScore,
+                manualRank: null,
+                title: row.title,
+              }
+            : null;
+          return (
+            <li key={row.title.id} className="flex items-center gap-3 px-3 py-2 pl-14 text-sm">
+              {row.title.posterUrl ? (
                 <Image
-                  src={season.title.posterUrl}
+                  src={row.title.posterUrl}
                   alt=""
                   width={28}
                   height={42}
-                  className="aspect-[2/3] flex-none rounded border border-border bg-muted object-cover"
+                  className={cn(
+                    'aspect-[2/3] flex-none rounded border border-border bg-muted object-cover',
+                    !rated && 'opacity-60',
+                  )}
                 />
               ) : (
                 <div className="aspect-[2/3] w-7 flex-none rounded border border-border bg-muted" />
               )}
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm text-foreground">{season.title.title}</p>
+                <p
+                  className={cn(
+                    'truncate text-sm',
+                    rated ? 'text-foreground' : 'text-muted-foreground',
+                  )}
+                >
+                  {row.title.title}
+                </p>
                 <p className="text-xs text-muted-foreground">
                   {[
-                    season.title.releaseYear?.toString(),
-                    season.rating !== null ? `${season.rating}/10` : null,
+                    row.title.releaseYear?.toString(),
+                    rated ? `${row.entry!.rating}/10` : 'Not rated',
                   ]
                     .filter((s): s is string => Boolean(s))
                     .join(' · ')}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => onRemoveSeason(season)}
-                disabled={removePending}
-                aria-label={`Remove ${season.title.title}`}
-                className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-30"
-              >
-                <X className="h-3.5 w-3.5" aria-hidden="true" />
-              </button>
+              {rated && tasteEntry ? (
+                <button
+                  type="button"
+                  onClick={() => onRemoveSeason(tasteEntry)}
+                  disabled={removePending}
+                  aria-label={`Remove ${row.title.title}`}
+                  className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-30"
+                >
+                  <X className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              ) : (
+                <Link
+                  href={`/titles/${row.title.id}`}
+                  className="inline-flex flex-none items-center rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+                >
+                  Rate
+                </Link>
+              )}
             </li>
-          ))}
-        </ul>
-      ) : null}
-    </li>
+          );
+        })}
+      </ul>
+    );
+  }
+
+  // Fallback: rated-only list (used while loading or on the (rare)
+  // case where the catalog query couldn't find all the user's rated
+  // titles in the franchise).
+  return (
+    <ul className="border-t border-border bg-muted/30">
+      {fallbackSeasons.map((season) => (
+        <li key={season.titleId} className="flex items-center gap-3 px-3 py-2 pl-14 text-sm">
+          {season.title.posterUrl ? (
+            <Image
+              src={season.title.posterUrl}
+              alt=""
+              width={28}
+              height={42}
+              className="aspect-[2/3] flex-none rounded border border-border bg-muted object-cover"
+            />
+          ) : (
+            <div className="aspect-[2/3] w-7 flex-none rounded border border-border bg-muted" />
+          )}
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm text-foreground">{season.title.title}</p>
+            <p className="text-xs text-muted-foreground">
+              {[
+                season.title.releaseYear?.toString(),
+                season.rating !== null ? `${season.rating}/10` : null,
+              ]
+                .filter((s): s is string => Boolean(s))
+                .join(' · ')}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onRemoveSeason(season)}
+            disabled={removePending}
+            aria-label={`Remove ${season.title.title}`}
+            className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-30"
+          >
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 
