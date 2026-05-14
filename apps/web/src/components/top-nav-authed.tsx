@@ -25,7 +25,6 @@ const PRIMARY_NAV: ReadonlyArray<NavItem> = [
   { label: 'Recommendations', href: '/' },
   { label: 'Search', href: '/search' },
   { label: 'Library', href: '/library' },
-  { label: 'Your taste', href: '/taste' },
   { label: 'Groups', href: '/groups' },
 ];
 

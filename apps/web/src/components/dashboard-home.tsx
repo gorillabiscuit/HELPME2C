@@ -141,7 +141,7 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
           </span>
         </Link>
         <Link
-          href="/taste"
+          href="/library?view=ranked"
           className="group flex items-start gap-4 rounded-lg border border-border bg-white p-5 transition hover:border-input hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
         >
           <span className="flex h-10 w-10 flex-none items-center justify-center rounded-md bg-primary/10 text-primary">
