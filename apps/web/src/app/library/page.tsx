@@ -8,6 +8,7 @@ import { LibraryEditDialog } from '@/components/library-edit-dialog';
 import { LibraryRemoveButton } from '@/components/library-remove-button';
 import { LibraryRankedView } from '@/components/library-ranked-view';
 import { LibraryCompareView } from '@/components/library-compare-view';
+import { RatingFace } from '@/components/rating-face';
 import { cn } from '@/lib/utils';
 
 const STATUS_LABEL: Record<string, string> = {
@@ -208,7 +209,10 @@ async function AllView({ filter }: { filter: AllFilter }) {
 
                 <div className="flex flex-none items-center gap-2 text-xs">
                   {entry.rating !== null ? (
-                    <span className="font-medium text-foreground">{entry.rating}/10</span>
+                    <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                      <span>{entry.rating}/10</span>
+                      <RatingFace rating={entry.rating} size="sm" />
+                    </span>
                   ) : (
                     <span className="text-muted-foreground">—</span>
                   )}

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Bookmark, Check, X } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
+import { RatingFace } from '@/components/rating-face';
 import { cn } from '@/lib/utils';
 
 type WatchStatus = 'watching' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_watch';
@@ -158,7 +159,7 @@ export function TitleQuickActions({
           <p className="mb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
             {existingRating !== null
               ? `Currently ${existingRating}/10 — change it?`
-              : 'How would you rate it? (10 = loved it · 1 = hated it)'}
+              : 'How would you rate it? 1-3 disliked · 4-6 mixed · 7-9 liked · 10 loved'}
           </p>
           <div className="flex flex-wrap items-center gap-1">
             {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
@@ -168,20 +169,21 @@ export function TitleQuickActions({
                 onClick={() => onWatchedWithRating(n)}
                 disabled={isPending}
                 className={cn(
-                  'h-7 w-7 rounded-md border text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-50',
+                  'flex h-12 w-9 flex-col items-center justify-center gap-0.5 rounded-md border text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-50',
                   n === existingRating
                     ? 'border-foreground bg-foreground text-primary-foreground'
                     : 'border-border bg-white text-foreground hover:bg-foreground hover:text-primary-foreground',
                 )}
               >
-                {n}
+                <span>{n}</span>
+                <RatingFace rating={n} size="sm" inheritColor={n === existingRating} />
               </button>
             ))}
             <button
               type="button"
               onClick={() => onWatchedWithRating(null)}
               disabled={isPending}
-              className="ml-1 rounded-md border border-border bg-white px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
+              className="ml-1 self-stretch rounded-md border border-border bg-white px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
             >
               Skip rating
             </button>

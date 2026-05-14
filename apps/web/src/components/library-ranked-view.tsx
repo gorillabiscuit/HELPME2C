@@ -6,6 +6,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { ChevronDown, ChevronUp, GripVertical, Minus, Plus, X } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
+import { RatingFace } from '@/components/rating-face';
 import { cn } from '@/lib/utils';
 
 type MediaType = 'tv' | 'film' | 'anime';
@@ -284,14 +285,19 @@ export function LibraryRankedView({ mediumFilter = 'all' }: { mediumFilter?: Med
                       </span>
                     ) : null}
                   </p>
-                  <p className="text-xs text-muted-foreground">
-                    {[
-                      MEDIA_TYPE_LABEL[f.representative.title.mediaType],
-                      f.representative.title.releaseYear?.toString(),
-                      meanLabel,
-                    ]
-                      .filter((s): s is string => Boolean(s))
-                      .join(' · ')}
+                  <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                    <span>
+                      {[
+                        MEDIA_TYPE_LABEL[f.representative.title.mediaType],
+                        f.representative.title.releaseYear?.toString(),
+                        meanLabel,
+                      ]
+                        .filter((s): s is string => Boolean(s))
+                        .join(' · ')}
+                    </span>
+                    {displayRating !== undefined && displayRating > 0 ? (
+                      <RatingFace rating={displayRating} size="sm" />
+                    ) : null}
                   </p>
                 </div>
                 <div className="flex flex-none items-center gap-1">

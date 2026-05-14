@@ -67,22 +67,33 @@ export interface Recommendation {
   readonly score: number;
 }
 
-// Per the M4 plan agreed 2026-05-08: anchors contribute at full weight,
-// ratings scale by rating/10 (10/10 = anchor-equivalent, 5/10 = half).
-// "Organic ranking with ability to rerank later" — these constants are
-// intentionally simple; tuning lives in a future commit, possibly via a
-// reranking layer that wraps recommendForUser rather than by changing
-// the constants here.
+// Anchors contribute at full positive weight. Ratings are bipolar per
+// ADR-0024: a 1-10 rating is mapped to a signed weight in [-1, +1] via
+// `(rating - RATING_NEUTRAL) / RATING_HALF_SPAN`. The midpoint is 5.5
+// (between "Mixed" 4-6 and "Liked" 7+) so rating 10 → +1.0 and rating
+// 1 → -1.0 symmetrically. Low-rated titles' tags now subtract from the
+// taste vector.
 const ANCHOR_CONTRIBUTION = 1.0;
-const MAX_RATING = 10;
+const RATING_NEUTRAL = 5.5;
+const RATING_HALF_SPAN = 4.5;
 const DEFAULT_LIMIT = 200;
 
 /**
  * Build a user's taste vector from their anchor picks + rated tracking entries.
  *
- * Anchors contribute the full tag weights of their title; ratings contribute
- * scaled by `rating / 10`. Multiple titles contributing the same tag
- * accumulate via sum.
+ * Anchors contribute the full tag weights of their title (always positive).
+ * Ratings contribute via the BIPOLAR formula per ADR-0024:
+ *
+ *   multiplier = (rating - 5.5) / 4.5
+ *
+ * which maps rating 1 → -1.0, rating 5/6 → ~neutral, rating 10 → +1.0.
+ * A low-rated title's tags now SUBTRACT from the taste vector, actively
+ * repelling future recommendations with similar themes.
+ *
+ * Multiple titles contributing the same tag accumulate via sum. The
+ * resulting `tagWeights` map can have negative values; downstream
+ * `scoreCandidate` interprets that as "candidates with this tag score
+ * lower."
  *
  * Titles referenced in `history` that don't appear in `userTitles` are
  * silently ignored — the caller is responsible for fetching tag data for
@@ -121,7 +132,8 @@ export function extractTasteVector(
   for (const rated of history.ratings) {
     const title = titlesById.get(rated.titleId);
     if (!title) continue;
-    const multiplier = rated.rating / MAX_RATING;
+    // Bipolar mapping per ADR-0024 — see top-of-file constants.
+    const multiplier = (rated.rating - RATING_NEUTRAL) / RATING_HALF_SPAN;
     for (const tag of title.tags) {
       tagWeights.set(tag.tagId, (tagWeights.get(tag.tagId) ?? 0) + tag.weight * multiplier);
     }

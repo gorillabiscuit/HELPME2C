@@ -64,7 +64,24 @@ describe('extractTasteVector', () => {
     expect(tasteFromTen.get('mechaT')).toBe(tasteFromAnchor.get('mechaT'));
   });
 
-  it('scales rating contributions linearly so a 5/10 contributes half of a 10/10', () => {
+  it('treats a 1/10 rating as a strong NEGATIVE contribution per ADR-0024', () => {
+    // Bipolar rating: 1/10 means "I hated this," tags subtract from
+    // the taste vector. Formula: (rating - 5.5) / 4.5.
+    const userTitles: TitleTagSet[] = [
+      {
+        titleId: 't1',
+        tags: [{ tagId: 'actionT', weight: 80 }],
+      },
+    ];
+    const taste = extractTasteVector(
+      { anchors: [], ratings: [{ titleId: 't1', rating: 1 }] },
+      userTitles,
+    );
+    expect(taste.get('actionT')).toBeLessThan(0);
+  });
+
+  it('maps rating 10 and rating 1 to opposite-sign contributions of equal magnitude', () => {
+    // Symmetric bipolar mapping: 1 → -1.0 multiplier, 10 → +1.0.
     const userTitles: TitleTagSet[] = [
       {
         titleId: 't1',
@@ -76,16 +93,47 @@ describe('extractTasteVector', () => {
       userTitles,
     );
     const tasteLow = extractTasteVector(
-      { anchors: [], ratings: [{ titleId: 't1', rating: 5 }] },
+      { anchors: [], ratings: [{ titleId: 't1', rating: 1 }] },
       userTitles,
     );
 
     const high = tasteHigh.get('actionT') ?? 0;
     const low = tasteLow.get('actionT') ?? 0;
-    expect(low).toBeGreaterThan(0);
-    expect(low).toBeLessThan(high);
-    // 5/10 should be exactly half of 10/10 per the linear contract.
-    expect(low * 2).toBeCloseTo(high, 10);
+    expect(high).toBeCloseTo(-low, 10);
+  });
+
+  it('maps mid-range ratings (5 and 6) to near-zero contributions', () => {
+    // The "Mixed" range (4-6) per ADR-0024 sits near zero. 5.5 is the
+    // exact neutral midpoint, so 5 and 6 each contribute ±0.11 × tag weight.
+    const userTitles: TitleTagSet[] = [
+      {
+        titleId: 't1',
+        tags: [{ tagId: 'actionT', weight: 100 }],
+      },
+    ];
+    const tasteFive = extractTasteVector(
+      { anchors: [], ratings: [{ titleId: 't1', rating: 5 }] },
+      userTitles,
+    );
+    const tasteSix = extractTasteVector(
+      { anchors: [], ratings: [{ titleId: 't1', rating: 6 }] },
+      userTitles,
+    );
+    const tasteTen = extractTasteVector(
+      { anchors: [], ratings: [{ titleId: 't1', rating: 10 }] },
+      userTitles,
+    );
+
+    const five = tasteFive.get('actionT') ?? 0;
+    const six = tasteSix.get('actionT') ?? 0;
+    const ten = tasteTen.get('actionT') ?? 0;
+    // Both 5 and 6 sit much closer to zero than to the extreme.
+    expect(Math.abs(five)).toBeLessThan(Math.abs(ten) / 5);
+    expect(Math.abs(six)).toBeLessThan(Math.abs(ten) / 5);
+    // 5 is slightly negative, 6 is slightly positive, symmetric.
+    expect(five).toBeLessThan(0);
+    expect(six).toBeGreaterThan(0);
+    expect(five).toBeCloseTo(-six, 10);
   });
 
   it('accumulates shared-tag weight across two anchor picks via sum', () => {

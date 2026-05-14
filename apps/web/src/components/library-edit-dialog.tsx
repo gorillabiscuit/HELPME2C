@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { RatingFace } from '@/components/rating-face';
 import { cn } from '@/lib/utils';
 
 // Mirror watch_entries.status enum. Hardcoded vs imported so this client
@@ -147,7 +148,12 @@ export function LibraryEditDialog({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="watch-edit-rating">Rating (1–10)</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="watch-edit-rating">Rating (1–10)</Label>
+              {rating !== '' && Number.isFinite(Number.parseInt(rating, 10)) ? (
+                <RatingFace rating={Number.parseInt(rating, 10)} size="sm" showLabel />
+              ) : null}
+            </div>
             <Input
               id="watch-edit-rating"
               type="number"
@@ -158,6 +164,9 @@ export function LibraryEditDialog({
               onChange={(e) => setRating(e.target.value)}
               placeholder="—"
             />
+            <p className="text-xs text-muted-foreground">
+              1-3 disliked · 4-6 mixed · 7-9 liked · 10 loved
+            </p>
           </div>
 
           {hasEpisodes ? (
