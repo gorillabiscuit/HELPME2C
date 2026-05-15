@@ -36,4 +36,22 @@ export const recommendAllGroupsEvent = eventType('recommend/all-groups.recompute
   schema: staticSchema<Record<string, never>>(),
 });
 
+// Theme extraction (LLM pass over title synopses). Two events:
+//   themes/extract.batch — process a specific set of title IDs (one
+//     batch is one Inngest function invocation, ~60 titles).
+//   themes/extract.all — fan-out: load all candidates from the catalog,
+//     split into batches, emit one .batch event per chunk.
+// See apps/web/src/server/themes/extract.ts for the underlying logic.
+export const extractThemesBatchEvent = eventType('themes/extract.batch', {
+  schema: staticSchema<{ titleIds: string[] }>(),
+});
+
+export const extractThemesAllEvent = eventType('themes/extract.all', {
+  schema: staticSchema<{
+    force?: boolean;
+    mediaType?: 'tv' | 'film' | 'anime';
+    limit?: number;
+  }>(),
+});
+
 export const inngest = new Inngest({ id: 'helpme2c' });
