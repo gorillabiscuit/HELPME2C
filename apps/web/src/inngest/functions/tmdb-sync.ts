@@ -55,6 +55,24 @@ interface TmdbTvDetail {
   videos?: TmdbVideosResponse;
 }
 
+// Movie detail differs from TV: `title`/`original_title` (not `name`),
+// `release_date` (no `last_air_date`), `runtime` is a single int (not an
+// array), and the keywords endpoint nests under `keywords` (same as TV).
+interface TmdbMovieDetail {
+  id: number;
+  title: string;
+  original_title: string;
+  overview: string;
+  status: string;
+  release_date: string;
+  runtime: number | null;
+  poster_path: string | null;
+  backdrop_path: string | null;
+  popularity: number;
+  keywords: { keywords: { id: number; name: string }[] };
+  videos?: TmdbVideosResponse;
+}
+
 // Pick a trailer (or fallback teaser) from a TMDB videos response.
 // Preference order: official YouTube Trailer → unofficial YouTube
 // Trailer → YouTube Teaser → null. TMDB returns videos roughly in
@@ -235,6 +253,97 @@ export async function fetchTmdbTvDiscoverPage(page: number): Promise<TmdbDiscove
   return tmdbGet<TmdbDiscoverPage>(
     `/discover/tv?sort_by=popularity.desc&page=${page}&language=en-US`,
   );
+}
+
+// Generic discover-page fetcher for the catalog-broadening script.
+// `mediaType` selects /discover/tv vs /discover/movie. `params` is a flat
+// record of additional TMDB query params (e.g. `with_original_language=ko`
+// or `with_origin_country=JP`). Returns the standard discover shape.
+//
+// Kept generic — language slicing and origin-country slicing both use
+// the same param interface and the same page-pagination model.
+export async function fetchTmdbDiscoverPage(
+  mediaType: 'tv' | 'movie',
+  page: number,
+  params: Record<string, string> = {},
+): Promise<TmdbDiscoverPage> {
+  const merged = new URLSearchParams({
+    sort_by: 'popularity.desc',
+    page: String(page),
+    language: 'en-US',
+    ...params,
+  });
+  return tmdbGet<TmdbDiscoverPage>(`/discover/${mediaType}?${merged.toString()}`);
+}
+
+// Films sibling of processTmdbTvShow. Shape differences flagged in the
+// TmdbMovieDetail interface above; everything else mirrors the TV path
+// 1:1 (same upsert pattern, same keyword + streaming flows).
+//
+// Movies don't have `last_air_date` — endYear stays null. `runtime` is
+// stored in `episodeDurationMinutes` (the column is already-overloaded
+// to mean "minutes per unit" — episode for TV, full runtime for film).
+// `number_of_episodes` is null for films.
+export async function processTmdbMovie(movieId: number): Promise<string | null> {
+  const [detail, providers] = await Promise.all([
+    tmdbGet<TmdbMovieDetail>(`/movie/${movieId}?append_to_response=keywords,videos&language=en-US`),
+    tmdbGet<TmdbWatchProviders>(`/movie/${movieId}/watch/providers`),
+  ]);
+  const trailer = pickTrailerFromTmdb(detail.videos);
+
+  const [upserted] = await db
+    .insert(titles)
+    .values({
+      externalId: String(detail.id),
+      source: 'tmdb',
+      mediaType: 'film',
+      title: detail.title,
+      originalTitle: detail.original_title !== detail.title ? detail.original_title : null,
+      synopsis: detail.overview || null,
+      status: tmdbStatusToEnum(detail.status),
+      releaseYear: detail.release_date ? parseInt(detail.release_date.slice(0, 4)) : null,
+      endYear: null,
+      episodeCount: null,
+      episodeDurationMinutes: detail.runtime ?? null,
+      posterUrl: detail.poster_path ? `${TMDB_IMAGE_BASE}${detail.poster_path}` : null,
+      backdropUrl: detail.backdrop_path ? `${TMDB_IMAGE_BASE}${detail.backdrop_path}` : null,
+      popularityScore: detail.popularity,
+      trailerProvider: trailer?.provider ?? null,
+      trailerVideoId: trailer?.videoId ?? null,
+    })
+    .onConflictDoUpdate({
+      target: [titles.externalId, titles.source],
+      set: {
+        title: detail.title,
+        synopsis: detail.overview || null,
+        status: tmdbStatusToEnum(detail.status),
+        episodeDurationMinutes: detail.runtime ?? null,
+        popularityScore: detail.popularity,
+        trailerProvider: trailer?.provider ?? null,
+        trailerVideoId: trailer?.videoId ?? null,
+        updatedAt: new Date(),
+      },
+    })
+    .returning({ id: titles.id });
+
+  if (!upserted) return null;
+
+  // Movie keyword response nests under `keywords.keywords` (TV nests
+  // under `keywords.results`). One of TMDB's small inconsistencies.
+  const keywords = detail.keywords?.keywords ?? [];
+  const tagIdMap = await upsertTmdbKeywords(keywords);
+
+  const tagRows = keywords
+    .map((kw) => ({ titleId: upserted.id, tagId: tagIdMap.get(kw.id) }))
+    .filter((r): r is { titleId: string; tagId: string } => r.tagId !== undefined)
+    .map((r) => ({ ...r, weight: 100, isSpoiler: false }));
+
+  if (tagRows.length > 0) {
+    await db.insert(titleTags).values(tagRows).onConflictDoNothing();
+  }
+
+  await upsertStreamingProviders(upserted.id, providers);
+  return upserted.id;
 }
 
 // Show-batch size inside a single step.run. Per docs/runbooks/inngest.md
