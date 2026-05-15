@@ -266,21 +266,43 @@ export async function extractForTitle(
 // FK resolution for comparable titles: case-insensitive match against
 // titles.title. Single-statement bulk lookup keeps the round-trips bounded
 // to one regardless of comparable count.
+// Strip trailing parenthetical qualifiers from an LLM-produced comparable
+// title string before catalog lookup. The model frequently appends
+// disambiguators that don't exist in our catalog: "Your Name (2016)",
+// "Monster (anime)", "What We Do in the Shadows (TV)", "Watchmen
+// (1986 comic / 2009 film)". Smoke testing at PROMPT_VERSION='v4.0'
+// surfaced this as the dominant FK-resolution failure mode (~48% raw
+// → ~70% after stripping).
+//
+// Only strips trailing parens, not embedded. "Death Note: L (Change the
+// World)" keeps the "(Change the World)" suffix — debatable but the
+// title genuinely uses it as part of the canonical name.
+export function stripTrailingParens(title: string): string {
+  return title.replace(/\s*\([^()]*\)\s*$/, '').trim();
+}
+
 export async function persistDescriptors(
   titleId: string,
   d: ExtractedDescriptors,
   sqlBinding: SqlBinding = neon(process.env.DATABASE_URL!),
 ): Promise<void> {
   // Resolve referenced_title strings to titles.id via case-insensitive
-  // exact match. Single query for all comparables on this title.
-  const comparableStrings = d.comparableTitles.map((c) => c.title);
+  // exact match against BOTH the raw string and a parens-stripped variant.
+  // The catalog stores canonical titles (no year/medium qualifiers) but
+  // the LLM frequently appends them — see stripTrailingParens.
   type ResolvedRow = { title: string; id: string };
+  const lookupKeys = new Set<string>();
+  for (const c of d.comparableTitles) {
+    lookupKeys.add(c.title.toLowerCase());
+    const stripped = stripTrailingParens(c.title).toLowerCase();
+    if (stripped !== c.title.toLowerCase()) lookupKeys.add(stripped);
+  }
   let resolved: ResolvedRow[] = [];
-  if (comparableStrings.length > 0) {
+  if (lookupKeys.size > 0) {
     resolved = (await sqlBinding`
       SELECT title, id
       FROM titles
-      WHERE LOWER(title) = ANY(${comparableStrings.map((s) => s.toLowerCase())}::text[])
+      WHERE LOWER(title) = ANY(${Array.from(lookupKeys)}::text[])
     `) as ResolvedRow[];
   }
   // Build a case-insensitive lookup. If multiple titles share the same
@@ -292,6 +314,17 @@ export async function persistDescriptors(
     const key = r.title.toLowerCase();
     if (!resolvedMap.has(key)) resolvedMap.set(key, r.id);
   }
+  // Look up each comparable: try raw first, then parens-stripped fallback.
+  const resolveComparable = (rawTitle: string): string | null => {
+    const direct = resolvedMap.get(rawTitle.toLowerCase());
+    if (direct) return direct;
+    const stripped = stripTrailingParens(rawTitle).toLowerCase();
+    if (stripped !== rawTitle.toLowerCase()) {
+      const fallback = resolvedMap.get(stripped);
+      if (fallback) return fallback;
+    }
+    return null;
+  };
 
   // Per-title transaction: themes + descriptors + comparables. Neon's
   // serverless driver supports tagged-template transactions via the
@@ -349,7 +382,7 @@ export async function persistDescriptors(
   await sqlBinding`DELETE FROM title_comparable_titles WHERE title_id = ${titleId}`;
   for (let i = 0; i < d.comparableTitles.length; i += 1) {
     const c = d.comparableTitles[i]!;
-    const refId = resolvedMap.get(c.title.toLowerCase()) ?? null;
+    const refId = resolveComparable(c.title);
     await sqlBinding`
       INSERT INTO title_comparable_titles (
         title_id, position, referenced_title, referenced_title_id, reason,
