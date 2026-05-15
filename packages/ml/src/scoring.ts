@@ -9,6 +9,7 @@
 // internal to the package, callers use recommendForUser /
 // recommendForGroup / explainGroupRecommendation.
 
+import type { ExplanationReason } from './explain';
 import type {
   ComparableEdge,
   TagThemeMembership,
@@ -272,4 +273,102 @@ export function v4Score(
     score += V4_COMPARABLE_WEIGHT * v4ComparableScore(candidateTitleId, edgeIndex, userRatings);
   }
   return score;
+}
+
+/**
+ * Parallel breakdown variant of v4Score — produces ExplanationReason[]
+ * instead of summing to a number. Each non-zero contributor surfaces as
+ * one reason so the explanation layer can render specific copy ("Touches
+ * on found-family," "Reminiscent of Mob Psycho 100").
+ *
+ * Contribution units match v4Score's units (weight × raw component),
+ * so reasons sort comparably against V1 reasons from explainCandidateScore.
+ *
+ * Returns reasons UNSORTED — caller sorts the combined V1+V4 list.
+ */
+export function v4ScoreBreakdown(
+  candidateTitleId: string,
+  v4Taste: V4TasteVector | undefined,
+  descriptor: V4Descriptor | undefined,
+  userRatings: ReadonlyMap<string, number> | undefined,
+  edgeIndex: ComparableEdgeIndex | undefined,
+): ExplanationReason[] {
+  const reasons: ExplanationReason[] = [];
+
+  if (v4Taste && descriptor) {
+    // v4-theme reasons: one per overlapping theme with non-zero weight.
+    for (const t of descriptor.themes) {
+      const userWeight = v4Taste.themesByWeight.get(t.slug);
+      if (userWeight === undefined || userWeight === 0) continue;
+      const contribution = V4_THEME_WEIGHT * userWeight * t.confidence;
+      if (contribution === 0) continue;
+      reasons.push({ kind: 'v4-theme', themeSlug: t.slug, contribution });
+    }
+    // v4-enum-fit reasons: one per matching enum bucket with non-zero weight.
+    const modeWeight = v4Taste.modePref.get(descriptor.narrativeMode);
+    if (modeWeight !== undefined && modeWeight !== 0) {
+      reasons.push({
+        kind: 'v4-enum-fit',
+        enumField: 'mode',
+        enumValue: descriptor.narrativeMode,
+        contribution: V4_ENUM_WEIGHT * modeWeight,
+      });
+    }
+    const engagementWeight = v4Taste.engagementPref.get(descriptor.engagementLevel);
+    if (engagementWeight !== undefined && engagementWeight !== 0) {
+      reasons.push({
+        kind: 'v4-enum-fit',
+        enumField: 'engagement',
+        enumValue: descriptor.engagementLevel,
+        contribution: V4_ENUM_WEIGHT * engagementWeight,
+      });
+    }
+    const stakesWeight = v4Taste.stakesPref.get(descriptor.stakesScale);
+    if (stakesWeight !== undefined && stakesWeight !== 0) {
+      reasons.push({
+        kind: 'v4-enum-fit',
+        enumField: 'stakes',
+        enumValue: descriptor.stakesScale,
+        contribution: V4_ENUM_WEIGHT * stakesWeight,
+      });
+    }
+  }
+
+  // v4-comparable reasons: one per edge with non-zero rating valence.
+  if (edgeIndex && userRatings && userRatings.size > 0) {
+    const inbound = edgeIndex.reverse.get(candidateTitleId);
+    if (inbound) {
+      for (const e of inbound) {
+        const rating = userRatings.get(e.fromTitleId);
+        if (rating === undefined || rating === 0) continue;
+        const contribution = V4_COMPARABLE_WEIGHT * rating * positionWeight(e.position);
+        if (contribution === 0) continue;
+        reasons.push({
+          kind: 'v4-comparable',
+          comparableTitleId: e.fromTitleId,
+          comparableDirection: 'inbound',
+          comparablePosition: e.position,
+          contribution,
+        });
+      }
+    }
+    const outbound = edgeIndex.forward.get(candidateTitleId);
+    if (outbound) {
+      for (const e of outbound) {
+        const rating = userRatings.get(e.toTitleId);
+        if (rating === undefined || rating === 0) continue;
+        const contribution = V4_COMPARABLE_WEIGHT * rating * positionWeight(e.position);
+        if (contribution === 0) continue;
+        reasons.push({
+          kind: 'v4-comparable',
+          comparableTitleId: e.toTitleId,
+          comparableDirection: 'outbound',
+          comparablePosition: e.position,
+          contribution,
+        });
+      }
+    }
+  }
+
+  return reasons;
 }

@@ -29,6 +29,7 @@ import {
   watchEntries,
 } from '@/server/schema';
 import { aggregateByFranchise, franchiseKey } from '@/server/lib/franchise';
+import { THEME_VOCABULARY } from '@/server/themes/vocabulary';
 import { groupTagsIntoTitleSets } from '../lib/group-tags';
 import { inngest, recommendAllUsersEvent, recommendUserEvent } from '../client';
 
@@ -86,6 +87,7 @@ const BLOCKED_TAG_NAMES = new Set([
 ]);
 
 function isReasonUsable(reason: ExplanationReason, tagInfo: ReadonlyMap<string, TagInfo>): boolean {
+  if (!reason.tagId) return false;
   const info = tagInfo.get(reason.tagId);
   if (!info) return false;
   if (info.category && BLOCKED_TAG_CATEGORIES.has(info.category)) return false;
@@ -106,23 +108,49 @@ function formatReasonHint(
   reasons: ReadonlyArray<ExplanationReason>,
   tagInfo: ReadonlyMap<string, TagInfo>,
   themeNames: ReadonlyMap<string, string>,
+  v4ThemeLabels: ReadonlyMap<string, string>,
+  comparableTitleNames: ReadonlyMap<string, string>,
 ): string | null {
   for (const reason of reasons) {
     if (reason.kind === 'direct-tag') {
       if (!isReasonUsable(reason, tagInfo)) continue;
-      const info = tagInfo.get(reason.tagId);
+      const info = tagInfo.get(reason.tagId!);
       if (!info) continue;
       return `Because you like ${info.name.toLowerCase()}`;
     }
-    // theme-bridge — surface the theme name + (optionally) what the
-    // user's interest is that bridges into it. Theme bridges go through
-    // editorial mappings (tagThemes) so they're already curated; just
-    // surface the theme name.
-    if (reason.themeId) {
-      const themeName = themeNames.get(reason.themeId);
-      if (!themeName) continue;
-      return `Matches your ${themeName.toLowerCase()} interest`;
+    if (reason.kind === 'theme-bridge') {
+      // surface the theme name + (optionally) what the user's interest
+      // is that bridges into it. Theme bridges go through editorial
+      // mappings (tagThemes) so they're already curated.
+      if (reason.themeId) {
+        const themeName = themeNames.get(reason.themeId);
+        if (!themeName) continue;
+        return `Matches your ${themeName.toLowerCase()} interest`;
+      }
+      continue;
     }
+    if (reason.kind === 'v4-theme' && reason.themeSlug) {
+      // V4 closed-vocab theme overlap. labelForSlug is human-readable
+      // ("found family" not "found-family"). Skip if vocab label is
+      // missing (shouldn't happen — vocab is in-tree).
+      const label = v4ThemeLabels.get(reason.themeSlug);
+      if (!label) continue;
+      return `Matches your ${label.toLowerCase()} interest`;
+    }
+    if (reason.kind === 'v4-comparable' && reason.comparableTitleId) {
+      // V4 comparable-graph edge. Surface "Reminiscent of [title]" only
+      // for POSITIVE contributions — a candidate comparable to a
+      // disliked title produces a negative contribution and shouldn't
+      // generate a positive-framed hint.
+      if (reason.contribution <= 0) continue;
+      const refName = comparableTitleNames.get(reason.comparableTitleId);
+      if (!refName) continue;
+      return `Reminiscent of ${refName}`;
+    }
+    // v4-enum-fit: deliberately not surfaced as headline copy. "Matches
+    // your stakes_scale preference" reads as jargon; "Has a deconstructive
+    // narrative mode" reads as film-school. The signal counts toward
+    // scoring; the hint is just not informative-enough copy.
   }
   return null;
 }
@@ -444,14 +472,41 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
   const themeRows2 = await db.select({ id: themes.id, name: themes.name }).from(themes);
   for (const t of themeRows2) themeNames.set(t.id, t.name);
 
+  // V4 explanation supports: closed-vocab theme labels (slug → human label)
+  // and comparable-title-id → title name. THEME_VOCABULARY is in-tree and
+  // covers any V4 theme the LLM can produce. Comparable-title names are
+  // looked up against the user's rated set (the only IDs v4-comparable
+  // reasons reference).
+  const v4ThemeLabels = new Map<string, string>(THEME_VOCABULARY.map((t) => [t.slug, t.label]));
+  const comparableTitleNames = new Map<string, string>();
+  const userTitleNameRows =
+    franchiseRows.length > 0
+      ? await db
+          .select({ id: titles.id, title: titles.title })
+          .from(titles)
+          .where(
+            inArray(
+              titles.id,
+              franchiseRows.map((f) => f.representativeTitleId),
+            ),
+          )
+      : [];
+  for (const t of userTitleNameRows) comparableTitleNames.set(t.id, t.title);
+
   const items = recs.map((r, i) => {
     if (i >= EXPLAIN_DEPTH) {
       return { titleId: r.titleId, score: r.score, reasonHint: null };
     }
     const candidate = candidatesById.get(r.titleId);
     if (!candidate) return { titleId: r.titleId, score: r.score, reasonHint: null };
-    const reasons = explainRecommendation(taste, candidate, themeMembership);
-    const reasonHint = formatReasonHint(reasons, tagInfo, themeNames);
+    const reasons = explainRecommendation(taste, candidate, themeMembership, v4Inputs);
+    const reasonHint = formatReasonHint(
+      reasons,
+      tagInfo,
+      themeNames,
+      v4ThemeLabels,
+      comparableTitleNames,
+    );
     return { titleId: r.titleId, score: r.score, reasonHint };
   });
 

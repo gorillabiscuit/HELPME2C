@@ -17,28 +17,56 @@ import type {
   TagThemeMembership,
   TitleTagSet,
   UserTasteVector,
+  V4RecInputs,
 } from './recommendation';
-import { buildTagThemeIndex, buildTasteTheme } from './scoring';
+import {
+  buildComparableEdgeIndex,
+  buildTagThemeIndex,
+  buildTasteTheme,
+  v4ScoreBreakdown,
+} from './scoring';
 
-/** One reason a single tag on the candidate contributed to a member's
- * score. `kind` distinguishes a direct tag-overlap match (the member
- * already has this tag in their taste) from a cross-medium theme bridge
- * (the member's taste connects via a shared theme). */
+/** One reason a single tag (or V4 signal) on the candidate contributed
+ * to a member's score. Discriminated by `kind`:
+ *   - `direct-tag` — candidate carries a tag the member has direct signal in
+ *   - `theme-bridge` — candidate's tag belongs to a theme the member's
+ *     OTHER tags supply signal to (cross-medium bridge)
+ *   - `v4-theme` — candidate has a V4 closed-vocab theme the member has
+ *     accumulated V4-theme signal in via their rated titles
+ *   - `v4-comparable` — candidate is connected to a member-rated title
+ *     via the comparable-titles graph (either direction)
+ *   - `v4-enum-fit` — candidate's narrative_mode / engagement_level /
+ *     stakes_scale matches the member's accumulated preference
+ *
+ * V1 fields (tagId, themeId, bridgedFromTagIds) remain set for the V1
+ * kinds and are undefined for V4 kinds. V4 fields are set per kind.
+ * Reader code switches on `kind` and reaches for the relevant fields. */
 export interface ExplanationReason {
-  readonly kind: 'direct-tag' | 'theme-bridge';
-  /** The candidate's tag id that contributed. */
-  readonly tagId: string;
-  /** Set when `kind === 'theme-bridge'`. The theme that connects the
-   * candidate's tag to one of the member's tags. */
+  readonly kind: 'direct-tag' | 'theme-bridge' | 'v4-theme' | 'v4-comparable' | 'v4-enum-fit';
+  /** Set for `direct-tag` and `theme-bridge`. The candidate's tag id
+   * that contributed. */
+  readonly tagId?: string;
+  /** Set for `theme-bridge`. The cross-medium theme that bridged. */
   readonly themeId?: string;
-  /** Set when `kind === 'theme-bridge'`. The member's tag(s) that
-   * actually have signal in the bridging theme — surfaces *what
-   * connection* the bridge is exposing, not just "some bridge happened." */
+  /** Set for `theme-bridge`. The member's tag(s) that supply signal to
+   * the bridging theme. */
   readonly bridgedFromTagIds?: ReadonlyArray<string>;
-  /** Raw score contribution from this tag. Used for sorting reasons
-   * within a member's explanation (top reasons first). Same scale as
-   * the underlying recommendForUser scores — comparable across reasons
-   * for the same member only. */
+  /** Set for `v4-theme`. The closed-vocab theme slug. */
+  readonly themeSlug?: string;
+  /** Set for `v4-comparable`. The titleId at the other end of the edge —
+   * for `outbound` direction it's a title the candidate is comparable
+   * TO; for `inbound` it's a title the candidate is comparable FROM. */
+  readonly comparableTitleId?: string;
+  /** Set for `v4-comparable`. Which way the edge runs. */
+  readonly comparableDirection?: 'inbound' | 'outbound';
+  /** Set for `v4-comparable`. The LLM's rank order (0-4, lower = stronger). */
+  readonly comparablePosition?: number;
+  /** Set for `v4-enum-fit`. Which enum field matched. */
+  readonly enumField?: 'mode' | 'engagement' | 'stakes';
+  /** Set for `v4-enum-fit`. The candidate's enum value (e.g. 'deconstructs'). */
+  readonly enumValue?: string;
+  /** Raw score contribution. Same units as recommendForUser scores —
+   * comparable across reasons for the same member only. */
   readonly contribution: number;
 }
 
@@ -78,17 +106,33 @@ export interface RecExplanation {
  * contribution descending — top reasons first. The caller slices to
  * top-N for display.
  *
- * Pure: no DB, no formatting. Web app resolves tagId/themeId to
- * display names via its own queries.
+ * Pure: no DB, no formatting. Web app resolves tagId/themeId/themeSlug
+ * to display names via its own queries.
+ *
+ * V4 reasons (`v4-theme`, `v4-comparable`, `v4-enum-fit`) are appended
+ * to the V1 reason list and sorted together by contribution. When V4
+ * has no signal (or `v4` is undefined), the function reduces to the V1
+ * tag-overlap + cross-medium-bridge explanation exactly.
  */
 export function explainRecommendation(
   taste: UserTasteVector,
   candidate: TitleTagSet,
   themeMembership: ReadonlyArray<TagThemeMembership> = [],
+  v4?: V4RecInputs,
 ): ExplanationReason[] {
   const tagThemes = buildTagThemeIndex(themeMembership);
   const tasteTheme = buildTasteTheme(taste, tagThemes);
-  return explainCandidateScore(taste, candidate, tagThemes, tasteTheme);
+  const v1Reasons = explainCandidateScore(taste, candidate, tagThemes, tasteTheme);
+  if (!v4) return v1Reasons;
+  const edgeIndex = buildComparableEdgeIndex(v4.comparableEdges);
+  const v4Reasons = v4ScoreBreakdown(
+    candidate.titleId,
+    v4.taste,
+    v4.candidateDescriptors.get(candidate.titleId),
+    v4.userRatings,
+    edgeIndex,
+  );
+  return [...v1Reasons, ...v4Reasons].sort((a, b) => b.contribution - a.contribution);
 }
 
 /** Per-member breakdown variant of scoreCandidate — accumulates reasons
@@ -284,9 +328,22 @@ export function formatRecExplanation(
   }
 
   const perMember = explanation.perMember.map((member) => {
-    const top = member.reasons.slice(0, 2).map((r) => {
-      if (r.kind === 'direct-tag') return tagName(r.tagId);
-      return `${themeName(r.themeId!)} (via ${tagName((r.bridgedFromTagIds ?? [])[0] ?? r.tagId)})`;
+    // Pick V1 reasons first (direct-tag / theme-bridge) for the
+    // formatter's copy templates — V4 reasons need V4-specific copy
+    // that this default formatter doesn't carry (no name maps for V4
+    // theme labels or comparable-title titles). Web app's own formatter
+    // can pull V4 copy in when needed.
+    const v1Reasons = member.reasons.filter(
+      (r) => r.kind === 'direct-tag' || r.kind === 'theme-bridge',
+    );
+    const top = v1Reasons.slice(0, 2).map((r) => {
+      if (r.kind === 'direct-tag' && r.tagId) return tagName(r.tagId);
+      if (r.kind === 'theme-bridge' && r.themeId) {
+        const bridgeTag = (r.bridgedFromTagIds ?? [])[0];
+        const viaName = bridgeTag ? tagName(bridgeTag) : r.tagId ? tagName(r.tagId) : '?';
+        return `${themeName(r.themeId)} (via ${viaName})`;
+      }
+      return '?';
     });
     const reasonText = top.length > 0 ? top.join(', ') : '—';
     return `${member.userId}: ${reasonText} — ${member.normalizedScore.toFixed(2)}`;
