@@ -1,13 +1,17 @@
-import { eq, inArray, notInArray } from 'drizzle-orm';
+import { eq, inArray, isNotNull, notInArray } from 'drizzle-orm';
 import { cron } from 'inngest';
 import {
+  buildV4TasteVector,
   explainRecommendation,
   extractTasteVector,
   recommendForUser,
   type AnchorPick,
+  type ComparableEdge,
   type ExplanationReason,
   type RatedTitle,
   type TagThemeMembership,
+  type V4Descriptor,
+  type V4RecInputs,
 } from '@helpme2c/ml';
 import { db } from '@/server/db';
 import {
@@ -15,8 +19,11 @@ import {
   tags,
   tagThemes,
   themes,
+  titleComparableTitles,
+  titleDescriptors,
   titles,
   titleTags,
+  titleThemes,
   userRecommendations,
   users,
   watchEntries,
@@ -282,7 +289,128 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
   const themeMembership: TagThemeMembership[] = themeRows;
 
   const taste = extractTasteVector({ anchors, ratings }, userTitles);
-  const recs = recommendForUser(taste, candidates, REC_LIMIT, themeMembership);
+
+  // ---------------------------------------------------------------------
+  // V4 content-descriptor inputs — see ADR-0027 §what-we-chose. Wired in
+  // additively: if V4 data hasn't been extracted yet for a title, that
+  // title contributes 0 to V4 scoring and the V1 tag-overlap path still
+  // runs normally. Absence of any V4 data → recommendForUser reduces to
+  // V1 behaviour exactly.
+  //
+  // Three fetches:
+  //   1. title_descriptors for user's rated/anchor titles (for taste vec)
+  //   2. title_descriptors for candidates (for per-candidate scoring)
+  //   3. resolved-FK comparable edges across rated + candidate set
+  //
+  // Phase 1A scale (~3k titles, ~15k comparable edges total) means we
+  // fetch broadly and filter client-side. At larger scale, narrow the
+  // edges fetch to only edges touching the user's titles + candidates.
+  // ---------------------------------------------------------------------
+
+  const v4TitleIds = Array.from(
+    new Set([...franchiseRows.map((f) => f.representativeTitleId), ...candidateTitleIds]),
+  );
+
+  // Scoring needs only the enum + theme fields; the open-vocab arrays
+  // (viewer_pleasures, tone, subtextual_themes) are stored but not
+  // consumed until Phase 2 embedding scoring (ADR-0027 §what-we-chose).
+  const v4DescriptorRows =
+    v4TitleIds.length > 0
+      ? await db
+          .select({
+            titleId: titleDescriptors.titleId,
+            narrativeMode: titleDescriptors.narrativeMode,
+            engagementLevel: titleDescriptors.engagementLevel,
+            stakesScale: titleDescriptors.stakesScale,
+          })
+          .from(titleDescriptors)
+          .where(inArray(titleDescriptors.titleId, v4TitleIds))
+      : [];
+
+  // V4 themes live in the existing title_themes table (re-extracted by
+  // the V4 pipeline with prompt_version='v4.0'). Fetch in the same window
+  // so we can build the V4Descriptor for each title.
+  const v4ThemeRows =
+    v4TitleIds.length > 0
+      ? await db
+          .select({
+            titleId: titleThemes.titleId,
+            slug: titleThemes.themeSlug,
+            confidence: titleThemes.confidence,
+          })
+          .from(titleThemes)
+          .where(inArray(titleThemes.titleId, v4TitleIds))
+      : [];
+
+  const themesByTitle = new Map<string, Array<{ slug: string; confidence: number }>>();
+  for (const r of v4ThemeRows) {
+    let arr = themesByTitle.get(r.titleId);
+    if (!arr) {
+      arr = [];
+      themesByTitle.set(r.titleId, arr);
+    }
+    arr.push({ slug: r.slug, confidence: r.confidence });
+  }
+
+  const candidateDescriptors = new Map<string, V4Descriptor>();
+  const userDescriptors = new Map<string, V4Descriptor>();
+  for (const d of v4DescriptorRows) {
+    const descriptor: V4Descriptor = {
+      themes: themesByTitle.get(d.titleId) ?? [],
+      narrativeMode: d.narrativeMode,
+      engagementLevel: d.engagementLevel,
+      stakesScale: d.stakesScale,
+    };
+    candidateDescriptors.set(d.titleId, descriptor);
+    userDescriptors.set(d.titleId, descriptor);
+  }
+
+  // Resolved-FK edges only — unresolved strings contribute nothing per
+  // ADR-0027. Pull all; the edge index in packages/ml is O(degree) per
+  // candidate so the candidate-set filter happens implicitly at scoring.
+  const v4EdgeRows = await db
+    .select({
+      fromId: titleComparableTitles.titleId,
+      toId: titleComparableTitles.referencedTitleId,
+      position: titleComparableTitles.position,
+    })
+    .from(titleComparableTitles)
+    .where(isNotNull(titleComparableTitles.referencedTitleId));
+
+  const comparableEdges: ComparableEdge[] = v4EdgeRows
+    .filter((e): e is { fromId: string; toId: string; position: number } => e.toId !== null)
+    .map((e) => ({ fromTitleId: e.fromId, toTitleId: e.toId, position: e.position }));
+
+  // Rating deltas per ADR-0024 bipolar mapping. Anchors are implicit at
+  // delta=+1.0 because they appear in franchiseRows with meanRating≥9
+  // → (9 - 5.5) / 4.5 ≈ 0.78, which is sub-1.0. Bump anchors explicitly
+  // to +1.0 to match the V1 ANCHOR_CONTRIBUTION semantics.
+  const userRatings = new Map<string, number>();
+  for (const f of franchiseRows) {
+    userRatings.set(f.representativeTitleId, (f.meanRating - 5.5) / 4.5);
+  }
+  for (const a of anchors) {
+    userRatings.set(a.titleId, 1.0);
+  }
+
+  const v4Taste = buildV4TasteVector({ anchors, ratings }, userDescriptors);
+
+  // Only pass v4 if there's meaningful signal — empty taste vector means
+  // V4 extraction hasn't run yet or the user's titles all lack descriptors.
+  // In that case skip the v4 path and let V1 carry the load.
+  const v4Active =
+    v4Taste.themesByWeight.size > 0 || v4Taste.modePref.size > 0 || candidateDescriptors.size > 0;
+
+  const v4Inputs: V4RecInputs | undefined = v4Active
+    ? {
+        taste: v4Taste,
+        candidateDescriptors,
+        comparableEdges,
+        userRatings,
+      }
+    : undefined;
+
+  const recs = recommendForUser(taste, candidates, REC_LIMIT, themeMembership, v4Inputs);
 
   // Resolve tag + theme names for the explain pass. Both tables are
   // small (~few hundred rows each); single SELECT per cron run is
