@@ -74,6 +74,7 @@ Group by package within the monorepo (root, then per-app, per-package).
 
 - **drizzle-orm** *(^0.45.2)* — ORM. ADR-0019. TypeScript-native schema + query builder; no codegen step. Used with the Neon serverless adapter for all DB access from tRPC procedures.
 - **@neondatabase/serverless** *(^1.1.0)* — Neon's serverless Postgres driver. ADR-0019. Required adapter for Drizzle to connect to Neon without traditional TCP connection-pool issues in serverless/edge environments.
+- **@anthropic-ai/sdk** *(^0.96.0)* — Anthropic API SDK. Used by `apps/web/src/server/themes/extract.ts` (shared by the standalone script and the `extract-themes` Inngest function) to derive thematic descriptors per title from synopses via Claude Haiku 4.5 with prompt caching on the controlled-vocabulary system prompt. The output replaces surface-level demographic tags ("Male Protagonist", "Shounen") as the source of "Why this rec?" copy. Direct SDK chosen over Vercel AI Gateway because this is bulk batch work, not request-time inference — no need for gateway-side observability/fallbacks.
 
 **Dev:**
 
