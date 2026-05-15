@@ -1,18 +1,24 @@
-import { and, eq, desc } from 'drizzle-orm';
+import { and, eq, desc, inArray, notInArray, sql } from 'drizzle-orm';
 import { headers } from 'next/headers';
 import Image from 'next/image';
 import { notFound, redirect } from 'next/navigation';
 import { auth } from '@clerk/nextjs/server';
 import { z } from 'zod';
+import { findCrossMediumBridges, type TitleTagSet } from '@helpme2c/ml';
 import { db } from '@/server/db';
 import {
   streamingAvailability,
+  tagThemes,
   tags,
+  themes,
   titleTags,
   titles,
   users,
   watchEntries,
 } from '@/server/schema';
+import { dedupeByFranchise, franchiseKey } from '@/server/lib/franchise';
+import { groupTagsIntoTitleSets } from '@/inngest/lib/group-tags';
+import { BridgeCard } from '@/components/bridge-card';
 import { PreviewOverlay } from '@/components/preview-overlay';
 import { TitleDetailAddButton } from '@/components/title-detail-add-button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -179,6 +185,146 @@ export default async function TitleDetailPage({ params }: PageProps) {
     .where(and(eq(users.clerkId, clerkUserId), eq(watchEntries.titleId, id)))
     .limit(1);
 
+  // Theme-similarity bridges. Per user feedback 2026-05-14, we DROPPED
+  // the original "anime ↔ live-action only" framing — it set an
+  // expectation the data couldn't fulfill. The valuable thing is
+  // "more shows with the same themes" regardless of medium.
+  //
+  // Candidate pool exclusions:
+  //   - the source title itself
+  //   - OTHER seasons of the same franchise (Jujutsu Kaisen S3's page
+  //     shouldn't suggest JJK S1 as a "similar themes" rec — same show)
+  //   - titles the current user has already touched (watching, planned,
+  //     completed, dropped — anything in watch_entries). No point
+  //     suggesting something they already have on their list.
+  const sourceFranchiseKey = franchiseKey(title.title);
+
+  // Find every title in the source's franchise. Pre-filter via LIKE
+  // narrows the catalog scan; JS franchiseKey check is authoritative.
+  const escapedKey = sourceFranchiseKey.replace(/[%_\\]/g, (c) => '\\' + c);
+  const sameFranchiseCandidates = await db
+    .select({ id: titles.id, title: titles.title })
+    .from(titles)
+    .where(sql`LOWER(${titles.title}) LIKE ${`${escapedKey}%`}`);
+  const sameFranchiseIds = sameFranchiseCandidates
+    .filter((t) => franchiseKey(t.title) === sourceFranchiseKey)
+    .map((t) => t.id);
+
+  // Find every title the current user has touched.
+  const userTouchedRows = await db
+    .select({ titleId: watchEntries.titleId })
+    .from(watchEntries)
+    .innerJoin(users, eq(watchEntries.userId, users.id))
+    .where(eq(users.clerkId, clerkUserId));
+  const userTouchedIds = userTouchedRows.map((r) => r.titleId);
+
+  const excludedIds = Array.from(new Set([id, ...sameFranchiseIds, ...userTouchedIds]));
+
+  const [sourceTagRows, candidateTagRows, themeRows] = await Promise.all([
+    db
+      .select({
+        titleId: titleTags.titleId,
+        tagId: titleTags.tagId,
+        weight: titleTags.weight,
+      })
+      .from(titleTags)
+      .where(eq(titleTags.titleId, id)),
+    db
+      .select({
+        titleId: titleTags.titleId,
+        tagId: titleTags.tagId,
+        weight: titleTags.weight,
+      })
+      .from(titleTags)
+      .innerJoin(titles, eq(titleTags.titleId, titles.id))
+      .where(notInArray(titles.id, excludedIds)),
+    db
+      .select({
+        tagId: tagThemes.tagId,
+        themeId: tagThemes.themeId,
+        strength: tagThemes.strength,
+      })
+      .from(tagThemes),
+  ]);
+
+  const sourceTitleTagSet: TitleTagSet | null =
+    sourceTagRows.length === 0
+      ? null
+      : { titleId: id, tags: sourceTagRows.map((r) => ({ tagId: r.tagId, weight: r.weight })) };
+
+  // Overfetch 3× then collapse seasons of the same franchise. Without
+  // this, "Attack on Titan", "AoT Season 2", "AoT Final Season" all
+  // place separately and burn slots on the 6-card grid. Specific-season
+  // bridges are still possible if the theme overlap is strong enough on
+  // a specific season but not others — rare in practice.
+  const BRIDGE_DISPLAY_LIMIT = 6;
+  const rawBridges = sourceTitleTagSet
+    ? findCrossMediumBridges(
+        sourceTitleTagSet,
+        groupTagsIntoTitleSets(candidateTagRows),
+        themeRows,
+        BRIDGE_DISPLAY_LIMIT * 3,
+      )
+    : [];
+
+  // Fetch display metadata for the overfetched set so we have title
+  // text for franchise dedup before slicing to the display limit.
+  const rawBridgeTitleIds = rawBridges.map((b) => b.titleId);
+  const rawBridgeTitleRows =
+    rawBridgeTitleIds.length > 0
+      ? await db
+          .select({
+            id: titles.id,
+            title: titles.title,
+            mediaType: titles.mediaType,
+            releaseYear: titles.releaseYear,
+            posterUrl: titles.posterUrl,
+            trailerProvider: titles.trailerProvider,
+            trailerVideoId: titles.trailerVideoId,
+          })
+          .from(titles)
+          .where(inArray(titles.id, rawBridgeTitleIds))
+      : [];
+  const rawBridgeTitleById = new Map(rawBridgeTitleRows.map((t) => [t.id, t]));
+
+  // Join bridge scores with title metadata, then dedup by franchise
+  // and slice to the display limit. Theme info is attached separately
+  // below (themeName lookup only needs the deduped survivors).
+  const joinedBridges = rawBridges.flatMap((b) => {
+    const meta = rawBridgeTitleById.get(b.titleId);
+    if (!meta) return [];
+    return [{ ...meta, bridgedThemes: b.bridgedThemes }];
+  });
+  const bridges = dedupeByFranchise(joinedBridges).slice(0, BRIDGE_DISPLAY_LIMIT);
+
+  // Theme names for the "Shares the X theme" subtitle, one per card.
+  const bridgeThemeIds = Array.from(
+    new Set(bridges.flatMap((b) => b.bridgedThemes.slice(0, 1).map((t) => t.themeId))),
+  );
+
+  const bridgeThemeRows =
+    bridgeThemeIds.length > 0
+      ? await db
+          .select({ id: themes.id, name: themes.name })
+          .from(themes)
+          .where(inArray(themes.id, bridgeThemeIds))
+      : [];
+  const bridgeThemeNameById = new Map(bridgeThemeRows.map((t) => [t.id, t.name]));
+
+  const bridgeCards = bridges.map((b) => {
+    const topTheme = b.bridgedThemes[0];
+    const themeName = topTheme ? bridgeThemeNameById.get(topTheme.themeId) : null;
+    return {
+      id: b.id,
+      title: b.title,
+      mediaType: b.mediaType,
+      posterUrl: b.posterUrl,
+      trailerProvider: b.trailerProvider,
+      trailerVideoId: b.trailerVideoId,
+      themeName,
+    };
+  });
+
   const yearLabel =
     title.releaseYear && title.endYear
       ? `${title.releaseYear}–${title.endYear}`
@@ -265,6 +411,30 @@ export default async function TitleDetailPage({ params }: PageProps) {
                 </span>
               ))}
             </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {bridgeCards.length > 0 ? (
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle>More shows with the same themes</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+              {bridgeCards.map((b) => (
+                <BridgeCard
+                  key={b.id}
+                  id={b.id}
+                  title={b.title}
+                  mediaType={b.mediaType}
+                  posterUrl={b.posterUrl}
+                  trailerProvider={b.trailerProvider}
+                  trailerVideoId={b.trailerVideoId}
+                  themeName={b.themeName ?? null}
+                />
+              ))}
+            </ul>
           </CardContent>
         </Card>
       ) : null}
