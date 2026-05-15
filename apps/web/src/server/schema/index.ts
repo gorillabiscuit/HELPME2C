@@ -4,4 +4,5 @@ export * from './streaming';
 export * from './watch';
 export * from './recommendations';
 export * from './themes';
+export * from './title-themes';
 export * from './groups';
