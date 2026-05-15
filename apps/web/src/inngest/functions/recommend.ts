@@ -32,31 +32,90 @@ import { inngest, recommendAllUsersEvent, recommendUserEvent } from '../client';
 // a reason subtitle. Cheap to extend later if needed.
 const EXPLAIN_DEPTH = 50;
 
+// Tag info loaded per cron run — name + AniList category (null for TMDB).
+interface TagInfo {
+  readonly name: string;
+  readonly category: string | null;
+}
+
+// Tag categories that describe cast composition / demographic targeting
+// rather than thematic content. Picking one of these as the headline
+// reason produces copy like "Because you like male protagonist" — true
+// in the technical sense, useless and patronising as a recommendation
+// rationale. Skipped when looking for the first usable reason.
+//
+// AniList's taxonomy puts cast-makeup tags under "Cast-*", marketing
+// demographic targeting under "Demographic", and adult-content flags
+// under "Sexual Content" — none of which describe what a show is *about*.
+// "Technical" is animation/production metadata.
+const BLOCKED_TAG_CATEGORIES = new Set([
+  'Cast-Traits',
+  'Cast-Main Cast',
+  'Demographic',
+  'Sexual Content',
+  'Technical',
+]);
+
+// Specific tag names to skip regardless of category. Belt-and-braces for
+// tags AniList didn't categorise tightly (Shounen/Seinen are marketed as
+// demographic buckets) plus generic TMDB keywords ("anime") that match
+// 410+ titles and convey no taste signal.
+const BLOCKED_TAG_NAMES = new Set([
+  'Male Protagonist',
+  'Female Protagonist',
+  'Heterosexual',
+  'Ensemble Cast',
+  'Primarily Teen Cast',
+  'Primarily Adult Cast',
+  'Primarily Male Cast',
+  'Primarily Female Cast',
+  'Shounen',
+  'Shoujo',
+  'Seinen',
+  'Josei',
+  'Kids',
+  'anime',
+  'animation',
+]);
+
+function isReasonUsable(reason: ExplanationReason, tagInfo: ReadonlyMap<string, TagInfo>): boolean {
+  const info = tagInfo.get(reason.tagId);
+  if (!info) return false;
+  if (info.category && BLOCKED_TAG_CATEGORIES.has(info.category)) return false;
+  if (BLOCKED_TAG_NAMES.has(info.name)) return false;
+  return true;
+}
+
 // Build a one-line "Why this rec?" string from the engine's top
 // ExplanationReason for a single rec. Returns null when no reason
 // crosses a meaningful contribution floor (avoids surfacing noise).
 //
-// Tag names come from the `tags` table, theme names from the `themes`
-// table; both Maps are passed in (built once per cron run).
+// Walks the reason list in contribution order and skips cast/demographic
+// reasons (see BLOCKED_TAG_CATEGORIES / BLOCKED_TAG_NAMES) — those are
+// technically-correct-but-insulting headlines like "Because you like
+// male protagonist". If every reason is blocked, returns null and the UI
+// hides the subtitle rather than surfacing noise.
 function formatReasonHint(
   reasons: ReadonlyArray<ExplanationReason>,
-  tagNames: ReadonlyMap<string, string>,
+  tagInfo: ReadonlyMap<string, TagInfo>,
   themeNames: ReadonlyMap<string, string>,
 ): string | null {
-  if (reasons.length === 0) return null;
-  const top = reasons[0];
-  if (!top) return null;
-  if (top.kind === 'direct-tag') {
-    const name = tagNames.get(top.tagId);
-    if (!name) return null;
-    return `Because you like ${name.toLowerCase()}`;
-  }
-  // theme-bridge — surface the theme name + (optionally) what the
-  // user's interest is that bridges into it.
-  if (top.themeId) {
-    const themeName = themeNames.get(top.themeId);
-    if (!themeName) return null;
-    return `Matches your ${themeName.toLowerCase()} interest`;
+  for (const reason of reasons) {
+    if (reason.kind === 'direct-tag') {
+      if (!isReasonUsable(reason, tagInfo)) continue;
+      const info = tagInfo.get(reason.tagId);
+      if (!info) continue;
+      return `Because you like ${info.name.toLowerCase()}`;
+    }
+    // theme-bridge — surface the theme name + (optionally) what the
+    // user's interest is that bridges into it. Theme bridges go through
+    // editorial mappings (tagThemes) so they're already curated; just
+    // surface the theme name.
+    if (reason.themeId) {
+      const themeName = themeNames.get(reason.themeId);
+      if (!themeName) continue;
+      return `Matches your ${themeName.toLowerCase()} interest`;
+    }
   }
   return null;
 }
@@ -241,13 +300,16 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
   // list either way.
   for (const tagId of taste.keys()) referencedTagIds.add(tagId);
 
-  const tagNames = new Map<string, string>();
+  // Load name + category so formatReasonHint can skip cast/demographic
+  // tags. Category is null for TMDB rows; the blocklist falls back to a
+  // name-based filter for those.
+  const tagInfo = new Map<string, TagInfo>();
   if (referencedTagIds.size > 0) {
     const tagRows = await db
-      .select({ id: tags.id, name: tags.name })
+      .select({ id: tags.id, name: tags.name, category: tags.category })
       .from(tags)
       .where(inArray(tags.id, Array.from(referencedTagIds)));
-    for (const t of tagRows) tagNames.set(t.id, t.name);
+    for (const t of tagRows) tagInfo.set(t.id, { name: t.name, category: t.category });
   }
 
   const themeNames = new Map<string, string>();
@@ -261,7 +323,7 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
     const candidate = candidatesById.get(r.titleId);
     if (!candidate) return { titleId: r.titleId, score: r.score, reasonHint: null };
     const reasons = explainRecommendation(taste, candidate, themeMembership);
-    const reasonHint = formatReasonHint(reasons, tagNames, themeNames);
+    const reasonHint = formatReasonHint(reasons, tagInfo, themeNames);
     return { titleId: r.titleId, score: r.score, reasonHint };
   });
 
