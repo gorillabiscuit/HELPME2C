@@ -9,7 +9,14 @@
 // internal to the package, callers use recommendForUser /
 // recommendForGroup / explainGroupRecommendation.
 
-import type { TagThemeMembership, TitleTagSet, UserTasteVector } from './recommendation';
+import type {
+  ComparableEdge,
+  TagThemeMembership,
+  TitleTagSet,
+  UserTasteVector,
+  V4Descriptor,
+  V4TasteVector,
+} from './recommendation';
 
 /** tagId → list of (themeId, strength) memberships. Built once per
  * scoring call so per-candidate iteration is O(1) per tag. */
@@ -102,6 +109,167 @@ export function scoreCandidate(
       if (themeWeight === undefined) continue;
       score += themeWeight * tag.weight * (m.strength / 100);
     }
+  }
+  return score;
+}
+
+// ---------------------------------------------------------------------------
+// V4 scoring components — per ADR-0027.
+//
+// Three components additive to the V1 baseTagScore:
+//   - themeScore     — user's V4-theme taste vector × candidate's themes,
+//                      weighted by per-theme confidence.
+//   - comparableScore — bidirectional walk on the resolved comparable graph,
+//                      weighted by rating valence × position weight.
+//   - enumFitScore   — user's preference distribution × candidate's enum value,
+//                      summed across narrative_mode + engagement_level
+//                      + stakes_scale.
+//
+// Initial weights are strawmen per ADR-0027 §what-we-chose. Tunable
+// constants here. Reranking later may add normalisation or rank fusion;
+// for Phase 1A linear combination is the debuggable starting point.
+// ---------------------------------------------------------------------------
+
+/** ADR-0027 weight β — V4 theme overlap (parity with base; this is the
+ * moat signal). */
+export const V4_THEME_WEIGHT = 1.0;
+/** ADR-0027 weight γ — comparable-titles graph (powerful but resolution
+ * rate is unknown until V4 runs at scale). */
+export const V4_COMPARABLE_WEIGHT = 0.8;
+/** ADR-0027 weight δ — enum fit (three coarse signals; sum earns the
+ * small weight). */
+export const V4_ENUM_WEIGHT = 0.3;
+
+/** Position weights for the comparable-titles graph. Position 0 (top
+ * comparable per the LLM's rank) carries full weight; later positions
+ * decay linearly. This matches the LLM's intent that earlier-ranked
+ * comparables are stronger matches. Indices 0..4 covered explicitly;
+ * out-of-range positions fall back to the last weight. */
+const COMPARABLE_POSITION_WEIGHTS: ReadonlyArray<number> = [1.0, 0.85, 0.7, 0.55, 0.4];
+
+function positionWeight(position: number): number {
+  if (position < 0) return COMPARABLE_POSITION_WEIGHTS[0]!;
+  if (position >= COMPARABLE_POSITION_WEIGHTS.length) {
+    return COMPARABLE_POSITION_WEIGHTS[COMPARABLE_POSITION_WEIGHTS.length - 1]!;
+  }
+  return COMPARABLE_POSITION_WEIGHTS[position]!;
+}
+
+/** Comparable-graph edge index: forward (from→edges) and reverse
+ * (to→edges) for O(degree) lookups at score time. */
+export interface ComparableEdgeIndex {
+  readonly forward: ReadonlyMap<string, ReadonlyArray<ComparableEdge>>;
+  readonly reverse: ReadonlyMap<string, ReadonlyArray<ComparableEdge>>;
+}
+
+/** Build the forward + reverse index for the comparable graph. Called
+ * once per recommendForUser / recommendForGroup call. */
+export function buildComparableEdgeIndex(
+  edges: ReadonlyArray<ComparableEdge>,
+): ComparableEdgeIndex {
+  const forward = new Map<string, ComparableEdge[]>();
+  const reverse = new Map<string, ComparableEdge[]>();
+  for (const e of edges) {
+    let f = forward.get(e.fromTitleId);
+    if (!f) {
+      f = [];
+      forward.set(e.fromTitleId, f);
+    }
+    f.push(e);
+    let r = reverse.get(e.toTitleId);
+    if (!r) {
+      r = [];
+      reverse.set(e.toTitleId, r);
+    }
+    r.push(e);
+  }
+  return { forward, reverse };
+}
+
+/** Sum of (user theme weight × candidate theme confidence) over the
+ * candidate's V4 themes. Negative user weights (from disliked titles
+ * carrying this theme) actively subtract. */
+function v4ThemeScore(v4Taste: V4TasteVector, descriptor: V4Descriptor): number {
+  let score = 0;
+  for (const t of descriptor.themes) {
+    const userWeight = v4Taste.themesByWeight.get(t.slug);
+    if (userWeight === undefined) continue;
+    score += userWeight * t.confidence;
+  }
+  return score;
+}
+
+/** Bidirectional comparable-graph score. For each edge connecting the
+ * candidate to a title the user has rated, contribute
+ *   rating × positionWeight(edge.position)
+ * Rating valence (positive vs negative) flows through — a user's
+ * dislike of A penalises A's comparables. */
+function v4ComparableScore(
+  candidateTitleId: string,
+  edgeIndex: ComparableEdgeIndex,
+  userRatings: ReadonlyMap<string, number>,
+): number {
+  let score = 0;
+  // Reverse: edges where toTitleId = candidate. fromTitleId may be rated.
+  const inbound = edgeIndex.reverse.get(candidateTitleId);
+  if (inbound) {
+    for (const e of inbound) {
+      const rating = userRatings.get(e.fromTitleId);
+      if (rating === undefined || rating === 0) continue;
+      score += rating * positionWeight(e.position);
+    }
+  }
+  // Forward: edges where fromTitleId = candidate. toTitleId may be rated.
+  const outbound = edgeIndex.forward.get(candidateTitleId);
+  if (outbound) {
+    for (const e of outbound) {
+      const rating = userRatings.get(e.toTitleId);
+      if (rating === undefined || rating === 0) continue;
+      score += rating * positionWeight(e.position);
+    }
+  }
+  return score;
+}
+
+/** Sum of user-preference for the candidate's enum value across the
+ * three enum fields. Each contributes the user's accumulated weight for
+ * that value. */
+function v4EnumFitScore(v4Taste: V4TasteVector, descriptor: V4Descriptor): number {
+  return (
+    (v4Taste.modePref.get(descriptor.narrativeMode) ?? 0) +
+    (v4Taste.engagementPref.get(descriptor.engagementLevel) ?? 0) +
+    (v4Taste.stakesPref.get(descriptor.stakesScale) ?? 0)
+  );
+}
+
+/**
+ * Total V4 contribution for one candidate. Composes:
+ *
+ *   v4Score(c) = β × themeScore(c)        if descriptor present, else 0
+ *              + γ × comparableScore(c)    if edges + ratings present
+ *              + δ × enumFitScore(c)       if descriptor present, else 0
+ *
+ * Returns 0 when v4 is inactive (no taste or no inputs) — the V1 score
+ * is unchanged in that case.
+ *
+ * Note: comparableScore fires even when the candidate has no V4
+ * descriptor (the edges are title-id-keyed, descriptor-independent).
+ * theme + enum-fit need the descriptor to compute.
+ */
+export function v4Score(
+  candidateTitleId: string,
+  v4Taste: V4TasteVector | undefined,
+  descriptor: V4Descriptor | undefined,
+  userRatings: ReadonlyMap<string, number> | undefined,
+  edgeIndex: ComparableEdgeIndex | undefined,
+): number {
+  let score = 0;
+  if (v4Taste && descriptor) {
+    score += V4_THEME_WEIGHT * v4ThemeScore(v4Taste, descriptor);
+    score += V4_ENUM_WEIGHT * v4EnumFitScore(v4Taste, descriptor);
+  }
+  if (edgeIndex && userRatings && userRatings.size > 0) {
+    score += V4_COMPARABLE_WEIGHT * v4ComparableScore(candidateTitleId, edgeIndex, userRatings);
   }
   return score;
 }
