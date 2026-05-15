@@ -1,6 +1,6 @@
-import { and, eq, ilike, or, sql } from 'drizzle-orm';
+import { and, eq, ilike, notInArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { mediaTypeEnum, titles } from '../schema';
+import { mediaTypeEnum, titles, users, watchEntries } from '../schema';
 import { dedupeByFranchise } from '../lib/franchise';
 import { protectedProcedure, router } from '../trpc';
 
@@ -43,6 +43,11 @@ export const titlesRouter = router({
         .object({
           limit: z.number().int().min(1).max(50).optional().default(16),
           mediaType: mediaTypeSchema.optional(),
+          /** When true, exclude titles already in the user's watch_entries
+           * (any status). Used by the /library Discover view so users don't
+           * see shows they've already rated or planned. Onboarding leaves
+           * this off (new users have no entries anyway). */
+          excludeUserEntries: z.boolean().optional().default(false),
         })
         .optional(),
     )
@@ -75,14 +80,31 @@ export const titlesRouter = router({
         trailerVideoId: titles.trailerVideoId,
       } as const;
 
+      // Build the exclusion list of title IDs the user has already
+      // touched. Only fetched when `excludeUserEntries` is true to
+      // keep the cold-start path (onboarding) cheap.
+      const userTouchedIds = input?.excludeUserEntries
+        ? (
+            await ctx.db
+              .select({ titleId: watchEntries.titleId })
+              .from(watchEntries)
+              .innerJoin(users, eq(watchEntries.userId, users.id))
+              .where(eq(users.clerkId, ctx.userId))
+          ).map((r) => r.titleId)
+        : [];
+      const hasExclusion = userTouchedIds.length > 0;
+
       // Caller specified a single mediaType — stratification doesn't
       // apply, just dedup + cap. Overfetch 3× so dedup has room to find
       // representatives without leaving the grid short.
       if (input?.mediaType) {
+        const whereClause = hasExclusion
+          ? and(eq(titles.mediaType, input.mediaType), notInArray(titles.id, userTouchedIds))
+          : eq(titles.mediaType, input.mediaType);
         const rows = await ctx.db
           .select(projection)
           .from(titles)
-          .where(eq(titles.mediaType, input.mediaType))
+          .where(whereClause)
           .orderBy(sql`${titles.popularityScore} DESC NULLS LAST, ${titles.title} ASC`)
           .limit(limit * 3);
         return dedupeByFranchise(rows).slice(0, limit);
@@ -98,7 +120,11 @@ export const titlesRouter = router({
           ctx.db
             .select(projection)
             .from(titles)
-            .where(eq(titles.mediaType, mt))
+            .where(
+              hasExclusion
+                ? and(eq(titles.mediaType, mt), notInArray(titles.id, userTouchedIds))
+                : eq(titles.mediaType, mt),
+            )
             .orderBy(sql`${titles.popularityScore} DESC NULLS LAST, ${titles.title} ASC`)
             .limit(perType),
         ),

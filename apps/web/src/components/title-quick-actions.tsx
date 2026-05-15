@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bookmark, Check, X } from 'lucide-react';
+import { Bookmark, Check, HelpCircle, X } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
+import { RatingFace } from '@/components/rating-face';
 import { cn } from '@/lib/utils';
 
 type WatchStatus = 'watching' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_watch';
@@ -41,6 +42,14 @@ interface TitleQuickActionsProps {
 //   - Want to watch → tracking + status=plan_to_watch.
 //   - Not interested → records dismissal in rec_feedback so the engine
 //                      suppresses the title; doesn't add a library entry.
+//   - Don't know it → pure client-side dismiss. No mutation, no signal
+//                     recorded — just slides the card out of view so the
+//                     next one takes its place. Distinct from "Not
+//                     interested" (which is negative signal): "Don't
+//                     know it" means the user has no opinion because
+//                     they don't recognise the show. Critical for the
+//                     onboarding flow where forcing a judgment on an
+//                     unfamiliar show was polluting the taste vector.
 //
 // State-aware reflection: if currentState shows the title is already
 // in library with status=completed and a rating, the Watched it button
@@ -87,6 +96,17 @@ export function TitleQuickActions({
 
   const onNotInterested = () => {
     recFeedbackUpsert.mutate({ titleId, dismissed: true });
+  };
+
+  // "Don't know it" records a soft signal on rec_feedback.unfamiliar
+  // (per the schema added 2026-05-15). NOT used for engine exclusion
+  // — the user explicitly wanted these tracked but still surfaceable
+  // for future recs (maybe they'll recognise the title later, or
+  // we'll learn things from the aggregate "X% of users don't know
+  // this show" pattern). The card hides locally via onActionComplete
+  // so the user moves on to the next one.
+  const onDontKnow = () => {
+    recFeedbackUpsert.mutate({ titleId, unfamiliar: true });
   };
 
   const isPending = watchUpsert.isPending || recFeedbackUpsert.isPending;
@@ -151,6 +171,24 @@ export function TitleQuickActions({
           <X className={iconSize} aria-hidden="true" />
           <span>Not interested</span>
         </button>
+        {/* Only render Don't-know-it when the parent has wired
+            onActionComplete — otherwise the click would be a silent
+            no-op (no DB mutation, no card hide). Dashboard rec cards
+            don't currently support per-card hiding so the button stays
+            absent there. Onboarding/Discover/Bridges all pass
+            onActionComplete and get the button. */}
+        {onActionComplete ? (
+          <button
+            type="button"
+            onClick={onDontKnow}
+            disabled={isPending}
+            title="Skip this one — show me a different show. No signal recorded."
+            className={cn(buttonBase, offState)}
+          >
+            <HelpCircle className={iconSize} aria-hidden="true" />
+            <span>Don&apos;t know it</span>
+          </button>
+        ) : null}
       </div>
 
       {ratingOpen ? (
@@ -158,7 +196,7 @@ export function TitleQuickActions({
           <p className="mb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
             {existingRating !== null
               ? `Currently ${existingRating}/10 — change it?`
-              : 'How would you rate it? (10 = loved it · 1 = hated it)'}
+              : 'How would you rate it? 1 = hated · 10 = loved'}
           </p>
           <div className="flex flex-wrap items-center gap-1">
             {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
@@ -168,20 +206,21 @@ export function TitleQuickActions({
                 onClick={() => onWatchedWithRating(n)}
                 disabled={isPending}
                 className={cn(
-                  'h-7 w-7 rounded-md border text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-50',
+                  'flex h-12 w-9 flex-col items-center justify-center gap-0.5 rounded-md border text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-50',
                   n === existingRating
                     ? 'border-foreground bg-foreground text-primary-foreground'
                     : 'border-border bg-white text-foreground hover:bg-foreground hover:text-primary-foreground',
                 )}
               >
-                {n}
+                <span>{n}</span>
+                <RatingFace rating={n} size="sm" inheritColor={n === existingRating} />
               </button>
             ))}
             <button
               type="button"
               onClick={() => onWatchedWithRating(null)}
               disabled={isPending}
-              className="ml-1 rounded-md border border-border bg-white px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
+              className="ml-1 self-stretch rounded-md border border-border bg-white px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
             >
               Skip rating
             </button>

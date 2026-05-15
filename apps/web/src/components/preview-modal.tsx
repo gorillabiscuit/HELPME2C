@@ -80,10 +80,24 @@ export function PreviewModal({ open, onOpenChange, videoId, titleText }: Preview
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/70 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0" />
+        {/*
+          stopPropagation on both Overlay and Content is required because
+          rec-card posters are wrapped in a Next.js <Link>, and React's
+          synthetic events bubble through the COMPONENT tree even when
+          the Portal moves the modal out of the DOM tree. Without this,
+          clicking the Close button (or backdrop) inside the modal
+          bubbles up to the parent Link and triggers navigation to the
+          title page — the user reported "i close the trailer and it
+          takes me to the title's page instead of staying on recs."
+        */}
+        <DialogPrimitive.Overlay
+          onClick={(e) => e.stopPropagation()}
+          className="fixed inset-0 z-50 bg-black/70 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0"
+        />
         <DialogPrimitive.Content
           ref={containerRef}
           aria-label={`Preview: ${titleText}`}
+          onClick={(e) => e.stopPropagation()}
           className={cn(
             'fixed z-50 overflow-hidden bg-black shadow-2xl ring-1 ring-white/10',
             isFullscreen

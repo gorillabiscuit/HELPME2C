@@ -38,10 +38,11 @@ export default async function OnboardingPage({ searchParams }: OnboardingPagePro
   ]);
 
   // /onboarding is the first-visit funnel. Returning users who already
-  // have any rated titles get the permanent refine surface at /taste.
+  // have any rated titles get the permanent refine surface — the Ranked
+  // view inside Library (formerly /taste, merged 2026-05-14).
   const hasAnyRating = watchEntries.some(({ entry }) => entry.rating !== null);
   if (hasAnyRating) {
-    redirect('/taste');
+    redirect('/library?view=ranked');
   }
 
   // Pass the full per-title state so TitleQuickActions on each card

@@ -40,15 +40,51 @@ export function franchiseKey(title: string): string {
     const previous = key;
     key = key
       .replace(/\s*\(\d{4}\)$/, '') // " (2023)"
-      .replace(/\s*[:\-–]\s*(?:the\s+)?final\s+(?:season|cour|part)$/i, '') // ": The Final Season", " - Final Cour"
-      .replace(/\s+(?:the\s+)?final\s+(?:season|cour|part)$/i, '') // " The Final Season", " Final Part"
-      .replace(/\s+(?:season|cour|part|s)\s*\d+$/i, '') // " Season 2", " S2", " Part 3", " Cour 1"
-      .replace(/\s+\d+(?:st|nd|rd|th)\s+season$/i, '') // " 2nd Season"
+      // "Final Season" / "Final Cour" / "Final Part" + ANYTHING following.
+      // Catches "The Final Season", "Final Season THE FINAL CHAPTERS",
+      // "Final Season: Subtitle" etc. The \b after the season-word stops
+      // us matching "season" as a prefix of a longer word.
+      .replace(/\s*[:\-–]\s*(?:the\s+)?final\s+(?:season|cour|part)\b.*$/i, '')
+      .replace(/\s+(?:the\s+)?final\s+(?:season|cour|part)\b.*$/i, '')
+      // "Season N" / "Part N" / "Cour N" / "SN" + ANYTHING following.
+      // The trailing `.*$` (after \b) catches subtitles, additional
+      // suffixes like " Part 2", or arc descriptors after the season
+      // identifier — "Attack on Titan Season 3 Part 2", "JJK Season 3:
+      // The Subtitle", "Final Season THE FINAL CHAPTERS" all reduce.
+      .replace(/\s+(?:season|cour|part|s)\s*\d+\b.*$/i, '')
+      .replace(/\s+\d+(?:st|nd|rd|th)\s+season\b.*$/i, '') // " 2nd Season" + anything
       .replace(/\s+(?:ii|iii|iv|v|vi|vii|viii|ix|x)$/i, '') // " II", " III"
       .trim();
     if (key === previous) break;
   }
   return key;
+}
+
+/**
+ * Strip the season/cour/part suffix from a title while preserving the
+ * original casing. Used wherever the franchise NAME (not the SQL/group
+ * key) should be displayed — e.g., the Compare view's "Attack on Titan
+ * Final Season" should display as "Attack on Titan" so the comparison
+ * is franchise-vs-franchise rather than franchise-vs-specific-season.
+ *
+ * Same strip patterns as `franchiseKey`, just without the toLowerCase
+ * step. The regexes are case-insensitive so the strip works either way.
+ */
+export function franchiseDisplayName(title: string): string {
+  let display = title.trim();
+  for (let pass = 0; pass < 6; pass++) {
+    const previous = display;
+    display = display
+      .replace(/\s*\(\d{4}\)$/, '')
+      .replace(/\s*[:\-–]\s*(?:the\s+)?final\s+(?:season|cour|part)\b.*$/i, '')
+      .replace(/\s+(?:the\s+)?final\s+(?:season|cour|part)\b.*$/i, '')
+      .replace(/\s+(?:season|cour|part|s)\s*\d+\b.*$/i, '')
+      .replace(/\s+\d+(?:st|nd|rd|th)\s+season\b.*$/i, '')
+      .replace(/\s+(?:ii|iii|iv|v|vi|vii|viii|ix|x)$/i, '')
+      .trim();
+    if (display === previous) break;
+  }
+  return display;
 }
 
 const ROMAN_TO_INT: Record<string, number> = {
@@ -120,6 +156,87 @@ export function franchiseSpecificity(originalTitle: string, key: string): number
   }
 
   return max;
+}
+
+/**
+ * Group rated entries by franchise and aggregate to one row per franchise.
+ * Used by the rec engine input pipeline (per ADR-0023) so a user with
+ * multiple rated seasons of the same franchise contributes the SAME
+ * signal weight as a user with one rated season.
+ *
+ * Each input row carries a rating and a title text. Output rows carry:
+ *   - `representativeTitleId`: titleId of the entry with the lowest
+ *     `franchiseSpecificity` value in the group (i.e. the canonical
+ *     entry — series entry beats Season 1 beats Season 2 etc).
+ *     Used as the synthetic franchise identifier passed to
+ *     extractTasteVector. Ties on specificity break to the FIRST
+ *     row in input order (mirrors `dedupeByFranchise`).
+ *   - `meanRating`: arithmetic mean of the rated seasons' ratings, no
+ *     rounding. Caller is responsible for any display rounding.
+ *   - `seasonTitleIds`: every titleId in the group, in input order.
+ *     Useful for callers that want to union season tags or correlate
+ *     back to the user's history.
+ *
+ * Result order matches the input order of each franchise's FIRST
+ * appearance. Subsequent rows for an already-seen franchise extend
+ * the existing group rather than create a new one.
+ *
+ * Empty input returns an empty array. Duplicate `titleId` values in
+ * input are NOT deduped — they count toward `meanRating` per occurrence
+ * and appear in `seasonTitleIds` per occurrence; callers should pass
+ * unique titleIds.
+ */
+export interface AggregatedFranchise {
+  readonly representativeTitleId: string;
+  readonly meanRating: number;
+  readonly seasonTitleIds: ReadonlyArray<string>;
+}
+
+export function aggregateByFranchise(
+  rows: ReadonlyArray<{ titleId: string; title: string; rating: number }>,
+): AggregatedFranchise[] {
+  // groups: franchiseKey -> mutable aggregator. Tracks both the best
+  // representative seen so far AND the running rating list for mean.
+  const groups = new Map<
+    string,
+    {
+      representativeTitleId: string;
+      representativeSpecificity: number;
+      ratingSum: number;
+      seasonTitleIds: string[];
+      position: number;
+    }
+  >();
+
+  rows.forEach((row, index) => {
+    const key = franchiseKey(row.title);
+    const specificity = franchiseSpecificity(row.title, key);
+    const existing = groups.get(key);
+    if (!existing) {
+      groups.set(key, {
+        representativeTitleId: row.titleId,
+        representativeSpecificity: specificity,
+        ratingSum: row.rating,
+        seasonTitleIds: [row.titleId],
+        position: index,
+      });
+      return;
+    }
+    existing.ratingSum += row.rating;
+    existing.seasonTitleIds.push(row.titleId);
+    if (specificity < existing.representativeSpecificity) {
+      existing.representativeTitleId = row.titleId;
+      existing.representativeSpecificity = specificity;
+    }
+  });
+
+  return Array.from(groups.values())
+    .sort((a, b) => a.position - b.position)
+    .map((g) => ({
+      representativeTitleId: g.representativeTitleId,
+      meanRating: g.ratingSum / g.seasonTitleIds.length,
+      seasonTitleIds: g.seasonTitleIds,
+    }));
 }
 
 /**

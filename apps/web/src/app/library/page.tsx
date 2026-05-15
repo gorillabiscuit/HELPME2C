@@ -6,6 +6,11 @@ import { appRouter } from '@/server/router';
 import { createContext } from '@/server/trpc';
 import { LibraryEditDialog } from '@/components/library-edit-dialog';
 import { LibraryRemoveButton } from '@/components/library-remove-button';
+import { LibraryRankedView } from '@/components/library-ranked-view';
+import { LibraryCompareView } from '@/components/library-compare-view';
+import { LibraryDiscoverView } from '@/components/library-discover-view';
+import { RatingFace } from '@/components/rating-face';
+import { cn } from '@/lib/utils';
 
 const STATUS_LABEL: Record<string, string> = {
   watching: 'Watching',
@@ -16,10 +21,6 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const KIND_LABEL: Record<string, string> = {
-  // 'anchor' rows are taste-only entries (no library tracking state).
-  // Under the unified-taste model the user thinks of these as
-  // "favourites" — the heart icon in the row's action area is the
-  // primary affordance; this label is a fallback when no status exists.
   anchor: 'Favourite',
   tracking: 'Tracking',
 };
@@ -30,53 +31,159 @@ const MEDIA_TYPE_LABEL: Record<string, string> = {
   anime: 'Anime',
 };
 
-export default async function LibraryPage() {
+type ViewMode = 'all' | 'ranked' | 'compare' | 'discover';
+
+const VIEW_LABEL: Record<ViewMode, string> = {
+  all: 'All',
+  ranked: 'Ranked',
+  compare: 'Compare',
+  discover: 'Discover',
+};
+
+interface LibraryPageProps {
+  searchParams: Promise<{ view?: string; filter?: string; medium?: string }>;
+}
+
+type AllFilter = 'all' | 'watched' | 'unwatched';
+type Medium = 'all' | 'tv' | 'film' | 'anime';
+
+// Library is the unified "your shows" surface. Three view modes:
+//   - all (default): every tracked entry, sorted by recency. Status +
+//     episode progress + rating editable per row.
+//   - ranked: drag-to-reorder rank list (franchise-grouped per ADR-0023)
+//   - compare: pairwise Elo refinement
+//
+// Merged from the separate /taste page on 2026-05-14 — Ranked and Compare
+// used to be tabs on that surface, but the boundary between "my shows"
+// and "my taste profile" leaked an implementation detail into the nav.
+// One surface, three modes.
+export default async function LibraryPage({ searchParams }: LibraryPageProps) {
   // Phase 1A: registered users only per PROJECT.md scope.
   const { userId } = await auth();
   if (!userId) {
     redirect('/');
   }
 
-  const caller = appRouter.createCaller(await createContext());
-  const entries = await caller.watch.list();
+  const params = await searchParams;
+  const view: ViewMode =
+    params.view === 'ranked' || params.view === 'compare' || params.view === 'discover'
+      ? params.view
+      : 'all';
+  const filter: AllFilter =
+    params.filter === 'watched' || params.filter === 'unwatched' ? params.filter : 'all';
+  const medium: Medium =
+    params.medium === 'tv' || params.medium === 'film' || params.medium === 'anime'
+      ? params.medium
+      : 'all';
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
-      <header className="mb-8">
-        <div className="flex items-baseline justify-between gap-3">
-          <h1 className="text-4xl font-semibold tracking-tight">Library</h1>
-          <span className="text-sm text-muted-foreground">
-            {entries.length === 0
-              ? 'No entries yet'
-              : `${entries.length} ${entries.length === 1 ? 'title' : 'titles'}`}
-          </span>
-        </div>
+      <header className="mb-6">
+        <h1 className="text-4xl font-semibold tracking-tight">Library</h1>
         <p className="mt-2 text-base text-text-body">
-          Everything you&apos;re tracking — what you&apos;ve watched, what you&apos;re watching, and
-          what you want to watch next. Ratings here shape your recommendations.
+          {view === 'all'
+            ? 'Every show you’re tracking, sorted by recent activity. Update status, episode progress, or rating per row.'
+            : view === 'ranked'
+              ? 'Your rated shows in preference order. Drag or use the arrows to reorder. Top of the list = strongest taste signal.'
+              : view === 'compare'
+                ? 'Pairwise comparison — pick the show you’d rather watch from each pair. Sharpens your ranking without you having to drag everything yourself.'
+                : 'Browse popular shows and rate the ones you’ve seen. The more you rate, the sharper your recommendations get.'}
         </p>
       </header>
 
+      <ViewTabs current={view} />
+
+      {view === 'all' ? <AllView filter={filter} /> : null}
+      {view === 'ranked' ? <LibraryRankedView mediumFilter={medium} /> : null}
+      {view === 'compare' ? <LibraryCompareView /> : null}
+      {view === 'discover' ? <LibraryDiscoverView /> : null}
+    </main>
+  );
+}
+
+function ViewTabs({ current }: { current: ViewMode }) {
+  const tabs: ViewMode[] = ['all', 'ranked', 'compare', 'discover'];
+  return (
+    <div
+      role="tablist"
+      aria-label="Library view"
+      className="mb-6 flex gap-1 border-b border-border"
+    >
+      {tabs.map((view) => {
+        const href = view === 'all' ? '/library' : `/library?view=${view}`;
+        const active = view === current;
+        return (
+          <Link
+            key={view}
+            href={href}
+            role="tab"
+            aria-selected={active}
+            className={cn(
+              '-mb-px rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2',
+              active
+                ? 'border-foreground text-foreground'
+                : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground',
+            )}
+          >
+            {VIEW_LABEL[view]}
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+async function AllView({ filter }: { filter: AllFilter }) {
+  const caller = appRouter.createCaller(await createContext());
+  const allEntries = await caller.watch.list();
+
+  // Watched = entries marked completed OR favourites (kind='anchor').
+  // A favourite means "I love this" which implies you've seen it; without
+  // this branch, legacy anchor entries leak into the Unwatched filter
+  // despite carrying a 10/10 rating. Dropped doesn't qualify as watched
+  // (you dropped it BEFORE finishing).
+  //
+  // Unwatched = the inverse: anything that isn't a favourite and isn't
+  // marked completed. So plan-to-watch / watching / on-hold / dropped /
+  // null-status-with-no-rating fall here.
+  const isWatched = (entry: { status: string | null; kind: string }) =>
+    entry.status === 'completed' || entry.kind === 'anchor';
+  const entries = allEntries.filter(({ entry }) => {
+    if (filter === 'watched') return isWatched(entry);
+    if (filter === 'unwatched') return !isWatched(entry);
+    return true;
+  });
+
+  if (allEntries.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-border px-6 py-12 text-center">
+        <p className="text-sm text-text-body">
+          Your library is empty. Search for a title to add your first show.
+        </p>
+        <div className="mt-4 flex justify-center">
+          <Link
+            href="/search"
+            className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+          >
+            Search
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <FilterChips current={filter} />
+      <p className="mb-4 text-sm text-muted-foreground">
+        {entries.length} of {allEntries.length} {allEntries.length === 1 ? 'title' : 'titles'}
+        {filter === 'all' ? '' : ` · ${filter}`}
+      </p>
       {entries.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border px-6 py-12 text-center">
           <p className="text-sm text-text-body">
-            Your library is empty. Add titles by searching for them or picking from your taste
-            refinement surface.
+            No {filter} titles. Try a different filter or add more shows.
           </p>
-          <div className="mt-4 flex justify-center gap-3">
-            <Link
-              href="/search"
-              className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
-            >
-              Search
-            </Link>
-            <Link
-              href="/taste"
-              className="inline-flex items-center rounded-md border border-border bg-white px-4 py-2 text-sm font-medium text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
-            >
-              Refine your taste
-            </Link>
-          </div>
         </div>
       ) : (
         <ul className="divide-y divide-border rounded-lg border border-border">
@@ -119,14 +226,13 @@ export default async function LibraryPage() {
 
                 <div className="flex flex-none items-center gap-2 text-xs">
                   {entry.rating !== null ? (
-                    <span className="font-medium text-foreground">{entry.rating}/10</span>
+                    <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                      <span>{entry.rating}/10</span>
+                      <RatingFace rating={entry.rating} size="sm" />
+                    </span>
                   ) : (
                     <span className="text-muted-foreground">—</span>
                   )}
-                  {/* Edit only on tracking entries — editing an anchor would
-                      implicitly graduate it (kind=anchor + status=set is not
-                      a meaningful state) and that promotion should be
-                      explicit, not a side-effect of clicking Edit. */}
                   {entry.kind === 'tracking' ? (
                     <LibraryEditDialog
                       titleId={title.id}
@@ -148,6 +254,37 @@ export default async function LibraryPage() {
           })}
         </ul>
       )}
-    </main>
+    </>
+  );
+}
+
+function FilterChips({ current }: { current: AllFilter }) {
+  const chips: AllFilter[] = ['all', 'watched', 'unwatched'];
+  const labels: Record<AllFilter, string> = {
+    all: 'All',
+    watched: 'Watched',
+    unwatched: 'Unwatched',
+  };
+  return (
+    <div className="mb-4 flex flex-wrap gap-2">
+      {chips.map((chip) => {
+        const href = chip === 'all' ? '/library' : `/library?filter=${chip}`;
+        const active = chip === current;
+        return (
+          <Link
+            key={chip}
+            href={href}
+            className={cn(
+              'inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2',
+              active
+                ? 'border-foreground bg-foreground text-background'
+                : 'border-border bg-card text-text-body hover:bg-muted hover:text-foreground',
+            )}
+          >
+            {labels[chip]}
+          </Link>
+        );
+      })}
+    </div>
   );
 }

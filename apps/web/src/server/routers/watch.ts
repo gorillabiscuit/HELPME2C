@@ -11,6 +11,7 @@ import {
   watchEntryKindEnum,
   watchStatusEnum,
 } from '../schema';
+import { franchiseDisplayName, franchiseKey, franchiseSpecificity } from '../lib/franchise';
 import { resolveInternalUserId } from '../lib/resolve-user';
 import { protectedProcedure, router } from '../trpc';
 import { inngest, recommendUserEvent } from '@/inngest/client';
@@ -213,11 +214,19 @@ export const watchRouter = router({
   // (manual_rank if set) → (elo_score if set) → (rating). Includes title
   // metadata for inline rendering. Used by the /taste page's ranked
   // view + as the candidate pool for pairwise comparisons.
+  // Returns the user's rated taste grouped by FRANCHISE per ADR-0023.
+  // One row per franchise; each carries the canonical representative's
+  // display data + a `seasons` array of all the user's rated entries
+  // in that franchise sorted by releaseYear ASC.
+  //
+  // Franchises sort by representative's manual_rank ASC NULLS LAST,
+  // then by mean rating DESC, then by representative titleId for
+  // determinism. Seasons within a franchise sort by release year.
   taste: protectedProcedure.query(async ({ ctx }) => {
     const internalUserId = await resolveInternalUserId(ctx.db, ctx.userId);
     if (!internalUserId) return [];
 
-    return ctx.db
+    const rows = await ctx.db
       .select({
         titleId: watchEntries.titleId,
         rating: watchEntries.rating,
@@ -234,16 +243,72 @@ export const watchRouter = router({
       })
       .from(watchEntries)
       .innerJoin(titles, eq(watchEntries.titleId, titles.id))
-      .where(and(eq(watchEntries.userId, internalUserId), isNotNull(watchEntries.rating)))
-      .orderBy(
-        // Custom ordering: manual_rank ASC NULLS LAST, then elo DESC NULLS LAST,
-        // then rating DESC. Drizzle's helper doesn't expose this combo cleanly
-        // so we drop to a sql template — sortable + indexable since both
-        // columns are simple types.
-        sql`${watchEntries.manualRank} ASC NULLS LAST`,
-        sql`${watchEntries.eloScore} DESC NULLS LAST`,
-        desc(watchEntries.rating),
-      );
+      .where(and(eq(watchEntries.userId, internalUserId), isNotNull(watchEntries.rating)));
+
+    // Group by franchise. The representative is the lowest-specificity
+    // entry; the franchise's manual_rank / eloScore come from that row.
+    type RowEntry = (typeof rows)[number];
+    type Group = {
+      franchiseKey: string;
+      representative: RowEntry;
+      representativeSpecificity: number;
+      seasons: RowEntry[];
+    };
+    const groups = new Map<string, Group>();
+    for (const row of rows) {
+      const key = franchiseKey(row.title.title);
+      const specificity = franchiseSpecificity(row.title.title, key);
+      const existing = groups.get(key);
+      if (!existing) {
+        groups.set(key, {
+          franchiseKey: key,
+          representative: row,
+          representativeSpecificity: specificity,
+          seasons: [row],
+        });
+        continue;
+      }
+      existing.seasons.push(row);
+      if (specificity < existing.representativeSpecificity) {
+        existing.representative = row;
+        existing.representativeSpecificity = specificity;
+      }
+    }
+
+    return Array.from(groups.values())
+      .map((g) => {
+        const ratings = g.seasons.flatMap((s) => (s.rating !== null ? [s.rating] : []));
+        const meanRating =
+          ratings.length > 0 ? ratings.reduce((a, b) => a + b, 0) / ratings.length : 0;
+        // Within-franchise: chronological (oldest first).
+        const seasonsSorted = g.seasons.slice().sort((a, b) => {
+          const ya = a.title.releaseYear ?? Number.MAX_SAFE_INTEGER;
+          const yb = b.title.releaseYear ?? Number.MAX_SAFE_INTEGER;
+          if (ya !== yb) return ya - yb;
+          return a.title.title.localeCompare(b.title.title);
+        });
+        return {
+          franchiseKey: g.franchiseKey,
+          representative: g.representative,
+          manualRank: g.representative.manualRank,
+          eloScore: g.representative.eloScore,
+          meanRating,
+          seasonCount: g.seasons.length,
+          seasons: seasonsSorted,
+        };
+      })
+      .sort((a, b) => {
+        // manual_rank ASC NULLS LAST
+        if (a.manualRank === null && b.manualRank !== null) return 1;
+        if (a.manualRank !== null && b.manualRank === null) return -1;
+        if (a.manualRank !== null && b.manualRank !== null && a.manualRank !== b.manualRank) {
+          return a.manualRank - b.manualRank;
+        }
+        // mean rating DESC
+        if (a.meanRating !== b.meanRating) return b.meanRating - a.meanRating;
+        // Stable tie-break on representative titleId
+        return a.representative.titleId.localeCompare(b.representative.titleId);
+      });
   }),
 
   // Bulk-set manual_rank by reading the new ordered titleId list.
@@ -388,19 +453,89 @@ export const watchRouter = router({
       };
     }),
 
-  // Returns two rated titles for the user to compare. v1 strategy:
-  // sample two at random from rated entries. Future improvements
-  // (pair-by-Elo-closeness, avoid recent repeats) are deferred —
-  // random is enough for the first cut.
+  // Lists ALL catalog seasons of a franchise (rated and unrated) with
+  // the user's rating per season if any. Used by the ranked-list
+  // accordion on /library?view=ranked — when a multi-season franchise
+  // is expanded, this endpoint hydrates the season list including
+  // ones the user hasn't rated yet ("Not rated" placeholders).
+  //
+  // SQL pre-filter via LOWER(title) LIKE 'franchiseKey%' narrows the
+  // catalog scan; JS franchiseKey check on the result set is the
+  // authoritative filter (handles "Hunter x Hunter (2011)" → same
+  // franchise as "Hunter x Hunter" etc).
+  franchiseSeasons: protectedProcedure
+    .input(z.object({ franchiseKey: z.string().min(1).max(200) }))
+    .query(async ({ ctx, input }) => {
+      const internalUserId = await resolveInternalUserId(ctx.db, ctx.userId);
+      if (!internalUserId) return [];
+
+      // Escape SQL LIKE wildcards then pre-filter to titles whose text
+      // starts with the franchise key. False positives are filtered in
+      // JS by re-running franchiseKey on each candidate.
+      const escaped = input.franchiseKey.replace(/[%_\\]/g, (c) => '\\' + c);
+      const candidates = await ctx.db
+        .select({
+          id: titles.id,
+          title: titles.title,
+          mediaType: titles.mediaType,
+          releaseYear: titles.releaseYear,
+          posterUrl: titles.posterUrl,
+        })
+        .from(titles)
+        .where(sql`LOWER(${titles.title}) LIKE ${`${escaped}%`}`);
+
+      const seasonsInFranchise = candidates.filter(
+        (t) => franchiseKey(t.title) === input.franchiseKey,
+      );
+
+      // Pull the user's entries for any of these seasons in one query.
+      const titleIds = seasonsInFranchise.map((t) => t.id);
+      const userEntries =
+        titleIds.length > 0
+          ? await ctx.db
+              .select({
+                titleId: watchEntries.titleId,
+                rating: watchEntries.rating,
+                eloScore: watchEntries.eloScore,
+                status: watchEntries.status,
+              })
+              .from(watchEntries)
+              .where(
+                and(
+                  eq(watchEntries.userId, internalUserId),
+                  inArray(watchEntries.titleId, titleIds),
+                ),
+              )
+          : [];
+      const entryByTitleId = new Map(userEntries.map((e) => [e.titleId, e]));
+
+      return seasonsInFranchise
+        .map((t) => ({
+          title: t,
+          entry: entryByTitleId.get(t.id) ?? null,
+        }))
+        .sort((a, b) => {
+          const ya = a.title.releaseYear ?? Number.MAX_SAFE_INTEGER;
+          const yb = b.title.releaseYear ?? Number.MAX_SAFE_INTEGER;
+          if (ya !== yb) return ya - yb;
+          return a.title.title.localeCompare(b.title.title);
+        });
+    }),
+
+  // Returns two rated titles for the user to compare. Per ADR-0023
+  // the franchise is the unit of taste, so the pair must come from
+  // DIFFERENT franchises — comparing "Attack on Titan S1" vs "AoT S2"
+  // is not a meaningful taste signal.
+  //
+  // Strategy: fetch all rated entries (Phase 1A scale = dozens, not
+  // thousands), group by franchiseKey, pick two distinct franchises
+  // at random, pick one representative entry from each. Returns null
+  // when the user has rated entries from fewer than 2 distinct
+  // franchises.
   getPairwisePair: protectedProcedure.query(async ({ ctx }) => {
     const internalUserId = await resolveInternalUserId(ctx.db, ctx.userId);
     if (!internalUserId) return null;
 
-    // ORDER BY RANDOM() + LIMIT 2 is the simplest correct approach.
-    // For Phase 1A scale (a user's rated set is in the dozens, not
-    // thousands) the table-scan cost is negligible. Above ~10k rated
-    // titles per user we'd switch to a TABLESAMPLE or maintain a
-    // shuffled cursor.
     const rows = await ctx.db
       .select({
         titleId: watchEntries.titleId,
@@ -414,12 +549,64 @@ export const watchRouter = router({
       })
       .from(watchEntries)
       .innerJoin(titles, eq(watchEntries.titleId, titles.id))
-      .where(and(eq(watchEntries.userId, internalUserId), isNotNull(watchEntries.rating)))
-      .orderBy(sql`RANDOM()`)
-      .limit(2);
+      .where(and(eq(watchEntries.userId, internalUserId), isNotNull(watchEntries.rating)));
 
-    const [a, b] = rows;
-    if (!a || !b) return null;
+    // Bucket rated entries by franchise.
+    type Row = (typeof rows)[number];
+    const byFranchise = new Map<string, Row[]>();
+    for (const row of rows) {
+      const key = franchiseKey(row.title.title);
+      let bucket = byFranchise.get(key);
+      if (!bucket) {
+        bucket = [];
+        byFranchise.set(key, bucket);
+      }
+      bucket.push(row);
+    }
+
+    if (byFranchise.size < 2) return null;
+
+    // Pick two distinct franchises at random.
+    const franchiseKeys = Array.from(byFranchise.keys());
+    // Fisher-Yates partial shuffle: only need the first two slots.
+    for (let i = 0; i < 2; i++) {
+      const j = i + Math.floor(Math.random() * (franchiseKeys.length - i));
+      const tmp = franchiseKeys[i] as string;
+      franchiseKeys[i] = franchiseKeys[j] as string;
+      franchiseKeys[j] = tmp;
+    }
+
+    // Within each franchise, pick the lowest-specificity rated season
+    // (the most-canonical one the user has actually rated). The Elo
+    // update goes to THAT entry's watch_entries row. Display uses
+    // `franchiseDisplayName` so "Attack on Titan Final Season" appears
+    // as "Attack on Titan" — the comparison is at the franchise level,
+    // not the specific-season level (per user feedback 2026-05-14).
+    const pickCanonical = (bucket: Row[]): Row => {
+      let best = bucket[0] as Row;
+      let bestSpec = franchiseSpecificity(best.title.title, franchiseKey(best.title.title));
+      for (let i = 1; i < bucket.length; i++) {
+        const row = bucket[i] as Row;
+        const spec = franchiseSpecificity(row.title.title, franchiseKey(row.title.title));
+        if (spec < bestSpec) {
+          best = row;
+          bestSpec = spec;
+        }
+      }
+      return best;
+    };
+    const aBucket = byFranchise.get(franchiseKeys[0] as string) as Row[];
+    const bBucket = byFranchise.get(franchiseKeys[1] as string) as Row[];
+    const aRaw = pickCanonical(aBucket);
+    const bRaw = pickCanonical(bBucket);
+    const a = {
+      ...aRaw,
+      title: { ...aRaw.title, title: franchiseDisplayName(aRaw.title.title) },
+    };
+    const b = {
+      ...bRaw,
+      title: { ...bRaw.title, title: franchiseDisplayName(bRaw.title.title) },
+    };
     return { a, b };
   }),
 
@@ -442,6 +629,32 @@ export const watchRouter = router({
 
       // Only recompute when something actually got removed. result.length
       // can be 0 if the entry was already gone (idempotent remove path).
+      if (result.length > 0) {
+        await triggerRecomputeSafely(internalUserId);
+      }
+      return { removed: result.length };
+    }),
+
+  // Bulk-remove. Used by the franchise-row Remove button in /taste —
+  // a single click should delete every season of the franchise the
+  // user has rated, not require N round-trips. Idempotent like
+  // remove(); zeroes through unrecognised ids without error.
+  removeMany: protectedProcedure
+    .input(z.object({ titleIds: z.array(titleIdSchema).min(1).max(100) }))
+    .mutation(async ({ ctx, input }) => {
+      const internalUserId = await resolveInternalUserId(ctx.db, ctx.userId);
+      if (!internalUserId) return { removed: 0 };
+
+      const result = await ctx.db
+        .delete(watchEntries)
+        .where(
+          and(
+            eq(watchEntries.userId, internalUserId),
+            inArray(watchEntries.titleId, input.titleIds),
+          ),
+        )
+        .returning({ id: watchEntries.id });
+
       if (result.length > 0) {
         await triggerRecomputeSafely(internalUserId);
       }

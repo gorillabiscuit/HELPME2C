@@ -1,0 +1,1 @@
+ALTER TABLE "rec_feedback" ADD COLUMN "unfamiliar" boolean DEFAULT false NOT NULL;

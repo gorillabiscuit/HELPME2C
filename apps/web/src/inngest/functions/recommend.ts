@@ -15,11 +15,13 @@ import {
   tags,
   tagThemes,
   themes,
+  titles,
   titleTags,
   userRecommendations,
   users,
   watchEntries,
 } from '@/server/schema';
+import { aggregateByFranchise, franchiseKey } from '@/server/lib/franchise';
 import { groupTagsIntoTitleSets } from '../lib/group-tags';
 import { inngest, recommendAllUsersEvent, recommendUserEvent } from '../client';
 
@@ -91,33 +93,52 @@ function effectiveRating(rating: number, eloScore: number | null): number {
 }
 
 export async function recomputeUserRecommendations(userId: string): Promise<{ recCount: number }> {
+  // Join titles so we can compute franchiseKey on each entry's title text.
+  // Per ADR-0023, the engine input is aggregated by franchise (mean rating
+  // per franchise) instead of one-row-per-watch_entry, so a user with
+  // multiple rated seasons of the same franchise contributes the same
+  // signal weight as a user with one rated season — no triple-counting.
   const userEntries = await db
     .select({
       titleId: watchEntries.titleId,
+      title: titles.title,
       kind: watchEntries.kind,
       rating: watchEntries.rating,
       eloScore: watchEntries.eloScore,
     })
     .from(watchEntries)
+    .innerJoin(titles, eq(watchEntries.titleId, titles.id))
     .where(eq(watchEntries.userId, userId));
 
   // Rated-taste model: "your taste" is the set of rated entries. Each
   // entry's effective rating is the user's 1-10 score, adjusted by Elo
-  // from pairwise comparisons (if any). High-rated entries (≥ 9
-  // effective) get treated as anchors — the engine's anchor signal is
-  // high-weight, suitable for "this defines my taste" titles.
+  // from pairwise comparisons (if any). High-rated FRANCHISES (≥ 9
+  // mean effective rating) become anchors.
   const anchorThreshold = 9;
-  const ratingEntries = userEntries.flatMap((e) =>
+  const ratedEntries = userEntries.flatMap((e) =>
     e.rating !== null
-      ? [{ titleId: e.titleId, rating: effectiveRating(e.rating, e.eloScore) }]
+      ? [
+          {
+            titleId: e.titleId,
+            title: e.title,
+            rating: effectiveRating(e.rating, e.eloScore),
+          },
+        ]
       : [],
   );
 
-  const anchors: AnchorPick[] = ratingEntries
-    .filter((r) => r.rating >= anchorThreshold)
-    .map((r) => ({ titleId: r.titleId }));
+  // ADR-0023: collapse to one synthetic row per franchise. The
+  // representative is the lowest-specificity rated entry in each group;
+  // its titleId is what the engine sees, its tags are what get scored.
+  const franchiseRows = aggregateByFranchise(ratedEntries);
 
-  const ratings: RatedTitle[] = ratingEntries;
+  const ratings: RatedTitle[] = franchiseRows.map((f) => ({
+    titleId: f.representativeTitleId,
+    rating: f.meanRating,
+  }));
+  const anchors: AnchorPick[] = franchiseRows
+    .filter((f) => f.meanRating >= anchorThreshold)
+    .map((f) => ({ titleId: f.representativeTitleId }));
 
   const userTitleIds = userEntries.map((e) => e.titleId);
   const emptyPayload: RecommendationsPayload = { schemaVersion: 2, items: [] };
@@ -160,8 +181,36 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
     .from(titleTags)
     .where(notInArray(titleTags.titleId, userTitleIds));
 
+  // Franchise-level exclusion. notInArray above only catches the exact
+  // titles the user has rated; OTHER seasons of the same franchise
+  // (which the user implicitly "has" via the franchise-as-unit-of-taste
+  // contract in ADR-0023) would still be candidates. Result: recs like
+  // "Attack on Titan Final Season" appearing for a user who already has
+  // "Attack on Titan" rated. Exclude them.
+  //
+  // Compute the set of franchise keys in the user's library, then fetch
+  // candidate title texts to compute franchiseKey on each and filter.
+  // Phase 1A scale (~2k titles) makes the JS filter cheap.
+  const userFranchiseKeys = new Set(userEntries.map((e) => franchiseKey(e.title)));
+  const candidateTitleIds = Array.from(new Set(candidateTagRows.map((r) => r.titleId)));
+  const candidateTitleTexts =
+    candidateTitleIds.length > 0
+      ? await db
+          .select({ id: titles.id, title: titles.title })
+          .from(titles)
+          .where(inArray(titles.id, candidateTitleIds))
+      : [];
+  const sameFranchiseCandidateIds = new Set(
+    candidateTitleTexts
+      .filter((t) => userFranchiseKeys.has(franchiseKey(t.title)))
+      .map((t) => t.id),
+  );
+  const filteredCandidateTagRows = candidateTagRows.filter(
+    (r) => !sameFranchiseCandidateIds.has(r.titleId),
+  );
+
   const userTitles = groupTagsIntoTitleSets(userTitleTagRows);
-  const candidates = groupTagsIntoTitleSets(candidateTagRows);
+  const candidates = groupTagsIntoTitleSets(filteredCandidateTagRows);
 
   // Cross-medium theme bridge — see packages/ml/src/recommendation.ts §JSDoc
   // and apps/web/src/server/schema/themes.ts for the editorial substrate.

@@ -65,6 +65,7 @@ The agent must not do any of these. If instructed to, stop and flag.
 - **No hallucinated imports.** If the symbol doesn't exist in a real npm package at the version we have installed, don't write code calling it. TypeScript and ESLint catch most cases but verify.
 - **No PII / secrets in source, tests, or fixtures.** Use env vars and `.env.example` placeholders.
 - **No third-party scripts loaded into the web app at runtime** without an ADR and a stop-and-ask. (Performance, privacy, supply-chain risk.)
+- **No reinventing well-solved interaction patterns.** Drag-and-drop, autocomplete, modals/dialogs, date pickers, virtualised lists, rich text editors, command palettes — these are categories where mature libraries already exist (`@dnd-kit`, `cmdk`, Radix UI, etc). Writing a hand-rolled version costs ongoing refinement and never reaches the polish of a battle-tested package. **Default to a popular, actively maintained library.** Add a line to `DEPS.md` justifying the choice. Custom implementations require an explicit reason ("the existing libraries don't support X behaviour we need") logged in a commit message or ADR.
 - **No `setTimeout` / `setInterval` for retry logic.** Use a typed retry library (e.g. `p-retry`) or write an explicit retry abstraction in `packages/shared`.
 - **No `document` / `window` in `packages/shared`.** Platform-agnostic means platform-agnostic. Use `useEffect` or platform-specific code in the consuming app.
 - **No `eval`. No `new Function(...)`. No dynamic `require()`.**

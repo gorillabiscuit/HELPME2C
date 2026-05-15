@@ -114,7 +114,14 @@ export const recFeedback = pgTable(
       .notNull()
       .references(() => titles.id, { onDelete: 'cascade' }),
     rating: recFeedbackRatingEnum('rating'),
+    // "Not interested" — user actively dismissed. The engine's read
+    // path excludes these from future recs (recommendations.list).
     dismissed: boolean('dismissed').notNull().default(false),
+    // "Don't know it" — user has no opinion because they don't
+    // recognise the show. Soft signal: recorded for analytics but the
+    // engine does NOT exclude on this. Distinct semantic from
+    // dismissed (which is real negative signal). Added 2026-05-15.
+    unfamiliar: boolean('unfamiliar').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
