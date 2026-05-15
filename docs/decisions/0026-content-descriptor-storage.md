@@ -75,6 +75,8 @@ This is a §4 stop-and-ask schema change per CLAUDE.md (new tables + columns add
 
 **Cost-attribution side-benefit.** Per-row `source_model` + `prompt_version` lets us answer questions like "what's the marginal cost of rerunning extraction on the 200 titles where the V4.0 prompt scored low engagement_level confidence?" without a separate audit table — just `SELECT title_id FROM title_descriptors WHERE prompt_version = 'v4.0' AND engagement_level = 'medium'` and pipe through the Inngest cost calculator.
 
+**Edit 2026-05-16 (cost calibration after first smoke run):** The catalog size is 5,949 titles (5,844 with synopsis), larger than the "~3,000" used in the original projection. With Sonnet 4.6 at $0.017–$0.022 per call (cached system prompt vs first calls), full-bulk re-extraction is **~$100–$130**, not $30–60. Smoke-extraction at 500 titles is ~$10. Worth retaining the per-row provenance argument unchanged — the cost-attribution side-benefit becomes more valuable at the actual scale, not less.
+
 ## What would change our mind
 
 - **The 1:1 `title_descriptors` table becomes the hottest join in the recommendation read path.** If `SELECT title FROM titles JOIN title_descriptors ON …` shows up in pg_stat_statements as a bottleneck, consider materialising into a single denormalised read table (or moving into a JSONB column on `titles`).

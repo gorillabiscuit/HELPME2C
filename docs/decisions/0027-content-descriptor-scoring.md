@@ -48,8 +48,14 @@ export function recommendForUser(
 export interface V4RecInputs {
   taste: V4TasteVector;                          // user's aggregated V4 signal
   candidateDescriptors: ReadonlyMap<string, V4Descriptor>;
-  comparableEdges: ReadonlyArray<{ from: string; to: string }>;
+  comparableEdges: ReadonlyArray<ComparableEdge>;
   userRatings: ReadonlyMap<string, number>;      // titleId → rating delta from neutral
+}
+
+export interface ComparableEdge {
+  fromTitleId: string;
+  toTitleId: string;
+  position: number;                              // 0-4, lower = stronger
 }
 ```
 
