@@ -41,10 +41,19 @@ export const titleThemes = pgTable(
     // 0..1 confidence reported by the LLM. Used to weight themes when
     // picking the headline for "Why this rec?" and to skip noise floor.
     confidence: real('confidence').notNull(),
-    // Source model identifier (e.g. "claude-haiku-4-5-20251001"). Lets
-    // us detect stale extractions when we upgrade the model + rerun.
+    // Source model identifier (e.g. "claude-sonnet-4-6"). Lets us detect
+    // stale extractions when we upgrade the model + rerun.
     source: text('source').notNull(),
+    // Extraction prompt version (e.g. 'v1', 'v4.0'). Per ADR-0026, paired
+    // with `source` so we can target re-extraction at specific (model,
+    // prompt) cohorts. Existing V1 rows default to 'v1'.
+    promptVersion: text('prompt_version').notNull().default('v1'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // Updated on every re-extraction. The original ON CONFLICT DO UPDATE
+    // pattern left created_at frozen at first-extraction time, which made
+    // it impossible to tell stale rows from fresh ones. `updated_at` is
+    // bumped on every UPSERT — see extract.ts persistThemes.
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     primaryKey({ columns: [t.titleId, t.themeSlug] }),
