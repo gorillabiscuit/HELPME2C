@@ -1,4 +1,5 @@
-import { pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { check, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { titles } from './titles';
 
 // V4 content descriptors — the LLM-extracted viewer-experience fields per
@@ -37,31 +38,53 @@ import { titles } from './titles';
 //
 // Deletion: ON DELETE CASCADE matches title_themes / title_comparable_titles.
 // If a title is removed from the catalog, all its descriptors go with it.
-export const titleDescriptors = pgTable('title_descriptors', {
-  titleId: uuid('title_id')
-    .primaryKey()
-    .references(() => titles.id, { onDelete: 'cascade' }),
-  // 4-6 free-form short phrases naming concrete surface pleasures that
-  // make someone press play. Open-vocab by design — see ADR-0025 for the
-  // reasoning. Phase 2 will embed these for similarity scoring.
-  viewerPleasures: text('viewer_pleasures').array().notNull(),
-  // 2-4 free-form tonal descriptors. Single or compound adjectives.
-  tone: text('tone').array().notNull(),
-  // 0-4 free-form phrases describing depth for viewers who want it.
-  // Allowed to be empty per the prompt — popcorn action films legitimately
-  // have no subtext worth naming. Default '{}' supports that.
-  subtextualThemes: text('subtextual_themes').array().notNull().default([]),
-  // Enum: plays-straight | deconstructs | parodies | reinvents | hybrid.
-  // CHECK constraint applied in the migration SQL.
-  narrativeMode: text('narrative_mode').notNull(),
-  // Enum: low | medium | high.
-  engagementLevel: text('engagement_level').notNull(),
-  // Enum: interpersonal | community | national | civilizational | cosmic.
-  // The PRIMARY DRAMATIC stakes layer per ADR-0025 — where the work
-  // invests emotional weight, not where its plot's action takes place.
-  stakesScale: text('stakes_scale').notNull(),
-  // Provenance — see top-of-file rationale.
-  sourceModel: text('source_model').notNull(),
-  promptVersion: text('prompt_version').notNull(),
-  extractedAt: timestamp('extracted_at', { withTimezone: true }).notNull().defaultNow(),
-});
+//
+// CHECK constraints on the three enum columns guard against parser drift —
+// extract.ts validates enum values in parseRaw, but defence-in-depth at the
+// schema level catches direct INSERTs (manual fixups, future tooling) that
+// bypass the parser. TEXT + CHECK chosen over Postgres ENUM type because
+// changing CHECK is one DROP/ADD; changing ENUM is harder to roll back.
+export const titleDescriptors = pgTable(
+  'title_descriptors',
+  {
+    titleId: uuid('title_id')
+      .primaryKey()
+      .references(() => titles.id, { onDelete: 'cascade' }),
+    // 4-6 free-form short phrases naming concrete surface pleasures that
+    // make someone press play. Open-vocab by design — see ADR-0025 for the
+    // reasoning. Phase 2 will embed these for similarity scoring.
+    viewerPleasures: text('viewer_pleasures').array().notNull(),
+    // 2-4 free-form tonal descriptors. Single or compound adjectives.
+    tone: text('tone').array().notNull(),
+    // 0-4 free-form phrases describing depth for viewers who want it.
+    // Allowed to be empty per the prompt — popcorn action films legitimately
+    // have no subtext worth naming. Default '{}' supports that.
+    subtextualThemes: text('subtextual_themes').array().notNull().default([]),
+    // Enum: plays-straight | deconstructs | parodies | reinvents | hybrid.
+    narrativeMode: text('narrative_mode').notNull(),
+    // Enum: low | medium | high.
+    engagementLevel: text('engagement_level').notNull(),
+    // Enum: interpersonal | community | national | civilizational | cosmic.
+    // The PRIMARY DRAMATIC stakes layer per ADR-0025 — where the work
+    // invests emotional weight, not where its plot's action takes place.
+    stakesScale: text('stakes_scale').notNull(),
+    // Provenance — see top-of-file rationale.
+    sourceModel: text('source_model').notNull(),
+    promptVersion: text('prompt_version').notNull(),
+    extractedAt: timestamp('extracted_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      'title_descriptors_narrative_mode_chk',
+      sql`${t.narrativeMode} IN ('plays-straight', 'deconstructs', 'parodies', 'reinvents', 'hybrid')`,
+    ),
+    check(
+      'title_descriptors_engagement_level_chk',
+      sql`${t.engagementLevel} IN ('low', 'medium', 'high')`,
+    ),
+    check(
+      'title_descriptors_stakes_scale_chk',
+      sql`${t.stakesScale} IN ('interpersonal', 'community', 'national', 'civilizational', 'cosmic')`,
+    ),
+  ],
+);
