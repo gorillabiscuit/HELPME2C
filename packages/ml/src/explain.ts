@@ -24,7 +24,15 @@ import {
   buildTagThemeIndex,
   buildTasteTheme,
   v4ScoreBreakdown,
+  V4_COMPARABLE_WEIGHT,
+  V4_ENUM_WEIGHT,
+  V4_THEME_WEIGHT,
+  type ComponentScales,
 } from './scoring';
+
+// Same V1 weight constant recommendForUser uses for its normalised
+// linear-combination scoring. Held at 1.0; reference for the V4 weights.
+const BASE_TAG_WEIGHT = 1.0;
 
 /** One reason a single tag (or V4 signal) on the candidate contributed
  * to a member's score. Discriminated by `kind`:
@@ -101,6 +109,42 @@ export interface RecExplanation {
 }
 
 /**
+ * Apply weighted per-component normalisation to a reason's contribution
+ * so reasons sort by the same ranking-aligned value recommendForUser
+ * uses. Without this, V1 raw contributions (0–100,000 range) dominate
+ * V4 raw contributions (0–1 range) in the sort, so V4 reasons never
+ * surface in headline copy.
+ *
+ * After normalisation, contribution magnitude is comparable across kinds.
+ * `Reminiscent of [X]` (v4-comparable) can outrank `Because you like Y`
+ * (direct-tag) when V4 is the stronger signal for that candidate.
+ */
+function normaliseReasonContribution(reason: ExplanationReason, scales: ComponentScales): number {
+  let scale: number;
+  let weight: number;
+  switch (reason.kind) {
+    case 'direct-tag':
+    case 'theme-bridge':
+      scale = scales.baseTag;
+      weight = BASE_TAG_WEIGHT;
+      break;
+    case 'v4-theme':
+      scale = scales.v4Theme;
+      weight = V4_THEME_WEIGHT;
+      break;
+    case 'v4-comparable':
+      scale = scales.v4Comparable;
+      weight = V4_COMPARABLE_WEIGHT;
+      break;
+    case 'v4-enum-fit':
+      scale = scales.v4EnumFit;
+      weight = V4_ENUM_WEIGHT;
+      break;
+  }
+  return scale > 0 ? (weight * reason.contribution) / scale : 0;
+}
+
+/**
  * Single-user explanation. Returns the same ExplanationReason[] shape
  * as the per-member arrays in explainGroupRecommendation, sorted by
  * contribution descending — top reasons first. The caller slices to
@@ -113,26 +157,42 @@ export interface RecExplanation {
  * to the V1 reason list and sorted together by contribution. When V4
  * has no signal (or `v4` is undefined), the function reduces to the V1
  * tag-overlap + cross-medium-bridge explanation exactly.
+ *
+ * `scales` (optional): when provided, each reason's contribution is
+ * replaced with its weighted normalised value (same scaling
+ * recommendForUser uses for ranking). This is what makes V4 reasons
+ * fairly compete with V1 reasons in the contribution-descending sort —
+ * needed for the headline copy generator to surface V4 reasons like
+ * "Reminiscent of Mob Psycho 100" when V4 actually drives the ranking.
+ * Without scales (legacy callers), raw contributions are used and V4
+ * reasons stay buried below V1.
  */
 export function explainRecommendation(
   taste: UserTasteVector,
   candidate: TitleTagSet,
   themeMembership: ReadonlyArray<TagThemeMembership> = [],
   v4?: V4RecInputs,
+  scales?: ComponentScales,
 ): ExplanationReason[] {
   const tagThemes = buildTagThemeIndex(themeMembership);
   const tasteTheme = buildTasteTheme(taste, tagThemes);
   const v1Reasons = explainCandidateScore(taste, candidate, tagThemes, tasteTheme);
-  if (!v4) return v1Reasons;
-  const edgeIndex = buildComparableEdgeIndex(v4.comparableEdges);
-  const v4Reasons = v4ScoreBreakdown(
-    candidate.titleId,
-    v4.taste,
-    v4.candidateDescriptors.get(candidate.titleId),
-    v4.userRatings,
-    edgeIndex,
-  );
-  return [...v1Reasons, ...v4Reasons].sort((a, b) => b.contribution - a.contribution);
+  const raw = v4
+    ? [
+        ...v1Reasons,
+        ...v4ScoreBreakdown(
+          candidate.titleId,
+          v4.taste,
+          v4.candidateDescriptors.get(candidate.titleId),
+          v4.userRatings,
+          buildComparableEdgeIndex(v4.comparableEdges),
+        ),
+      ]
+    : v1Reasons;
+  const normalised = scales
+    ? raw.map((r) => ({ ...r, contribution: normaliseReasonContribution(r, scales) }))
+    : raw;
+  return normalised.sort((a, b) => b.contribution - a.contribution);
 }
 
 /** Per-member breakdown variant of scoreCandidate — accumulates reasons

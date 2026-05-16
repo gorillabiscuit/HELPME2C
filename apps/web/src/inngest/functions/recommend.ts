@@ -2,6 +2,7 @@ import { eq, inArray, isNotNull, notInArray, sql } from 'drizzle-orm';
 import { cron } from 'inngest';
 import {
   buildV4TasteVector,
+  computeRecommendationScales,
   explainRecommendation,
   extractTasteVector,
   recommendForUser,
@@ -515,6 +516,17 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
 
   const recs = recommendForUser(taste, candidates, REC_LIMIT, themeMembership, v4Inputs);
 
+  // Component scales for the explanation layer. Same scales recommendForUser
+  // uses for normalised ranking; passing them to explainRecommendation lets
+  // V4 reasons compete fairly with V1 in the contribution-descending sort
+  // that drives headline copy.
+  const explanationScales = computeRecommendationScales(
+    taste,
+    candidates,
+    themeMembership,
+    v4Inputs,
+  );
+
   // Resolve tag + theme names for the explain pass. Both tables are
   // small (~few hundred rows each); single SELECT per cron run is
   // cheap. The maps stay in scope only for this user's compute.
@@ -574,7 +586,13 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
     }
     const candidate = candidatesById.get(r.titleId);
     if (!candidate) return { titleId: r.titleId, score: r.score, reasonHint: null };
-    const reasons = explainRecommendation(taste, candidate, themeMembership, v4Inputs);
+    const reasons = explainRecommendation(
+      taste,
+      candidate,
+      themeMembership,
+      v4Inputs,
+      explanationScales,
+    );
     const reasonHint = formatReasonHint(
       reasons,
       tagInfo,

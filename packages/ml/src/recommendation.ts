@@ -201,7 +201,12 @@ import {
   scoreCandidate,
   scoreCombinedV4,
   v4Components,
+  type ComponentScales,
 } from './scoring';
+
+// Re-export ComponentScales so callers (web Inngest job) can pass it to
+// explainRecommendation without reaching into the internal scoring kernel.
+export type { ComponentScales } from './scoring';
 
 // ---------------------------------------------------------------------------
 // V4 content descriptors — per ADR-0025 / ADR-0026 / ADR-0027.
@@ -347,6 +352,43 @@ export function buildV4TasteVector(
 // this baseline. Changing this is a load-bearing decision; if needed,
 // promote to a per-call parameter or an ADR.
 const BASE_TAG_WEIGHT = 1.0;
+
+/**
+ * Compute per-component max-of-|values| scales for the candidate set.
+ * Same scales recommendForUser uses internally to normalise. Exposed so
+ * the explanation layer can apply consistent normalisation to reason
+ * contributions, making V4 reasons sort fairly against V1 in the
+ * headline-copy walk (per ADR-0027 Edit 2026-05-16's noted follow-up).
+ *
+ * Cost: one pass over candidates. Callers that recompute recs anyway
+ * are paying this cost in recommendForUser already; calling this
+ * separately for the explanation pass duplicates the work. At Phase 1A
+ * scale (~3k candidates) the duplicate compute is sub-100ms — acceptable
+ * trade for not breaking recommendForUser's return-type contract.
+ */
+export function computeRecommendationScales(
+  taste: UserTasteVector,
+  candidates: ReadonlyArray<TitleTagSet>,
+  themeMembership: ReadonlyArray<TagThemeMembership> = [],
+  v4?: V4RecInputs,
+): ComponentScales {
+  const tagThemes = buildTagThemeIndex(themeMembership);
+  const tasteTheme = buildTasteTheme(taste, tagThemes);
+  const edgeIndex = v4 ? buildComparableEdgeIndex(v4.comparableEdges) : undefined;
+
+  const baseTagScores: number[] = [];
+  const v4Comps = candidates.map((c) => {
+    baseTagScores.push(scoreCandidate(taste, c, tagThemes, tasteTheme));
+    return v4Components(
+      c.titleId,
+      v4?.taste,
+      v4?.candidateDescriptors.get(c.titleId),
+      v4?.userRatings,
+      edgeIndex,
+    );
+  });
+  return computeComponentScales(baseTagScores, v4Comps);
+}
 
 export function recommendForUser(
   taste: UserTasteVector,
