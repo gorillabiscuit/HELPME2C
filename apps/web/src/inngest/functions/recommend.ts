@@ -1,4 +1,4 @@
-import { eq, inArray, isNotNull, notInArray } from 'drizzle-orm';
+import { eq, inArray, isNotNull, notInArray, sql } from 'drizzle-orm';
 import { cron } from 'inngest';
 import {
   buildV4TasteVector,
@@ -335,8 +335,60 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
   // edges fetch to only edges touching the user's titles + candidates.
   // ---------------------------------------------------------------------
 
+  // Sibling-redirect map for the V4-dup-rows bug.
+  //
+  // The catalog has ~366 duplicate-title groups (anime that exists as BOTH
+  // an AniList row and a TMDB row — same lowercased title, different
+  // titles.id). V4 extraction prefers the higher-popularity row (always
+  // AniList for these dups) so the AniList row has V4 descriptors while
+  // the TMDB row doesn't. If the user's watch_entries.title_id points at
+  // the TMDB-side of the pair (e.g. their UI search picked the TMDB
+  // result), the V4 taste vector + comparable-graph traversal sees zero
+  // V4 signal for that title — even though the AniList sibling has full
+  // V4 data.
+  //
+  // Fix: for each user-rated title that LACKS V4 descriptors itself but
+  // has a same-title sibling row WITH V4 descriptors, redirect V4 lookups
+  // to the sibling. The user's rating still attaches to their original
+  // title_id (that's what watch_entries holds), but V4 data flows from the
+  // sibling. Below, we also map both ids → rating in userRatings so the
+  // comparable-graph traversal fires on edges from either side.
+  //
+  // Phase 2 work: dedup at sync time so this fixup isn't needed —
+  // canonicalise on (lowercased title, release_year) and keep ONE row
+  // per work, merging tags + V4 across sources.
+  const userRatedIds = franchiseRows.map((f) => f.representativeTitleId);
+  const v4SiblingMap = new Map<string, string>();
+  if (userRatedIds.length > 0) {
+    // Drizzle's query builder doesn't express self-joins-with-EXISTS-subqueries
+    // cleanly; raw SQL with parameterised IN list. userRatedIds are UUIDs sourced
+    // from our own DB query so no injection surface.
+    const idList = sql.join(
+      userRatedIds.map((id) => sql`${id}::uuid`),
+      sql`, `,
+    );
+    type SiblingRow = { originalId: string; v4SiblingId: string };
+    // db.execute returns a result object with `.rows`; Drizzle types this
+    // loosely so we narrow via cast.
+    const siblingResult = (await db.execute(sql`
+      SELECT t1.id AS "originalId", sibling.id AS "v4SiblingId"
+      FROM titles t1
+      JOIN titles sibling
+        ON LOWER(sibling.title) = LOWER(t1.title) AND sibling.id <> t1.id
+      WHERE t1.id IN (${idList})
+        AND EXISTS(SELECT 1 FROM title_descriptors td WHERE td.title_id = sibling.id)
+        AND NOT EXISTS(SELECT 1 FROM title_descriptors td WHERE td.title_id = t1.id)
+    `)) as unknown as { rows?: SiblingRow[] } | SiblingRow[];
+    const siblingRows: SiblingRow[] = Array.isArray(siblingResult)
+      ? siblingResult
+      : (siblingResult.rows ?? []);
+    for (const r of siblingRows) {
+      if (!v4SiblingMap.has(r.originalId)) v4SiblingMap.set(r.originalId, r.v4SiblingId);
+    }
+  }
+
   const v4TitleIds = Array.from(
-    new Set([...franchiseRows.map((f) => f.representativeTitleId), ...candidateTitleIds]),
+    new Set([...userRatedIds, ...Array.from(v4SiblingMap.values()), ...candidateTitleIds]),
   );
 
   // Scoring needs only the enum + theme fields; the open-vocab arrays
@@ -381,7 +433,7 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
   }
 
   const candidateDescriptors = new Map<string, V4Descriptor>();
-  const userDescriptors = new Map<string, V4Descriptor>();
+  const descriptorsByTitleId = new Map<string, V4Descriptor>();
   for (const d of v4DescriptorRows) {
     const descriptor: V4Descriptor = {
       themes: themesByTitle.get(d.titleId) ?? [],
@@ -390,7 +442,18 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
       stakesScale: d.stakesScale,
     };
     candidateDescriptors.set(d.titleId, descriptor);
-    userDescriptors.set(d.titleId, descriptor);
+    descriptorsByTitleId.set(d.titleId, descriptor);
+  }
+
+  // userDescriptors keyed by USER's rated title_id, populated from the
+  // sibling V4 row when the rated row itself has no descriptors (dup-rows
+  // fix above). This lets buildV4TasteVector accumulate V4 signal even
+  // when the user's watch_entries points at the V4-less side of a dup.
+  const userDescriptors = new Map<string, V4Descriptor>();
+  for (const ratedId of userRatedIds) {
+    const v4SourceId = v4SiblingMap.get(ratedId) ?? ratedId;
+    const descriptor = descriptorsByTitleId.get(v4SourceId);
+    if (descriptor) userDescriptors.set(ratedId, descriptor);
   }
 
   // Resolved-FK edges only — unresolved strings contribute nothing per
@@ -413,12 +476,24 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
   // delta=+1.0 because they appear in franchiseRows with meanRating≥9
   // → (9 - 5.5) / 4.5 ≈ 0.78, which is sub-1.0. Bump anchors explicitly
   // to +1.0 to match the V1 ANCHOR_CONTRIBUTION semantics.
+  //
+  // Dup-rows extension: when a user-rated title has a V4 sibling, map
+  // BOTH ids to the same rating. The comparable graph's edges originate
+  // from whichever row was V4-extracted (typically the AniList side),
+  // so v4ComparableScore's `userRatings.get(e.fromTitleId)` lookups need
+  // to find the sibling id too. Without this, comparable edges from the
+  // AniList row are ignored even when the user has rated the TMDB sibling.
   const userRatings = new Map<string, number>();
+  const setRatingForBothSides = (id: string, delta: number) => {
+    userRatings.set(id, delta);
+    const sibling = v4SiblingMap.get(id);
+    if (sibling) userRatings.set(sibling, delta);
+  };
   for (const f of franchiseRows) {
-    userRatings.set(f.representativeTitleId, (f.meanRating - 5.5) / 4.5);
+    setRatingForBothSides(f.representativeTitleId, (f.meanRating - 5.5) / 4.5);
   }
   for (const a of anchors) {
-    userRatings.set(a.titleId, 1.0);
+    setRatingForBothSides(a.titleId, 1.0);
   }
 
   const v4Taste = buildV4TasteVector({ anchors, ratings }, userDescriptors);
