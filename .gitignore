@@ -22,6 +22,11 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Generated run-time artifacts from one-off scripts
+apps/web/scripts/bulk-v4-*.log
+apps/web/scripts/compare-output-*.txt
+apps/web/scripts/test-pleasures-*.txt
+
 # Editor / OS
 .DS_Store
 .idea/

@@ -1,0 +1,3 @@
+ALTER TABLE "title_descriptors" ADD CONSTRAINT "title_descriptors_narrative_mode_chk" CHECK ("title_descriptors"."narrative_mode" IN ('plays-straight', 'deconstructs', 'parodies', 'reinvents', 'hybrid'));--> statement-breakpoint
+ALTER TABLE "title_descriptors" ADD CONSTRAINT "title_descriptors_engagement_level_chk" CHECK ("title_descriptors"."engagement_level" IN ('low', 'medium', 'high'));--> statement-breakpoint
+ALTER TABLE "title_descriptors" ADD CONSTRAINT "title_descriptors_stakes_scale_chk" CHECK ("title_descriptors"."stakes_scale" IN ('interpersonal', 'community', 'national', 'civilizational', 'cosmic'));

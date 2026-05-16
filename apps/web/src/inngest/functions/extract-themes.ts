@@ -72,6 +72,11 @@ export const extractThemesBatch = inngest.createFunction(
     let processed = 0;
     let empty = 0;
     let failed = 0;
+    // Track FK-resolution health for the comparable_titles graph. Per
+    // ADR-0027 §what-would-change-our-mind, sustained low resolution
+    // (<40%) is a signal to pull forward Phase 2 embedding work.
+    let comparablesResolved = 0;
+    let comparablesTotal = 0;
     const errors: Array<{ id: string; message: string }> = [];
 
     for (let i = 0; i < titleIds.length; i += INNER_STEP_BATCH) {
@@ -86,11 +91,15 @@ export const extractThemesBatch = inngest.createFunction(
         let chunkOk = 0;
         let chunkEmpty = 0;
         let chunkFail = 0;
+        let chunkResolved = 0;
+        let chunkTotal = 0;
         const chunkErrors: Array<{ id: string; message: string }> = [];
 
         for (const row of rows) {
           const candidate = rowToCandidate(row);
           const r = await processCandidate(candidate, anthropic, sql);
+          chunkResolved += r.resolvedComparables;
+          chunkTotal += r.totalComparables;
           if (r.ok) chunkOk += 1;
           else if (r.empty) chunkEmpty += 1;
           else {
@@ -98,15 +107,37 @@ export const extractThemesBatch = inngest.createFunction(
             if (r.error) chunkErrors.push({ id: candidate.id, message: r.error });
           }
         }
-        return { ok: chunkOk, empty: chunkEmpty, failed: chunkFail, errors: chunkErrors };
+        return {
+          ok: chunkOk,
+          empty: chunkEmpty,
+          failed: chunkFail,
+          resolved: chunkResolved,
+          total: chunkTotal,
+          errors: chunkErrors,
+        };
       });
       processed += result.ok;
       empty += result.empty;
       failed += result.failed;
+      comparablesResolved += result.resolved;
+      comparablesTotal += result.total;
       errors.push(...result.errors);
     }
 
-    return { processed, empty, failed, errors };
+    const comparableResolutionRate =
+      comparablesTotal > 0 ? comparablesResolved / comparablesTotal : null;
+
+    return {
+      processed,
+      empty,
+      failed,
+      comparables: {
+        resolved: comparablesResolved,
+        total: comparablesTotal,
+        resolutionRate: comparableResolutionRate,
+      },
+      errors,
+    };
   },
 );
 

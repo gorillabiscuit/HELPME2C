@@ -22,6 +22,8 @@ enough to warrant its own ADR or on-call doc, not a longer runbook.
 - [TMDB](tmdb.md) — TV/film metadata + watch providers (per [ADR-0009](../decisions/0009-streaming-availability-data-source.md))
 - [Sentry](sentry.md) — error tracking + tracing (per [ADR-0010](../decisions/0010-observability-stack.md))
 - [PostHog](posthog.md) — product analytics + session replay (per [ADR-0010](../decisions/0010-observability-stack.md))
+- [V4 extraction](v4-extraction.md) — LLM content-descriptor pipeline (per [ADR-0025](../decisions/0025-viewer-experience-extraction.md) / [ADR-0026](../decisions/0026-content-descriptor-storage.md) / [ADR-0027](../decisions/0027-content-descriptor-scoring.md))
+- [DSAR](dsar.md) — GDPR data-subject request handling (per [ADR-0012](../decisions/0012-privacy-compliance.md))
 
 AniList runbook will land alongside the AniList sync work in M2.
 

@@ -1,13 +1,18 @@
-import { eq, inArray, notInArray } from 'drizzle-orm';
+import { eq, inArray, isNotNull, notInArray, sql } from 'drizzle-orm';
 import { cron } from 'inngest';
 import {
+  buildV4TasteVector,
+  computeRecommendationScales,
   explainRecommendation,
   extractTasteVector,
   recommendForUser,
   type AnchorPick,
+  type ComparableEdge,
   type ExplanationReason,
   type RatedTitle,
   type TagThemeMembership,
+  type V4Descriptor,
+  type V4RecInputs,
 } from '@helpme2c/ml';
 import { db } from '@/server/db';
 import {
@@ -15,13 +20,17 @@ import {
   tags,
   tagThemes,
   themes,
+  titleComparableTitles,
+  titleDescriptors,
   titles,
   titleTags,
+  titleThemes,
   userRecommendations,
   users,
   watchEntries,
 } from '@/server/schema';
 import { aggregateByFranchise, franchiseKey } from '@/server/lib/franchise';
+import { THEME_VOCABULARY } from '@/server/themes/vocabulary';
 import { groupTagsIntoTitleSets } from '../lib/group-tags';
 import { inngest, recommendAllUsersEvent, recommendUserEvent } from '../client';
 
@@ -79,6 +88,7 @@ const BLOCKED_TAG_NAMES = new Set([
 ]);
 
 function isReasonUsable(reason: ExplanationReason, tagInfo: ReadonlyMap<string, TagInfo>): boolean {
+  if (!reason.tagId) return false;
   const info = tagInfo.get(reason.tagId);
   if (!info) return false;
   if (info.category && BLOCKED_TAG_CATEGORIES.has(info.category)) return false;
@@ -99,23 +109,49 @@ function formatReasonHint(
   reasons: ReadonlyArray<ExplanationReason>,
   tagInfo: ReadonlyMap<string, TagInfo>,
   themeNames: ReadonlyMap<string, string>,
+  v4ThemeLabels: ReadonlyMap<string, string>,
+  comparableTitleNames: ReadonlyMap<string, string>,
 ): string | null {
   for (const reason of reasons) {
     if (reason.kind === 'direct-tag') {
       if (!isReasonUsable(reason, tagInfo)) continue;
-      const info = tagInfo.get(reason.tagId);
+      const info = tagInfo.get(reason.tagId!);
       if (!info) continue;
       return `Because you like ${info.name.toLowerCase()}`;
     }
-    // theme-bridge — surface the theme name + (optionally) what the
-    // user's interest is that bridges into it. Theme bridges go through
-    // editorial mappings (tagThemes) so they're already curated; just
-    // surface the theme name.
-    if (reason.themeId) {
-      const themeName = themeNames.get(reason.themeId);
-      if (!themeName) continue;
-      return `Matches your ${themeName.toLowerCase()} interest`;
+    if (reason.kind === 'theme-bridge') {
+      // surface the theme name + (optionally) what the user's interest
+      // is that bridges into it. Theme bridges go through editorial
+      // mappings (tagThemes) so they're already curated.
+      if (reason.themeId) {
+        const themeName = themeNames.get(reason.themeId);
+        if (!themeName) continue;
+        return `Matches your ${themeName.toLowerCase()} interest`;
+      }
+      continue;
     }
+    if (reason.kind === 'v4-theme' && reason.themeSlug) {
+      // V4 closed-vocab theme overlap. labelForSlug is human-readable
+      // ("found family" not "found-family"). Skip if vocab label is
+      // missing (shouldn't happen — vocab is in-tree).
+      const label = v4ThemeLabels.get(reason.themeSlug);
+      if (!label) continue;
+      return `Matches your ${label.toLowerCase()} interest`;
+    }
+    if (reason.kind === 'v4-comparable' && reason.comparableTitleId) {
+      // V4 comparable-graph edge. Surface "Reminiscent of [title]" only
+      // for POSITIVE contributions — a candidate comparable to a
+      // disliked title produces a negative contribution and shouldn't
+      // generate a positive-framed hint.
+      if (reason.contribution <= 0) continue;
+      const refName = comparableTitleNames.get(reason.comparableTitleId);
+      if (!refName) continue;
+      return `Reminiscent of ${refName}`;
+    }
+    // v4-enum-fit: deliberately not surfaced as headline copy. "Matches
+    // your stakes_scale preference" reads as jargon; "Has a deconstructive
+    // narrative mode" reads as film-school. The signal counts toward
+    // scoring; the hint is just not informative-enough copy.
   }
   return null;
 }
@@ -282,7 +318,258 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
   const themeMembership: TagThemeMembership[] = themeRows;
 
   const taste = extractTasteVector({ anchors, ratings }, userTitles);
-  const recs = recommendForUser(taste, candidates, REC_LIMIT, themeMembership);
+
+  // ---------------------------------------------------------------------
+  // V4 content-descriptor inputs — see ADR-0027 §what-we-chose. Wired in
+  // additively: if V4 data hasn't been extracted yet for a title, that
+  // title contributes 0 to V4 scoring and the V1 tag-overlap path still
+  // runs normally. Absence of any V4 data → recommendForUser reduces to
+  // V1 behaviour exactly.
+  //
+  // Three fetches:
+  //   1. title_descriptors for user's rated/anchor titles (for taste vec)
+  //   2. title_descriptors for candidates (for per-candidate scoring)
+  //   3. resolved-FK comparable edges across rated + candidate set
+  //
+  // Phase 1A scale (~3k titles, ~15k comparable edges total) means we
+  // fetch broadly and filter client-side. At larger scale, narrow the
+  // edges fetch to only edges touching the user's titles + candidates.
+  // ---------------------------------------------------------------------
+
+  // Sibling-redirect map for the V4-dup-rows bug.
+  //
+  // The catalog has ~366 duplicate-title groups (anime that exists as BOTH
+  // an AniList row and a TMDB row — same lowercased title, different
+  // titles.id). V4 extraction prefers the higher-popularity row (always
+  // AniList for these dups) so the AniList row has V4 descriptors while
+  // the TMDB row doesn't. If the user's watch_entries.title_id points at
+  // the TMDB-side of the pair (e.g. their UI search picked the TMDB
+  // result), the V4 taste vector + comparable-graph traversal sees zero
+  // V4 signal for that title — even though the AniList sibling has full
+  // V4 data.
+  //
+  // Fix: for each user-rated title that LACKS V4 descriptors itself but
+  // has a same-title sibling row WITH V4 descriptors, redirect V4 lookups
+  // to the sibling. The user's rating still attaches to their original
+  // title_id (that's what watch_entries holds), but V4 data flows from the
+  // sibling. Below, we also map both ids → rating in userRatings so the
+  // comparable-graph traversal fires on edges from either side.
+  //
+  // Phase 2 work: dedup at sync time so this fixup isn't needed —
+  // canonicalise on (lowercased title, release_year) and keep ONE row
+  // per work, merging tags + V4 across sources.
+  const userRatedIds = franchiseRows.map((f) => f.representativeTitleId);
+  const v4SiblingMap = new Map<string, string>();
+  if (userRatedIds.length > 0) {
+    // Drizzle's query builder doesn't express self-joins-with-EXISTS-subqueries
+    // cleanly; raw SQL with parameterised IN list. userRatedIds are UUIDs sourced
+    // from our own DB query so no injection surface.
+    const idList = sql.join(
+      userRatedIds.map((id) => sql`${id}::uuid`),
+      sql`, `,
+    );
+    type SiblingRow = { originalId: string; v4SiblingId: string };
+    // db.execute returns a result object with `.rows`; Drizzle types this
+    // loosely so we narrow via cast.
+    const siblingResult = (await db.execute(sql`
+      SELECT t1.id AS "originalId", sibling.id AS "v4SiblingId"
+      FROM titles t1
+      JOIN titles sibling
+        ON LOWER(sibling.title) = LOWER(t1.title) AND sibling.id <> t1.id
+      WHERE t1.id IN (${idList})
+        AND EXISTS(SELECT 1 FROM title_descriptors td WHERE td.title_id = sibling.id)
+        AND NOT EXISTS(SELECT 1 FROM title_descriptors td WHERE td.title_id = t1.id)
+    `)) as unknown as { rows?: SiblingRow[] } | SiblingRow[];
+    const siblingRows: SiblingRow[] = Array.isArray(siblingResult)
+      ? siblingResult
+      : (siblingResult.rows ?? []);
+    for (const r of siblingRows) {
+      if (!v4SiblingMap.has(r.originalId)) v4SiblingMap.set(r.originalId, r.v4SiblingId);
+    }
+  }
+
+  const v4TitleIds = Array.from(
+    new Set([...userRatedIds, ...Array.from(v4SiblingMap.values()), ...candidateTitleIds]),
+  );
+
+  // Scoring needs only the enum + theme fields; the open-vocab arrays
+  // (viewer_pleasures, tone, subtextual_themes) are stored but not
+  // consumed until Phase 2 embedding scoring (ADR-0027 §what-we-chose).
+  const v4DescriptorRows =
+    v4TitleIds.length > 0
+      ? await db
+          .select({
+            titleId: titleDescriptors.titleId,
+            narrativeMode: titleDescriptors.narrativeMode,
+            engagementLevel: titleDescriptors.engagementLevel,
+            stakesScale: titleDescriptors.stakesScale,
+          })
+          .from(titleDescriptors)
+          .where(inArray(titleDescriptors.titleId, v4TitleIds))
+      : [];
+
+  // V4 themes live in the existing title_themes table (re-extracted by
+  // the V4 pipeline with prompt_version='v4.0'). Fetch in the same window
+  // so we can build the V4Descriptor for each title.
+  const v4ThemeRows =
+    v4TitleIds.length > 0
+      ? await db
+          .select({
+            titleId: titleThemes.titleId,
+            slug: titleThemes.themeSlug,
+            confidence: titleThemes.confidence,
+          })
+          .from(titleThemes)
+          .where(inArray(titleThemes.titleId, v4TitleIds))
+      : [];
+
+  const themesByTitle = new Map<string, Array<{ slug: string; confidence: number }>>();
+  for (const r of v4ThemeRows) {
+    let arr = themesByTitle.get(r.titleId);
+    if (!arr) {
+      arr = [];
+      themesByTitle.set(r.titleId, arr);
+    }
+    arr.push({ slug: r.slug, confidence: r.confidence });
+  }
+
+  const candidateDescriptors = new Map<string, V4Descriptor>();
+  const descriptorsByTitleId = new Map<string, V4Descriptor>();
+  for (const d of v4DescriptorRows) {
+    const descriptor: V4Descriptor = {
+      themes: themesByTitle.get(d.titleId) ?? [],
+      narrativeMode: d.narrativeMode,
+      engagementLevel: d.engagementLevel,
+      stakesScale: d.stakesScale,
+    };
+    candidateDescriptors.set(d.titleId, descriptor);
+    descriptorsByTitleId.set(d.titleId, descriptor);
+  }
+
+  // userDescriptors keyed by USER's rated title_id, populated from the
+  // sibling V4 row when the rated row itself has no descriptors (dup-rows
+  // fix above). This lets buildV4TasteVector accumulate V4 signal even
+  // when the user's watch_entries points at the V4-less side of a dup.
+  const userDescriptors = new Map<string, V4Descriptor>();
+  for (const ratedId of userRatedIds) {
+    const v4SourceId = v4SiblingMap.get(ratedId) ?? ratedId;
+    const descriptor = descriptorsByTitleId.get(v4SourceId);
+    if (descriptor) userDescriptors.set(ratedId, descriptor);
+  }
+
+  // Resolved-FK edges only — unresolved strings contribute nothing per
+  // ADR-0027. Pull all; the edge index in packages/ml is O(degree) per
+  // candidate so the candidate-set filter happens implicitly at scoring.
+  const v4EdgeRows = await db
+    .select({
+      fromId: titleComparableTitles.titleId,
+      toId: titleComparableTitles.referencedTitleId,
+      position: titleComparableTitles.position,
+    })
+    .from(titleComparableTitles)
+    .where(isNotNull(titleComparableTitles.referencedTitleId));
+
+  const comparableEdges: ComparableEdge[] = v4EdgeRows
+    .filter((e): e is { fromId: string; toId: string; position: number } => e.toId !== null)
+    .map((e) => ({ fromTitleId: e.fromId, toTitleId: e.toId, position: e.position }));
+
+  // Rating deltas per ADR-0024 bipolar mapping. Anchors are implicit at
+  // delta=+1.0 because they appear in franchiseRows with meanRating≥9
+  // → (9 - 5.5) / 4.5 ≈ 0.78, which is sub-1.0. Bump anchors explicitly
+  // to +1.0 to match the V1 ANCHOR_CONTRIBUTION semantics.
+  //
+  // Dup-rows extension: when a user-rated title has a V4 sibling, map
+  // BOTH ids to the same rating. The comparable graph's edges originate
+  // from whichever row was V4-extracted (typically the AniList side),
+  // so v4ComparableScore's `userRatings.get(e.fromTitleId)` lookups need
+  // to find the sibling id too. Without this, comparable edges from the
+  // AniList row are ignored even when the user has rated the TMDB sibling.
+  const userRatings = new Map<string, number>();
+  const setRatingForBothSides = (id: string, delta: number) => {
+    userRatings.set(id, delta);
+    const sibling = v4SiblingMap.get(id);
+    if (sibling) userRatings.set(sibling, delta);
+  };
+  for (const f of franchiseRows) {
+    setRatingForBothSides(f.representativeTitleId, (f.meanRating - 5.5) / 4.5);
+  }
+  for (const a of anchors) {
+    setRatingForBothSides(a.titleId, 1.0);
+  }
+
+  const v4Taste = buildV4TasteVector({ anchors, ratings }, userDescriptors);
+
+  // Only pass v4 if there's meaningful signal — empty taste vector means
+  // V4 extraction hasn't run yet or the user's titles all lack descriptors.
+  // In that case skip the v4 path and let V1 carry the load.
+  //
+  // Checks all four V4 dimensions (themes / mode / engagement / stakes) to
+  // match recommendForGroup's cold-start logic — a user with signal in
+  // engagementPref or stakesPref but no themesByWeight or modePref WAS
+  // previously treated as no-V4-signal here, causing asymmetric behaviour
+  // between single-user and group recs (caught by 2026-05-16 meta-check).
+  const v4Active =
+    v4Taste.themesByWeight.size > 0 ||
+    v4Taste.modePref.size > 0 ||
+    v4Taste.engagementPref.size > 0 ||
+    v4Taste.stakesPref.size > 0 ||
+    candidateDescriptors.size > 0;
+
+  const v4Inputs: V4RecInputs | undefined = v4Active
+    ? {
+        taste: v4Taste,
+        candidateDescriptors,
+        comparableEdges,
+        userRatings,
+      }
+    : undefined;
+
+  // Ask for 2x REC_LIMIT so post-scoring dedup can drop dup-row hits
+  // without ending up with fewer than REC_LIMIT final recs at the
+  // common case. At Phase 1A scale the extra sort cost is sub-millisecond.
+  const rawRecs = recommendForUser(taste, candidates, REC_LIMIT * 2, themeMembership, v4Inputs);
+
+  // Candidate-side dup-row dedup. Same dup-row pattern that prompted the
+  // user-side sibling-redirect (a single anime exists as both an AniList
+  // anime row AND a TMDB tv row with the same canonical title) surfaces
+  // again on the candidate side: both rows score (differently — the V4-
+  // having row higher, the V4-less row lower), and BOTH appear in the
+  // recs list. Symptom: e.g. OPM-fan sees "Mob Psycho 100" twice in the
+  // top-10 — once at rank 1 (V4-driven) and once at rank 3 (V1-only)
+  // (caught by 2026-05-16 meta-check + validate-rec-profiles smoke).
+  //
+  // Dedup by lowercased title — same key the sibling-redirect uses.
+  // The recommendForUser sort is descending by score, so walking in
+  // order and skipping titles already seen keeps the higher-scoring
+  // (typically V4-having) row from each dup group.
+  //
+  // Phase 2 work: dedup at sync time on (lowercased title, release_year)
+  // to make this fixup unnecessary — see QUEUE.md Phase 2 entry +
+  // ADR-0023 franchise-key follow-up.
+  const candidateTitleById = new Map(candidateTitleTexts.map((t) => [t.id, t.title]));
+  const seenLowerTitle = new Set<string>();
+  const recs: typeof rawRecs = [];
+  for (const r of rawRecs) {
+    const title = candidateTitleById.get(r.titleId);
+    if (title) {
+      const key = title.toLowerCase();
+      if (seenLowerTitle.has(key)) continue;
+      seenLowerTitle.add(key);
+    }
+    recs.push(r);
+    if (recs.length >= REC_LIMIT) break;
+  }
+
+  // Component scales for the explanation layer. Same scales recommendForUser
+  // uses for normalised ranking; passing them to explainRecommendation lets
+  // V4 reasons compete fairly with V1 in the contribution-descending sort
+  // that drives headline copy.
+  const explanationScales = computeRecommendationScales(
+    taste,
+    candidates,
+    themeMembership,
+    v4Inputs,
+  );
 
   // Resolve tag + theme names for the explain pass. Both tables are
   // small (~few hundred rows each); single SELECT per cron run is
@@ -316,14 +603,47 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
   const themeRows2 = await db.select({ id: themes.id, name: themes.name }).from(themes);
   for (const t of themeRows2) themeNames.set(t.id, t.name);
 
+  // V4 explanation supports: closed-vocab theme labels (slug → human label)
+  // and comparable-title-id → title name. THEME_VOCABULARY is in-tree and
+  // covers any V4 theme the LLM can produce. Comparable-title names are
+  // looked up against the user's rated set (the only IDs v4-comparable
+  // reasons reference).
+  const v4ThemeLabels = new Map<string, string>(THEME_VOCABULARY.map((t) => [t.slug, t.label]));
+  const comparableTitleNames = new Map<string, string>();
+  const userTitleNameRows =
+    franchiseRows.length > 0
+      ? await db
+          .select({ id: titles.id, title: titles.title })
+          .from(titles)
+          .where(
+            inArray(
+              titles.id,
+              franchiseRows.map((f) => f.representativeTitleId),
+            ),
+          )
+      : [];
+  for (const t of userTitleNameRows) comparableTitleNames.set(t.id, t.title);
+
   const items = recs.map((r, i) => {
     if (i >= EXPLAIN_DEPTH) {
       return { titleId: r.titleId, score: r.score, reasonHint: null };
     }
     const candidate = candidatesById.get(r.titleId);
     if (!candidate) return { titleId: r.titleId, score: r.score, reasonHint: null };
-    const reasons = explainRecommendation(taste, candidate, themeMembership);
-    const reasonHint = formatReasonHint(reasons, tagInfo, themeNames);
+    const reasons = explainRecommendation(
+      taste,
+      candidate,
+      themeMembership,
+      v4Inputs,
+      explanationScales,
+    );
+    const reasonHint = formatReasonHint(
+      reasons,
+      tagInfo,
+      themeNames,
+      v4ThemeLabels,
+      comparableTitleNames,
+    );
     return { titleId: r.titleId, score: r.score, reasonHint };
   });
 

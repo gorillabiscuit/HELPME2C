@@ -50,8 +50,12 @@ When the world changes:
 | 0019 | ORM (Drizzle) | Accepted | 2026-05-06 |
 | 0020 | Group recommendation strategy | Proposed | 2026-05-07 |
 | 0021 | Streaming availability — ranking vs filter | Proposed | 2026-05-07 |
+| 0025 | Viewer-experience extraction schema | Accepted | 2026-05-15 |
+| 0026 | Storage schema for V4 content descriptors | Accepted | 2026-05-15 |
+| 0027 | V4 content descriptors in the recommendation engine | Accepted | 2026-05-15 |
+| 0028 | Phase 2 embedding-based scoring for open-vocab V4 fields | Proposed | 2026-05-16 |
 
-(More to be filled in as Phase 1 progresses. See `QUEUE.md` for pending decisions.)
+(More to be filled in as Phase 1 progresses. See `QUEUE.md` for pending decisions. ADRs 0022–0024 exist in the directory but are not yet reflected in this index — separate fixup.)
 
 ## Numbering
 

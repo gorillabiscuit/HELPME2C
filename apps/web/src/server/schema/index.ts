@@ -5,4 +5,6 @@ export * from './watch';
 export * from './recommendations';
 export * from './themes';
 export * from './title-themes';
+export * from './title-descriptors';
+export * from './title-comparable-titles';
 export * from './groups';

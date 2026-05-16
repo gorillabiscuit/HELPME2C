@@ -127,6 +127,27 @@
       "when": 1778844236103,
       "tag": "0017_melodic_emma_frost",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1778869999641,
+      "tag": "0018_sloppy_storm",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1778873295464,
+      "tag": "0019_tense_venus",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1778920000000,
+      "tag": "0020_enable_pg_trgm",
+      "breakpoints": true
     }
   ]
 }
