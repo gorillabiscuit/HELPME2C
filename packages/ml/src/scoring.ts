@@ -244,18 +244,17 @@ function v4EnumFitScore(v4Taste: V4TasteVector, descriptor: V4Descriptor): numbe
 }
 
 /**
- * Total V4 contribution for one candidate. Composes:
+ * Total V4 contribution for one candidate, computed as raw (unnormalised)
+ * weighted sum. Used by the explanation layer (per-candidate breakdown
+ * doesn't have access to the candidate set, so it can't normalise).
  *
- *   v4Score(c) = β × themeScore(c)        if descriptor present, else 0
- *              + γ × comparableScore(c)    if edges + ratings present
- *              + δ × enumFitScore(c)       if descriptor present, else 0
+ * The recommender's ranking path uses v4Components + normalisation
+ * instead — see v4Components below and recommendForUser's two-pass
+ * scoring loop. Per ADR-0027 Edit 2026-05-16, raw v4Score values are
+ * three orders of magnitude smaller than V1 baseTagScore so they have
+ * no influence on rankings unless normalised.
  *
- * Returns 0 when v4 is inactive (no taste or no inputs) — the V1 score
- * is unchanged in that case.
- *
- * Note: comparableScore fires even when the candidate has no V4
- * descriptor (the edges are title-id-keyed, descriptor-independent).
- * theme + enum-fit need the descriptor to compute.
+ * Kept for backward compat + explanation use, NOT for ranking.
  */
 export function v4Score(
   candidateTitleId: string,
@@ -264,15 +263,100 @@ export function v4Score(
   userRatings: ReadonlyMap<string, number> | undefined,
   edgeIndex: ComparableEdgeIndex | undefined,
 ): number {
-  let score = 0;
-  if (v4Taste && descriptor) {
-    score += V4_THEME_WEIGHT * v4ThemeScore(v4Taste, descriptor);
-    score += V4_ENUM_WEIGHT * v4EnumFitScore(v4Taste, descriptor);
+  const c = v4Components(candidateTitleId, v4Taste, descriptor, userRatings, edgeIndex);
+  return (
+    V4_THEME_WEIGHT * c.theme + V4_COMPARABLE_WEIGHT * c.comparable + V4_ENUM_WEIGHT * c.enumFit
+  );
+}
+
+/** Raw per-component scores for one candidate. The recommender calls
+ * this once per candidate, then normalises across the set before
+ * applying weights — see scoreCombinedV4. Per ADR-0027 the components
+ * cannot be combined raw because V1 baseTag is on a 0-100,000 scale
+ * while V4 components are on a 0-1 scale, so naive addition makes V4
+ * inert. Normalisation across the candidate set makes weights mean
+ * what they say. */
+export interface V4Components {
+  /** Closed-vocab theme overlap (unweighted). */
+  readonly theme: number;
+  /** Comparable-graph contribution (unweighted, signed — rating valence
+   * flows through, can be negative). */
+  readonly comparable: number;
+  /** Enum-fit contribution (unweighted, signed). */
+  readonly enumFit: number;
+}
+
+/** Compute the three V4 raw components for one candidate. Returns
+ * all-zero when v4 inputs are missing. */
+export function v4Components(
+  candidateTitleId: string,
+  v4Taste: V4TasteVector | undefined,
+  descriptor: V4Descriptor | undefined,
+  userRatings: ReadonlyMap<string, number> | undefined,
+  edgeIndex: ComparableEdgeIndex | undefined,
+): V4Components {
+  const theme = v4Taste && descriptor ? v4ThemeScore(v4Taste, descriptor) : 0;
+  const enumFit = v4Taste && descriptor ? v4EnumFitScore(v4Taste, descriptor) : 0;
+  const comparable =
+    edgeIndex && userRatings && userRatings.size > 0
+      ? v4ComparableScore(candidateTitleId, edgeIndex, userRatings)
+      : 0;
+  return { theme, comparable, enumFit };
+}
+
+/** Component scales for the four raw scoring channels. Computed once
+ * per scoring call from max-of-absolute-values across the candidate
+ * set. Used to normalise raw component values to [-1, 1] before
+ * applying weights — see ADR-0027 Edit 2026-05-16. */
+export interface ComponentScales {
+  readonly baseTag: number;
+  readonly v4Theme: number;
+  readonly v4Comparable: number;
+  readonly v4EnumFit: number;
+}
+
+/** Compute max-of-absolute-values per component across the candidate
+ * set. Zero when all values are zero — normaliseToScale returns 0 in
+ * that case (component contributes nothing). */
+export function computeComponentScales(
+  baseTagScores: ReadonlyArray<number>,
+  v4ComponentsByTitle: ReadonlyArray<V4Components>,
+): ComponentScales {
+  let baseTag = 0;
+  let v4Theme = 0;
+  let v4Comparable = 0;
+  let v4EnumFit = 0;
+  for (const s of baseTagScores) {
+    const a = Math.abs(s);
+    if (a > baseTag) baseTag = a;
   }
-  if (edgeIndex && userRatings && userRatings.size > 0) {
-    score += V4_COMPARABLE_WEIGHT * v4ComparableScore(candidateTitleId, edgeIndex, userRatings);
+  for (const c of v4ComponentsByTitle) {
+    const at = Math.abs(c.theme);
+    const ac = Math.abs(c.comparable);
+    const ae = Math.abs(c.enumFit);
+    if (at > v4Theme) v4Theme = at;
+    if (ac > v4Comparable) v4Comparable = ac;
+    if (ae > v4EnumFit) v4EnumFit = ae;
   }
-  return score;
+  return { baseTag, v4Theme, v4Comparable, v4EnumFit };
+}
+
+/** Normalise a raw value against a per-component scale. Sign-preserving
+ * (a negative input produces a negative output in [-1, 0]). Zero scale
+ * → zero output (component contributes nothing to total). */
+export function normaliseToScale(value: number, scale: number): number {
+  if (scale === 0) return 0;
+  return value / scale;
+}
+
+/** Total V4 contribution after normalisation. Computed per-candidate
+ * using the pre-computed component scales. */
+export function scoreCombinedV4(components: V4Components, scales: ComponentScales): number {
+  return (
+    V4_THEME_WEIGHT * normaliseToScale(components.theme, scales.v4Theme) +
+    V4_COMPARABLE_WEIGHT * normaliseToScale(components.comparable, scales.v4Comparable) +
+    V4_ENUM_WEIGHT * normaliseToScale(components.enumFit, scales.v4EnumFit)
+  );
 }
 
 /**

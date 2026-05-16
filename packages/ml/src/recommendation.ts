@@ -196,8 +196,11 @@ import {
   buildComparableEdgeIndex,
   buildTagThemeIndex,
   buildTasteTheme,
+  computeComponentScales,
+  normaliseToScale,
   scoreCandidate,
-  v4Score,
+  scoreCombinedV4,
+  v4Components,
 } from './scoring';
 
 // ---------------------------------------------------------------------------
@@ -338,6 +341,13 @@ export function buildV4TasteVector(
   return { themesByWeight, modePref, engagementPref, stakesPref };
 }
 
+// Weight on the V1 baseTagScore component in the normalised combination.
+// Held at 1.0 — V1 has been the production signal and is the reference
+// scale; the V4 weights (β/γ/δ in scoring.ts) are calibrated relative to
+// this baseline. Changing this is a load-bearing decision; if needed,
+// promote to a per-call parameter or an ADR.
+const BASE_TAG_WEIGHT = 1.0;
+
 export function recommendForUser(
   taste: UserTasteVector,
   candidates: ReadonlyArray<TitleTagSet>,
@@ -351,21 +361,45 @@ export function recommendForUser(
   // lookups are O(degree) not O(|edges|).
   const edgeIndex = v4 ? buildComparableEdgeIndex(v4.comparableEdges) : undefined;
 
-  const scored: Recommendation[] = [];
+  // Per ADR-0027 Edit 2026-05-16: V1 baseTagScore and V4 components are
+  // on radically different scales (V1 in the 0-100,000 range from
+  // tag.weight × tag.weight; V4 in the 0-1 range from confidence ×
+  // rating-delta). Adding them raw makes V4 contribute three orders of
+  // magnitude less than V1 — V4 wiring becomes decorative.
+  //
+  // Two-pass scoring solves this:
+  //   1. Compute raw per-component scores for every candidate
+  //   2. Find max-of-|values| per component across the candidate set
+  //   3. Normalise each component to [-1, 1] (sign-preserving)
+  //   4. Combine via weighted sum
+  //
+  // Weights now genuinely mean "this component counts X as much as V1
+  // tags." BASE_TAG_WEIGHT=1.0 is the reference; V4 weights live in
+  // scoring.ts.
+
+  const baseTagScores: number[] = [];
+  const v4Comps: ReturnType<typeof v4Components>[] = [];
   for (const candidate of candidates) {
-    const baseScore = scoreCandidate(taste, candidate, tagThemes, tasteTheme);
-    const v4Contribution = v4Score(
-      candidate.titleId,
-      v4?.taste,
-      v4?.candidateDescriptors.get(candidate.titleId),
-      v4?.userRatings,
-      edgeIndex,
+    baseTagScores.push(scoreCandidate(taste, candidate, tagThemes, tasteTheme));
+    v4Comps.push(
+      v4Components(
+        candidate.titleId,
+        v4?.taste,
+        v4?.candidateDescriptors.get(candidate.titleId),
+        v4?.userRatings,
+        edgeIndex,
+      ),
     );
-    scored.push({
-      titleId: candidate.titleId,
-      score: baseScore + v4Contribution,
-    });
   }
+
+  const scales = computeComponentScales(baseTagScores, v4Comps);
+
+  const scored: Recommendation[] = candidates.map((candidate, i) => ({
+    titleId: candidate.titleId,
+    score:
+      BASE_TAG_WEIGHT * normaliseToScale(baseTagScores[i]!, scales.baseTag) +
+      scoreCombinedV4(v4Comps[i]!, scales),
+  }));
 
   scored.sort((a, b) => {
     if (a.score !== b.score) return b.score - a.score;
@@ -488,34 +522,42 @@ export function recommendForGroup(
   // Edge index is shared across members — same graph for everyone.
   const edgeIndex = v4 ? buildComparableEdgeIndex(v4.comparableEdges) : undefined;
 
-  // Precompute per-member: tasteTheme + raw score for every candidate +
-  // per-member max raw score (for normalisation). One pass over
-  // candidates per member. `isColdStart` distinguishes "no taste vector
-  // yet" (true cold-start — abstain from veto) from "has taste, no
-  // candidate matches" (the AWM mixed-medium failure mode per ADR-0020
-  // §what-would-change-our-mind — should veto).
+  // Precompute per-member: tasteTheme + per-component scores per
+  // candidate + per-component scales for normalisation + final
+  // normalised scores. One pass over candidates per member.
+  // `isColdStart` distinguishes "no taste vector yet" (true cold-start
+  // — abstain from veto) from "has taste, no candidate matches" (the
+  // AWM mixed-medium failure mode per ADR-0020 §what-would-change-our-
+  // mind — should veto).
   //
-  // V4 contribution adds to each per-member raw score before
-  // normalisation, so the per-user-0..1 scale (which veto/AWM operate on)
-  // still applies. Both V1 and V4 signal compete for the same per-user
-  // dynamic range — disagreement on a V4 axis (one member loves a
-  // deconstruction, another hates it) flows through to the disagreement
-  // penalty just like V1 tag disagreement.
+  // V4 contributes through the same per-component normalisation as
+  // recommendForUser (ADR-0027 Edit 2026-05-16). Each member's raw
+  // V1/V4 components are normalised to that member's max-per-component
+  // across the candidate set, then weighted-summed. The result is then
+  // normalised AGAIN (per-user max) for veto/AWM. Two layers of
+  // normalisation: one for V1-vs-V4 commensurability per member, one
+  // for cross-member commensurability.
   const memberContexts = members.map((m) => {
     const tasteTheme = buildTasteTheme(m.taste, tagThemes);
     const v4Taste = v4?.memberTastes.get(m.userId);
     const v4Ratings = v4?.memberRatings.get(m.userId);
-    const rawScores = candidates.map((c) => {
-      const base = scoreCandidate(m.taste, c, tagThemes, tasteTheme);
-      const v4Contribution = v4Score(
+
+    const baseTagScores = candidates.map((c) => scoreCandidate(m.taste, c, tagThemes, tasteTheme));
+    const v4Comps = candidates.map((c) =>
+      v4Components(
         c.titleId,
         v4Taste,
         v4?.candidateDescriptors.get(c.titleId),
         v4Ratings,
         edgeIndex,
-      );
-      return base + v4Contribution;
-    });
+      ),
+    );
+    const scales = computeComponentScales(baseTagScores, v4Comps);
+    const rawScores = candidates.map(
+      (_, i) =>
+        BASE_TAG_WEIGHT * normaliseToScale(baseTagScores[i]!, scales.baseTag) +
+        scoreCombinedV4(v4Comps[i]!, scales),
+    );
     let maxRaw = 0;
     for (const s of rawScores) {
       if (s > maxRaw) maxRaw = s;
@@ -523,9 +565,7 @@ export function recommendForGroup(
     // Cold-start: no V1 taste AND no V4 signal across ANY of the four
     // V4 dimensions (themes / mode / engagement / stakes). A user with
     // signal in any V4 dimension has expressed preferences and should
-    // not be treated as cold-start. Keying only off themesByWeight would
-    // incorrectly cold-start a user whose extracted descriptors produced
-    // enum preferences but no theme overlaps.
+    // not be treated as cold-start.
     const hasV4Signal =
       v4Taste !== undefined &&
       (v4Taste.themesByWeight.size > 0 ||

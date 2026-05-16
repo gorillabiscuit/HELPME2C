@@ -19,13 +19,26 @@ Wire **five of the eight V4 fields** into `packages/ml` scoring at Phase 1A. Def
 ### Score formula
 
 ```
-totalScore = baseTagScore                  // existing — unchanged
-           + β × themeScore                // NEW — V4 closed-vocab themes
-           + γ × comparableScore           // NEW — comparable-title graph
-           + δ × enumFitScore              // NEW — mode + engagement + stakes
+totalScore = α × normalise(baseTagScore)                          // V1
+           + β × normalise(themeScore)                            // V4 closed-vocab
+           + γ × normalise(comparableScore, signed)               // V4 graph
+           + δ × normalise(enumFitScore, signed)                  // V4 enums
 ```
 
-**Initial weights:** `β = 1.0`, `γ = 0.8`, `δ = 0.3`. Tunable constants in `packages/ml`. These are strawmen anchored on the intuition that closed-vocab theme overlap is the moat signal (β at parity with baseline), the comparable-titles graph is high-leverage but its resolution rate is unknown until V4 runs at scale (γ slightly below), and the three enum fields are coarser per-field signals that earn weight only when summed (δ small).
+Where `normalise(x)` divides `x` by `max(|values|)` across the candidate set, sign-preserving, yielding `[-1, 1]`. **`α = 1.0`** is the reference weight on V1. **`β = 1.0`, `γ = 0.8`, `δ = 0.3`** are tunable constants in `packages/ml/src/scoring.ts`. After normalisation these weights genuinely mean "this component counts X as much as V1 tags toward the ranking" — pre-normalisation they were meaningless because component scales differed by ~3 orders of magnitude (see Edit 2026-05-16).
+
+### Edit 2026-05-16 — per-component normalisation
+
+The original linear-raw-combination formula above was found to be mathematically incoherent during the bulk-extraction smoke pass. V1 `baseTagScore` is on a 0–100,000 scale (sum of `tag.weight × tag.weight`, both 0–100); V4 components are on a 0–1 scale (`confidence × rating-delta × position-weight`, each 0–1). Adding them raw with `β = 1.0` makes V4 contribute three orders of magnitude less than V1; V4 wiring becomes decorative.
+
+The pivot: per-component max-of-absolute-values normalisation across the candidate set, computed in one pass, applied before the weighted sum. Implementation: `computeComponentScales` + `normaliseToScale` + `scoreCombinedV4` in `packages/ml/src/scoring.ts`. Headline test `packages/ml/src/v4-normalisation.test.ts` asserts a V4-preferred candidate outranks a V1-preferred candidate after normalisation — the assertion that would fail if the raw-sum approach were restored.
+
+Backward compat preserved: V4 absent → V1 normalisation is monotonic, ordering unchanged. All 164 pre-existing tests pass without modification.
+
+Caveats kept on the "what would change our mind" list:
+
+- The headline copy generator (`formatReasonHint`) walks reasons by raw contribution descending; V4 reasons surface only as fallback when V1 has no usable reason, not when V4 is normalised-higher than V1. Normalised-contribution explanation is a Phase 2 follow-up — requires passing per-component scales into the explanation layer.
+- Per-batch dependence: scores are now relative to the specific candidate set scored. Acceptable for the current use (we always score the full candidate set together). Becomes a concern if we ever re-rank smaller subsets.
 
 ### Deferred to Phase 2
 
