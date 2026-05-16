@@ -94,9 +94,7 @@ async function lookupTitles(titles: ReadonlyArray<string>): Promise<Map<string, 
   return map;
 }
 
-async function setupSyntheticUser(
-  profile: ProfileSpec,
-): Promise<{
+async function setupSyntheticUser(profile: ProfileSpec): Promise<{
   userId: string;
   resolvedRatings: Array<{ titleId: string; title: string; rating: number }>;
 }> {
@@ -245,10 +243,31 @@ async function runProfile(profile: ProfileSpec): Promise<void> {
   }
 }
 
+async function cleanupStaleValidationUsers(): Promise<void> {
+  // Defensive startup sweep — earlier crashed runs (e.g. the "tracked" vs
+  // "tracking" enum mismatch) leave orphan rows because setupSyntheticUser
+  // threw between user-INSERT and watch_entries-INSERT, before runProfile's
+  // finally block could see the userId. Clean up any clerk_id matching
+  // the synthetic prefix so re-runs don't accumulate.
+  const stale = (await sql`
+    SELECT id, clerk_id FROM users WHERE clerk_id LIKE 'validation_%'
+  `) as Array<{ id: string; clerk_id: string }>;
+  if (stale.length === 0) return;
+  console.log(`Found ${stale.length} stale validation users from prior runs — cleaning up`);
+  for (const u of stale) {
+    await sql`DELETE FROM user_recommendations WHERE user_id = ${u.id}`;
+    await sql`DELETE FROM watch_entries WHERE user_id = ${u.id}`;
+    await sql`DELETE FROM users WHERE id = ${u.id}`;
+  }
+  console.log(`Cleaned up ${stale.length} stale users.\n`);
+}
+
 async function main(): Promise<void> {
   console.log(`Multi-profile rec validation`);
   console.log(`Started ${new Date().toISOString()}`);
   console.log(`Profiles: ${PROFILES.length}`);
+
+  await cleanupStaleValidationUsers();
 
   for (const profile of PROFILES) {
     try {
