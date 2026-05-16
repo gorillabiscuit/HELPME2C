@@ -1,6 +1,6 @@
 import { and, eq, ilike, notInArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { mediaTypeEnum, titles, users, watchEntries } from '../schema';
+import { mediaTypeEnum, recFeedback, titles, users, watchEntries } from '../schema';
 import { dedupeByFranchise } from '../lib/franchise';
 import { protectedProcedure, router } from '../trpc';
 
@@ -48,6 +48,14 @@ export const titlesRouter = router({
            * see shows they've already rated or planned. Onboarding leaves
            * this off (new users have no entries anyway). */
           excludeUserEntries: z.boolean().optional().default(false),
+          /** When true, exclude titles the user has actioned via
+           * recFeedback (dismissed via "Not interested" OR marked
+           * unfamiliar via "Don't know it"). Distinct from the algorithm's
+           * "unfamiliar is a soft signal" rule: this is purely a picker-UI
+           * concern — the user has already told us "don't show me this
+           * card right now", so the popular grid honours that even when
+           * the engine still considers the title surface-able later. */
+          excludeRecFeedback: z.boolean().optional().default(false),
         })
         .optional(),
     )
@@ -81,17 +89,28 @@ export const titlesRouter = router({
       } as const;
 
       // Build the exclusion list of title IDs the user has already
-      // touched. Only fetched when `excludeUserEntries` is true to
-      // keep the cold-start path (onboarding) cheap.
-      const userTouchedIds = input?.excludeUserEntries
-        ? (
-            await ctx.db
+      // touched — watch_entries (added / rated / planned) plus optionally
+      // rec_feedback (Not interested / Don't know it). Only fetched when
+      // the respective flag is set to keep the cold-start path cheap.
+      const [watchTouchedIds, feedbackTouchedIds] = await Promise.all([
+        input?.excludeUserEntries
+          ? ctx.db
               .select({ titleId: watchEntries.titleId })
               .from(watchEntries)
               .innerJoin(users, eq(watchEntries.userId, users.id))
               .where(eq(users.clerkId, ctx.userId))
-          ).map((r) => r.titleId)
-        : [];
+              .then((rows) => rows.map((r) => r.titleId))
+          : Promise.resolve<string[]>([]),
+        input?.excludeRecFeedback
+          ? ctx.db
+              .select({ titleId: recFeedback.titleId })
+              .from(recFeedback)
+              .innerJoin(users, eq(recFeedback.userId, users.id))
+              .where(eq(users.clerkId, ctx.userId))
+              .then((rows) => rows.map((r) => r.titleId))
+          : Promise.resolve<string[]>([]),
+      ]);
+      const userTouchedIds = Array.from(new Set([...watchTouchedIds, ...feedbackTouchedIds]));
       const hasExclusion = userTouchedIds.length > 0;
 
       // Caller specified a single mediaType — stratification doesn't

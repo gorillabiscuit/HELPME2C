@@ -92,4 +92,21 @@ export const recFeedbackRouter = router({
         .limit(1);
       return row ?? null;
     }),
+
+  // Returns every (titleId, dismissed, unfamiliar) row for the current
+  // user. Used by /onboarding so the picker can hide titles the user has
+  // already actioned via "Not interested" or "Don't know it" — the watch
+  // entries alone aren't enough because those buttons only write here.
+  list: protectedProcedure.query(async ({ ctx }) => {
+    const internalUserId = await resolveInternalUserId(ctx.db, ctx.userId);
+    if (!internalUserId) return [];
+    return ctx.db
+      .select({
+        titleId: recFeedback.titleId,
+        dismissed: recFeedback.dismissed,
+        unfamiliar: recFeedback.unfamiliar,
+      })
+      .from(recFeedback)
+      .where(eq(recFeedback.userId, internalUserId));
+  }),
 });
