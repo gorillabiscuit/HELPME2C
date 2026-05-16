@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,6 +36,21 @@ export function AgeCheckForm({ initialCountry }: AgeCheckFormProps) {
   const [country, setCountry] = useState(initialKnown);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Browser back-forward cache (bfcache) will otherwise restore this
+  // page's in-memory snapshot when the user navigates back from
+  // /onboarding — skipping the server-side ageVerified check in
+  // app/age-check/page.tsx entirely. router.refresh() forces a fresh
+  // RSC fetch which re-runs the redirect.
+  useEffect(() => {
+    function onPageShow(event: PageTransitionEvent) {
+      if (event.persisted) {
+        router.refresh();
+      }
+    }
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, [router]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
