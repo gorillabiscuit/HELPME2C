@@ -125,14 +125,18 @@ export const titlesRouter = router({
           .from(titles)
           .where(whereClause)
           .orderBy(sql`${titles.popularityScore} DESC NULLS LAST, ${titles.title} ASC`)
-          .limit(limit * 3);
+          .limit(limit * 3 + userTouchedIds.length);
         return dedupeByFranchise(rows).slice(0, limit);
       }
 
       // No filter — stratify across all three media types. Overfetch
       // 2× per type before dedup so each bucket has enough survivors to
-      // contribute its share to the round-robin merge.
-      const perType = limit * 2;
+      // contribute its share to the round-robin merge. The +touched term
+      // keeps the un-actioned pool at ≥ limit*2 even after the user has
+      // burned through a lot of cards — without it, a long onboarding
+      // session would deplete the picker as soon as actioned count
+      // outgrew the static fetch window.
+      const perType = limit * 2 + userTouchedIds.length;
       const mediaTypes = ['tv', 'film', 'anime'] as const;
       const buckets = await Promise.all(
         mediaTypes.map((mt) =>
