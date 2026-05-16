@@ -38,7 +38,7 @@ import { THEME_VOCABULARY, THEME_SLUGS, labelForSlug } from './vocabulary';
 type SqlBinding = NeonQueryFunction<false, false>;
 
 export const EXTRACT_MODEL = 'claude-sonnet-4-6';
-export const PROMPT_VERSION = 'v4.0';
+export const PROMPT_VERSION = 'v4.1';
 
 const NARRATIVE_MODES = new Set([
   'plays-straight',
@@ -115,6 +115,12 @@ Return JSON with the following EIGHT fields. No prose, JSON only.
 3. "tone": 2-4 short tonal descriptors (one or two words each) describing how the work FEELS. Examples: "deadpan", "melancholic", "operatic", "frenetic", "wistful", "sardonic".
 
 4. "narrative_mode": exactly one of "plays-straight" | "deconstructs" | "parodies" | "reinvents" | "hybrid".
+   - plays-straight: the work sincerely executes its genre. **Darker tone, moral complexity, or thematic depth does NOT make a show "deconstructs"** — Breaking Bad, Better Call Saul, Death Note, and Jujutsu Kaisen all play their genres straight even though they're morally heavy. The shonen-with-stakes shows like Demon Slayer and Attack on Titan are also plays-straight (or reinvents); they don't interrogate the form.
+   - deconstructs: the work explicitly foregrounds and examines its genre's conventions as its CENTRAL PROJECT. The genre-interrogation must be the point, not incidental. One Punch Man (examines what heroism means when victory costs nothing), Evangelion (examines what mecha-piloting does to teenagers), Mob Psycho 100 (examines the cost of psychic-hero power) — these are deconstructions because the meta-commentary is load-bearing to the work itself.
+   - parodies: openly sends up its genre for comic effect.
+   - reinvents: keeps the form but radically reshapes it within the genre. The Wire reinventing the police procedural, The Good Place reinventing the sitcom, Attack on Titan's later seasons reinventing battle-shonen into political war drama.
+   - hybrid: meaningfully blends two or more modes (e.g. Cowboy Bebop blending noir, western, and sci-fi).
+   - **Tiebreaker rule**: when in doubt between plays-straight and deconstructs, prefer plays-straight unless the work is famously discussed as a "deconstruction" in critical or fan discourse. "This show has dark themes" or "this show is darker than most shonen" is NOT enough — the work must explicitly interrogate its form.
 
 5. "subtextual_themes": 2-4 free-form phrases (5-12 words each) — for VIEWERS WHO WANT IT, what depth is there beneath the surface? Not every work has subtext worth naming. If a work is genuinely surface-only (a popcorn action film, a comfort sitcom), return []. Don't manufacture subtext that isn't load-bearing.
 
