@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PreviewOverlay } from '@/components/preview-overlay';
 import { TitleQuickActions } from '@/components/title-quick-actions';
+import { franchiseDisplayName } from '@/server/lib/franchise';
 import { cn } from '@/lib/utils';
 
 type WatchStatus = 'watching' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_watch';
@@ -34,6 +35,11 @@ interface InitialEntry {
 interface OnboardingFlowProps {
   initialPopular: TitleSummary[];
   initialEntries: InitialEntry[];
+  /** Title IDs the user has already actioned via "Not interested"
+   * (dismissed) or "Don't know it" (unfamiliar). The picker hides these
+   * — without it, the cards would fade out and then pop straight back
+   * in, because neither action writes a watch entry. */
+  hiddenTitleIds: string[];
   /** Which step to show on mount. `'intro'` is the post-signup landing
    * (value-prop screen → Let's go button → picker). `'picker'` skips
    * the intro for users arriving via a deliberate "start picking" CTA
@@ -57,6 +63,7 @@ const TRANSITION_OUT_MS = 220;
 export function OnboardingFlow({
   initialPopular,
   initialEntries,
+  hiddenTitleIds,
   initialPhase = 'intro',
 }: OnboardingFlowProps) {
   const router = useRouter();
@@ -127,10 +134,16 @@ export function OnboardingFlow({
   // (`exiting`) stay rendered until their transition finishes. Search
   // results are not filtered — if a user explicitly searched a title
   // they already rated, they want to see it.
+  //
+  // hiddenIds captures titles actioned via "Not interested" / "Don't
+  // know it" — neither writes a watch entry, so the entry-based check
+  // alone wouldn't hide them.
+  const hiddenIds = useMemo(() => new Set(hiddenTitleIds), [hiddenTitleIds]);
   const titlesToShow = showingSearchResults
     ? rawTitlesToShow
     : rawTitlesToShow.filter((title) => {
         if (exiting.has(title.id)) return true;
+        if (hiddenIds.has(title.id)) return false;
         const entry = entryByTitleId.get(title.id);
         return !entry || entry.status === null;
       });
@@ -171,12 +184,13 @@ export function OnboardingFlow({
             size="lg"
             onClick={() => {
               // Set client state first (instant UI swap to picker), then
-              // push the ?start=pick marker into the URL. The marker
-              // tells the Server Component in apps/web/src/app/onboarding/page.tsx
-              // not to redirect us to /library?view=ranked when our first
-              // rating triggers TitleQuickActions' router.refresh(). The
-              // URL survives router.refresh, so the picker stays mounted
-              // for the whole picking session.
+              // push the ?start=pick marker into the URL. The Server
+              // Component (apps/web/src/app/onboarding/page.tsx) reads
+              // that marker to set initialPhase='picker' — so when a
+              // rating triggers TitleQuickActions' router.refresh(),
+              // the server re-renders with initialPhase='picker' and
+              // the user stays on the picker instead of being bounced
+              // back to the intro screen.
               setPhase('picker');
               router.replace('/onboarding?start=pick');
             }}
@@ -229,6 +243,12 @@ export function OnboardingFlow({
         <ul className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
           {titlesToShow.map((title) => {
             const mediaTypeLabel = MEDIA_TYPE_LABEL[title.mediaType] ?? title.mediaType;
+            // In onboarding the user is rating "the show" not "the season".
+            // Strip season suffixes for display so "My Hero Academia 2nd
+            // Season" reads as "My Hero Academia". The rec engine already
+            // rolls ratings up by franchise, so storing against this
+            // specific titleId is fine — only the display needed fixing.
+            const displayTitle = franchiseDisplayName(title.title);
             const entry = entryByTitleId.get(title.id);
             const isExiting = exiting.has(title.id);
             return (
@@ -256,11 +276,11 @@ export function OnboardingFlow({
                     <PreviewOverlay
                       trailerProvider={title.trailerProvider}
                       trailerVideoId={title.trailerVideoId}
-                      titleText={title.title}
+                      titleText={displayTitle}
                     />
                   </div>
                   <h3 className="mt-2 truncate text-sm font-medium text-foreground group-hover:underline">
-                    {title.title}
+                    {displayTitle}
                   </h3>
                   <p className="text-xs text-muted-foreground">
                     {[mediaTypeLabel, title.releaseYear?.toString()]
