@@ -14,7 +14,9 @@ These are NOT decisions yet. They're strawmen for the new-session Claude + human
 
 ---
 
-## ADR-XXXX: Phase 2 — embedding-based scoring for `viewer_pleasures` / `tone` / `subtextual_themes`
+## ADR-0028 (Proposed): Phase 2 — embedding-based scoring
+
+**Promoted to a full ADR draft on 2026-05-16: see [0028-phase-2-embedding-scoring.md](0028-phase-2-embedding-scoring.md).** The detailed strawman below was the QUEUE-stage notes; the ADR is now the canonical source of truth (with updated 2026-05-16 pricing data + the Voyage-3-large upgrade path documented). Resolve this QUEUE entry when ADR-0028 flips to Accepted.
 
 **Recommendation:** OpenAI `text-embedding-3-small` (1536 dim) + pgvector cosine similarity, embedded per-field and aggregated at score time. Run as an Inngest cron after V4 extraction. Phase 2 work per [PROJECT.md §96](../../PROJECT.md) and [ADR-0027 §what-we-rejected](0027-content-descriptor-scoring.md).
 
