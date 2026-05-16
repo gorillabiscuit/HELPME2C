@@ -502,8 +502,18 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
   // Only pass v4 if there's meaningful signal — empty taste vector means
   // V4 extraction hasn't run yet or the user's titles all lack descriptors.
   // In that case skip the v4 path and let V1 carry the load.
+  //
+  // Checks all four V4 dimensions (themes / mode / engagement / stakes) to
+  // match recommendForGroup's cold-start logic — a user with signal in
+  // engagementPref or stakesPref but no themesByWeight or modePref WAS
+  // previously treated as no-V4-signal here, causing asymmetric behaviour
+  // between single-user and group recs (caught by 2026-05-16 meta-check).
   const v4Active =
-    v4Taste.themesByWeight.size > 0 || v4Taste.modePref.size > 0 || candidateDescriptors.size > 0;
+    v4Taste.themesByWeight.size > 0 ||
+    v4Taste.modePref.size > 0 ||
+    v4Taste.engagementPref.size > 0 ||
+    v4Taste.stakesPref.size > 0 ||
+    candidateDescriptors.size > 0;
 
   const v4Inputs: V4RecInputs | undefined = v4Active
     ? {
@@ -514,7 +524,41 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
       }
     : undefined;
 
-  const recs = recommendForUser(taste, candidates, REC_LIMIT, themeMembership, v4Inputs);
+  // Ask for 2x REC_LIMIT so post-scoring dedup can drop dup-row hits
+  // without ending up with fewer than REC_LIMIT final recs at the
+  // common case. At Phase 1A scale the extra sort cost is sub-millisecond.
+  const rawRecs = recommendForUser(taste, candidates, REC_LIMIT * 2, themeMembership, v4Inputs);
+
+  // Candidate-side dup-row dedup. Same dup-row pattern that prompted the
+  // user-side sibling-redirect (a single anime exists as both an AniList
+  // anime row AND a TMDB tv row with the same canonical title) surfaces
+  // again on the candidate side: both rows score (differently — the V4-
+  // having row higher, the V4-less row lower), and BOTH appear in the
+  // recs list. Symptom: e.g. OPM-fan sees "Mob Psycho 100" twice in the
+  // top-10 — once at rank 1 (V4-driven) and once at rank 3 (V1-only)
+  // (caught by 2026-05-16 meta-check + validate-rec-profiles smoke).
+  //
+  // Dedup by lowercased title — same key the sibling-redirect uses.
+  // The recommendForUser sort is descending by score, so walking in
+  // order and skipping titles already seen keeps the higher-scoring
+  // (typically V4-having) row from each dup group.
+  //
+  // Phase 2 work: dedup at sync time on (lowercased title, release_year)
+  // to make this fixup unnecessary — see QUEUE.md Phase 2 entry +
+  // ADR-0023 franchise-key follow-up.
+  const candidateTitleById = new Map(candidateTitleTexts.map((t) => [t.id, t.title]));
+  const seenLowerTitle = new Set<string>();
+  const recs: typeof rawRecs = [];
+  for (const r of rawRecs) {
+    const title = candidateTitleById.get(r.titleId);
+    if (title) {
+      const key = title.toLowerCase();
+      if (seenLowerTitle.has(key)) continue;
+      seenLowerTitle.add(key);
+    }
+    recs.push(r);
+    if (recs.length >= REC_LIMIT) break;
+  }
 
   // Component scales for the explanation layer. Same scales recommendForUser
   // uses for normalised ranking; passing them to explainRecommendation lets
