@@ -287,6 +287,16 @@ export function stripTrailingParens(title: string): string {
   return title.replace(/\s*\([^()]*\)\s*$/, '').trim();
 }
 
+// Trigram similarity threshold for the FK-resolution fuzzy fallback.
+// Calibrated from sampled unresolved strings: 0.5 catches the wins
+// (One Punch Man → One-Punch Man at 1.000, Your Name (2016) → Your
+// Name. at 0.667, Naruto Shippuden (Pain Arc) → Naruto: Shippuden at
+// 0.654) without false-positiving across-genre titles. Raise toward
+// 0.7 if false positives become a problem; lower toward 0.4 if too
+// many wins are missed (but watch for translation-variant noise — at
+// 0.4 "Demon Slayer" might match "Slayers" wrongly).
+export const TRIGRAM_THRESHOLD = 0.5;
+
 export async function persistDescriptors(
   titleId: string,
   d: ExtractedDescriptors,
@@ -320,14 +330,39 @@ export async function persistDescriptors(
     const key = r.title.toLowerCase();
     if (!resolvedMap.has(key)) resolvedMap.set(key, r.id);
   }
-  // Look up each comparable: try raw first, then parens-stripped fallback.
-  const resolveComparable = (rawTitle: string): string | null => {
+  // Look up each comparable in three stages, cheapest first:
+  //   1. raw exact-match (case-insensitive)
+  //   2. parens-stripped exact-match (handles "Your Name (2016)" etc)
+  //   3. trigram similarity fallback (handles "Demon Slayer" → "Demon
+  //      Slayer: Kimetsu no Yaiba" and other name-shape variants)
+  // Stage 3 hits the DB per unresolved comparable, but only for the
+  // residual after stages 1+2 — typically 1-2 per title at the popular
+  // end, more in the tail. Acceptable for batch extraction; would
+  // need batching if hot-path.
+  const resolveComparable = async (rawTitle: string): Promise<string | null> => {
     const direct = resolvedMap.get(rawTitle.toLowerCase());
     if (direct) return direct;
     const stripped = stripTrailingParens(rawTitle).toLowerCase();
     if (stripped !== rawTitle.toLowerCase()) {
       const fallback = resolvedMap.get(stripped);
       if (fallback) return fallback;
+    }
+    // Stage 3 — trigram fallback. Use stripped form if it differs (so
+    // "Your Name (2016)" looks up "your name" rather than the raw form),
+    // otherwise the raw lowercased. pg_trgm % operator with the GIN
+    // index, threshold via similarity() in WHERE clause.
+    const probe = stripped !== rawTitle.toLowerCase() ? stripped : rawTitle.toLowerCase();
+    type FuzzyRow = { id: string; sim: number };
+    const matches = (await sqlBinding`
+      SELECT id, similarity(LOWER(title), ${probe}) AS sim
+      FROM titles
+      WHERE LOWER(title) % ${probe}
+      ORDER BY sim DESC
+      LIMIT 1
+    `) as FuzzyRow[];
+    const top = matches[0];
+    if (top && top.sim >= TRIGRAM_THRESHOLD) {
+      return top.id;
     }
     return null;
   };
@@ -388,7 +423,7 @@ export async function persistDescriptors(
   await sqlBinding`DELETE FROM title_comparable_titles WHERE title_id = ${titleId}`;
   for (let i = 0; i < d.comparableTitles.length; i += 1) {
     const c = d.comparableTitles[i]!;
-    const refId = resolveComparable(c.title);
+    const refId = await resolveComparable(c.title);
     await sqlBinding`
       INSERT INTO title_comparable_titles (
         title_id, position, referenced_title, referenced_title_id, reason,
