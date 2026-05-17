@@ -50,8 +50,9 @@ When the world changes:
 | 0019 | ORM (Drizzle) | Accepted | 2026-05-06 |
 | 0020 | Group recommendation strategy | Proposed | 2026-05-07 |
 | 0021 | Streaming availability — ranking vs filter | Proposed | 2026-05-07 |
+| 0025 | Embedded video provider + cookie posture | Accepted | 2026-05-17 |
 
-(More to be filled in as Phase 1 progresses. See `QUEUE.md` for pending decisions.)
+(0022–0024 exist in this directory but are not indexed here yet; index backfill is a separate housekeeping task. More to be filled in as Phase 1 progresses. See `QUEUE.md` for pending decisions.)
 
 ## Numbering
 
