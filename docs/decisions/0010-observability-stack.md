@@ -10,7 +10,7 @@ For Phase 1A:
 
 - **Sentry** for application errors (frontend + server). Free tier (5k errors/month) as the MVP starting point.
 - **PostHog** for product analytics + session replay. Consent-gated: PostHog only fires after the user opts in via the cookie consent banner (per ADR-0012). Session replay configured with strict masking — all input fields, auth flows, and any element marked sensitive are masked by default.
-- **Vercel built-in logs** for runtime visibility, **drained to Axiom** for retention beyond Vercel's hobby/pro retention window. Axiom is wired via Vercel's native log-drain integration in Phase 1A.
+- **Vercel built-in logs** for runtime visibility, **drained to Axiom** for retention beyond Vercel's hobby/pro retention window. Axiom is wired via Vercel's native log-drain integration in Phase 1A. (See Edit 2026-05-16 below — log drain wiring is deferred until the Vercel plan is upgraded from Hobby to Pro.)
 - **OpenTelemetry traces deferred to Phase 2.** Trigger: ML inference complexity (per ADR-0008's Phase 2 work) when latency-spread becomes hard to debug from Sentry + Vercel logs alone.
 
 Set up day 1, before users exist.
@@ -42,6 +42,31 @@ Vercel's built-in log retention is too short for incident forensics (1 hour on H
 - **Axiom free tier exceeded** — 500GB/mo log volume implies serious traffic; revisit at that point.
 - **ML inference complexity arrives** (Phase 2 trigger) — adopt OpenTelemetry traces; Sentry has tracing but it's not where it shines.
 - **A specific Datadog feature becomes essential** — unlikely while solo, but the migration path is clean from this stack.
+
+## Edit 2026-05-16 — Axiom log drain deferred
+
+Vercel **Log Drains** (the integration product this ADR depends on for shipping
+Vercel runtime logs to Axiom) require the **Pro plan**. The project is on
+Hobby. So in practice, until the Pro upgrade lands:
+
+- Sentry: live (errors + performance — works on any Vercel plan).
+- PostHog: live (consent-gated, masked replay — works on any Vercel plan).
+- Vercel built-in log viewer: live, but capped at 1-hour retention on Hobby.
+- **Axiom log drain: not wired.** No retention beyond the 1-hour window.
+
+Operational consequence: incident forensics older than ~1 hour from a Vercel
+function relies on whatever Sentry captured plus whatever the user reported.
+For solo-dev MVP scale this is tolerable; for any user-reported incident with a
+≥1-hour reporting lag, we're working with partial evidence.
+
+Trigger to wire the drain: at the same time as the Vercel Pro upgrade (which
+will likely be driven by other Pro-only features — increased function
+execution caps, password-protected previews, etc — not by this alone). When
+that happens: re-read Axiom's current free tier and Vercel's current drain
+docs; the integration may have shifted shape between now and then.
+
+Nothing else in this ADR changes — Sentry + PostHog + the OTel-deferred
+posture all still hold.
 
 ## Related
 
