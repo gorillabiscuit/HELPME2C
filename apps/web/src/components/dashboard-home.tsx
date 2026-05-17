@@ -46,11 +46,13 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
   const greetingSuffix = firstName ? `, ${firstName}` : '';
 
   if (recs.length === 0) {
-    // Two narrow cases this covers: (1) cold-start user with no
-    // favourites, (2) just-picked user inside the ~30s debounce before
-    // the rec recompute writes back. /onboarding is the intended
-    // landing for (1); it auto-redirects to /taste for (2) because
-    // that's the page that explains what to do next.
+    // Defense in depth — the home page (apps/web/src/app/page.tsx) now
+    // redirects to /onboarding when recs is empty, so this branch should
+    // be unreachable via the normal /-route path. Kept for race
+    // conditions and any future code path that mounts DashboardHome with
+    // empty recs directly. CTA points at /onboarding so the user lands
+    // on the structured first-time flow either way; /onboarding itself
+    // routes just-picked users on to /library?view=ranked.
     return (
       <main className="mx-auto max-w-2xl px-6 py-16">
         <p className="text-base text-muted-foreground">Welcome{greetingSuffix}.</p>
@@ -64,10 +66,10 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
             point for your personal recommendations. If you just picked, give us a moment.
           </p>
           <Link
-            href="/library?view=discover"
+            href="/onboarding"
             className="mt-6 inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
           >
-            Browse popular shows
+            Pick your favourites
           </Link>
         </div>
       </main>
