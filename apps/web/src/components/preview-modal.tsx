@@ -68,25 +68,38 @@ export function PreviewModal({ open, onOpenChange, videoId, titleText }: Preview
     }
   };
 
+  // Phase 1A: YouTube trailer embeds are NOT gated by the cookie-consent
+  // toggles in lib/consent.ts. The product treats opening the modal as the
+  // consenting gesture (rationale + Phase 1B remediation plan in ADR-0025).
+  // Don't add a consent check around the iframe without revisiting that ADR.
+  //
+  // Embed domain is www.youtube.com (NOT youtube-nocookie.com). The privacy-
+  // enhanced domain ships zero cookies, which means YouTube can't see the
+  // user's YouTube session — every embed looks anonymous and gets served the
+  // "Sign in to confirm that you're not a bot" wall at high rates. Using
+  // youtube.com lets YouTube reuse the visitor's existing session and
+  // dramatically lowers the bot-challenge rate. Trade-off: YouTube sets its
+  // own cookies on first frame. Disclosed in the consent banner; full
+  // rationale in ADR-0025.
+  //
   // YouTube embed params:
   //   autoplay=1, playsinline=1     — start playing, no fullscreen forced on mobile
   //   controls=0, rel=0             — hide native chrome + related-video grid
   //   modestbranding=1              — minimal YouTube branding (wordmark stays per ToS)
   //   mute=0|1                      — audio per user preference + session override
   //   enablejsapi=1                 — enables postMessage control if we ever want it
-  //   origin=<our origin>           — required for YouTube to trust the embed
-  //                                   without serving the "Sign in to confirm
-  //                                   that you're not a bot" challenge. Computed
-  //                                   client-side so we don't ship "origin=localhost"
-  //                                   in a production SSR'd HTML payload — wait
-  //                                   until mount, then render the iframe.
+  //   origin=<our origin>           — required by the JS API (enablejsapi=1) for
+  //                                   postMessage security. Computed client-side so
+  //                                   we don't ship "origin=localhost" in a
+  //                                   production SSR'd HTML payload — wait until
+  //                                   mount, then render the iframe.
   const mute = audioOn ? 0 : 1;
   const [origin, setOrigin] = useState<string | null>(null);
   useEffect(() => {
     if (open) setOrigin(window.location.origin);
   }, [open]);
   const embedSrc = origin
-    ? `https://www.youtube-nocookie.com/embed/${encodeURIComponent(videoId)}?autoplay=1&playsinline=1&controls=0&rel=0&modestbranding=1&mute=${mute}&enablejsapi=1&origin=${encodeURIComponent(origin)}`
+    ? `https://www.youtube.com/embed/${encodeURIComponent(videoId)}?autoplay=1&playsinline=1&controls=0&rel=0&modestbranding=1&mute=${mute}&enablejsapi=1&origin=${encodeURIComponent(origin)}`
     : null;
   const youtubeWatchUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
 

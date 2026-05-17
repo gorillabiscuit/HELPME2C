@@ -37,6 +37,8 @@ Default state before consent action: **no tracking fires.** The banner is non-bl
 
 PostHog session replay is configured with strict masking by default — input fields, auth flows, and any element marked sensitive are masked. This is the dependency from ADR-0010.
 
+**Amendment 2026-05-17 (per ADR-0025):** Embedded YouTube trailer previews fall outside the three toggles above for Phase 1A. The trailer surface is core to the product, so opening the trailer modal is treated as the consenting gesture; YouTube cookies are set on iframe load. This is disclosed in the consent banner copy and the privacy page. A proper 4th "Embedded media" toggle (click-to-play with a thumbnail until consented) is queued for Phase 1B alongside the marketing/affiliate toggle. See ADR-0025 §"Phase 1B follow-up".
+
 ### 5. Age gate
 
 Self-declared birth date at signup. Thresholds:
@@ -56,7 +58,7 @@ Self-serve `/account/export` and `/account/delete` cover ~95% of DSARs. Edge cas
 
 ### 8. Sub-processor disclosure
 
-The privacy policy must list all third-party processors of personal data: Clerk (auth), Neon (database), Vercel (hosting + logs), PostHog (analytics + replay), Sentry (errors), Axiom (log retention). TMDB and AniList are not sub-processors — calls are server-to-server with no user PII transmitted.
+The privacy policy must list all third-party processors of personal data: Clerk (auth), Neon (database), Vercel (hosting + logs), PostHog (analytics + replay), Sentry (errors), Axiom (log retention), and — per ADR-0025 — Google/YouTube (embedded trailer previews; receives the visitor's IP, User-Agent, Referer, and any existing YouTube session cookies on iframe load). TMDB and AniList are not sub-processors — calls are server-to-server with no user PII transmitted.
 
 ### 9. PII redaction in observability
 
