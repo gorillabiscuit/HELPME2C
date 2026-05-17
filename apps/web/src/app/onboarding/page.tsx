@@ -1,4 +1,3 @@
-import { redirect } from 'next/navigation';
 import { appRouter } from '@/server/router';
 import { createContext } from '@/server/trpc';
 import { OnboardingFlow } from '@/components/onboarding-flow';
@@ -31,28 +30,26 @@ export default async function OnboardingPage({ searchParams }: OnboardingPagePro
   await requireAgeVerified();
 
   const caller = appRouter.createCaller(await createContext());
-  const [popularTitles, watchEntries, params] = await Promise.all([
-    caller.titles.popular({ limit: 16 }),
+  const [popularTitles, watchEntries, feedbackEntries, params] = await Promise.all([
+    // limit 50 + server-side exclusion of watch_entries AND rec_feedback:
+    // every router.refresh() after a card action re-queries and brings
+    // fresh titles in at the tail, so a user who clicks "Don't know it"
+    // on a row of unfamiliar shows still gets new ones to look at instead
+    // of running out.
+    caller.titles.popular({ limit: 50, excludeUserEntries: true, excludeRecFeedback: true }),
     caller.watch.list(),
+    caller.recFeedback.list(),
     searchParams,
   ]);
 
-  // /onboarding is the first-visit funnel. Returning users who already
-  // have any rated titles get the permanent refine surface — the Ranked
-  // view inside Library (formerly /taste, merged 2026-05-14).
-  //
-  // CRITICAL: the redirect is gated on the user NOT being in an active
-  // picking session (signalled by ?start=pick). Without that gate, rating
-  // any single title triggers TitleQuickActions' router.refresh(), which
-  // re-runs this Server Component, which sees hasAnyRating=true, and
-  // bounces the user out of the picker after their first pick. The
-  // OnboardingFlow client component pushes ?start=pick into the URL when
-  // the user clicks "Let's go", and the marker survives router.refresh.
-  const hasAnyRating = watchEntries.some(({ entry }) => entry.rating !== null);
-  const isInPickerSession = params.start === 'pick';
-  if (hasAnyRating && !isInPickerSession) {
-    redirect('/library?view=ranked');
-  }
+  // No auto-redirect to /library here. A previous version redirected when
+  // any watch entry had a rating, but TitleQuickActions calls
+  // router.refresh() after every mutation — so the *first* rating during
+  // an in-flight onboarding session would kick the user out of the
+  // picker. The "send returning users to /library" intent is satisfied
+  // by the picker reflecting their existing state plus the bottom-bar
+  // Continue button (which navigates to /), so returning users still get
+  // a sensible flow without breaking cold-start.
 
   // Pass the full per-title state so TitleQuickActions on each card
   // reflects "already on your list / already rated" — important for a
@@ -63,16 +60,30 @@ export default async function OnboardingPage({ searchParams }: OnboardingPagePro
     rating: entry.rating,
   }));
 
-  // ?start=pick → skip the intro phase. Used by the empty-dashboard
-  // "Pick favourites" CTA AND by OnboardingFlow itself when the user
-  // clicks "Let's go" (the picker writes the marker so the redirect
-  // above doesn't fire mid-pick).
+  // Titles the user has acted on via "Not interested" (dismissed) or
+  // "Don't know it" (unfamiliar). The onboarding filter needs these to
+  // hide the cards after the action — neither button writes a watch
+  // entry, so initialEntries alone wouldn't tell the picker to hide
+  // them. Both are treated the same way at the UI: just "don't show me
+  // this card again right now". The engine still treats dismissed and
+  // unfamiliar differently for future recs (see recFeedback router).
+  const dismissedOrUnfamiliarTitleIds = feedbackEntries
+    .filter((f) => f.dismissed || f.unfamiliar)
+    .map((f) => f.titleId);
+
+  // ?start=pick → skip the intro phase. Used by:
+  //   - the empty-dashboard "Pick favourites" CTA (deliberate opt-in
+  //     to the picker, so we shouldn't re-show the value-prop screen)
+  //   - OnboardingFlow's own "Let's go" button (so a router.refresh
+  //     during the picking session doesn't bounce the user back to the
+  //     intro screen).
   const initialPhase = params.start === 'pick' ? 'picker' : 'intro';
 
   return (
     <OnboardingFlow
       initialPopular={popularTitles}
       initialEntries={initialEntries}
+      hiddenTitleIds={dismissedOrUnfamiliarTitleIds}
       initialPhase={initialPhase}
     />
   );

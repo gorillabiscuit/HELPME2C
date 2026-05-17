@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { trpc } from '@/lib/trpc';
 import { PreviewOverlay } from '@/components/preview-overlay';
 import { TitleQuickActions } from '@/components/title-quick-actions';
+import { franchiseDisplayName } from '@/server/lib/franchise';
 
 type MediaType = 'tv' | 'film' | 'anime';
 
@@ -21,18 +22,23 @@ const MEDIA_TYPE_LABEL: Record<MediaType, string> = {
 // permanent home (which lived on /taste's Add tab before the
 // library merge).
 //
-// titles.popular already does franchise dedup + media-type round-
-// robin so a new user sees variety. Cards fade out locally on
-// action click for immediate feedback; router.refresh re-fetches
-// the page so the next batch of popular titles can take their slot.
+// titles.popular does franchise dedup + media-type round-robin so a
+// new user sees variety, plus server-side exclusion of titles the
+// user has already actioned (watch_entries OR rec_feedback) so each
+// re-fetch brings fresh ones at the tail. Cards fade out locally on
+// click for immediate feedback; on action complete we invalidate the
+// popular query so the next batch backfills the grid — Discover
+// should never visibly deplete as long as the catalog has more.
 //
 // Not in scope (yet): search bar to find specific titles by name —
 // /search already exists for that. Could be merged later if alpha
 // testers want one-stop "browse + search" here.
 export function LibraryDiscoverView() {
+  const utils = trpc.useUtils();
   const popularQuery = trpc.titles.popular.useQuery({
-    limit: 24,
+    limit: 50,
     excludeUserEntries: true,
+    excludeRecFeedback: true,
   });
   const [hidden, setHidden] = useState<Set<string>>(new Set());
 
@@ -79,13 +85,15 @@ export function LibraryDiscoverView() {
                   <PreviewOverlay
                     trailerProvider={t.trailerProvider}
                     trailerVideoId={t.trailerVideoId}
-                    titleText={t.title}
+                    titleText={franchiseDisplayName(t.title)}
                   />
                 </div>
               ) : (
                 <div className="aspect-[2/3] rounded-md border border-border bg-muted" />
               )}
-              <p className="mt-2 line-clamp-2 text-sm font-medium text-foreground">{t.title}</p>
+              <p className="mt-2 line-clamp-2 text-sm font-medium text-foreground">
+                {franchiseDisplayName(t.title)}
+              </p>
               <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
                 {[MEDIA_TYPE_LABEL[t.mediaType] ?? t.mediaType, t.releaseYear?.toString()]
                   .filter((s): s is string => Boolean(s))
@@ -96,13 +104,18 @@ export function LibraryDiscoverView() {
               titleId={t.id}
               currentState={null}
               size="compact"
-              onActionComplete={() =>
+              onActionComplete={() => {
                 setHidden((current) => {
                   const next = new Set(current);
                   next.add(t.id);
                   return next;
-                })
-              }
+                });
+                // Refetch so the server backfills with fresh titles
+                // (server-side excludes everything actioned). Without
+                // this the grid would shrink card by card until it hit
+                // the "no more popular" empty state.
+                void utils.titles.popular.invalidate();
+              }}
             />
           </li>
         ))}
