@@ -127,6 +127,13 @@
       "when": 1778844236103,
       "tag": "0017_melodic_emma_frost",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1779028244991,
+      "tag": "0018_nebulous_lorna_dane",
+      "breakpoints": true
     }
   ]
 }
