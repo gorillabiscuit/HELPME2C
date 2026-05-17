@@ -7,6 +7,13 @@ declare global {
     ageVerified?: boolean;
     ageVerifiedAt?: string; // ISO-8601 UTC
     region?: 'eu' | 'row';
+    // ISO-3166-1 alpha-2 country code, captured at age-check, IP-defaulted
+    // via Vercel's x-vercel-ip-country header. Optional during the
+    // transition — existing users have no country set until they re-verify
+    // or until the Phase 1B backfill ticket lands. Source of truth for
+    // streaming-availability filtering (TMDB watch_region takes country,
+    // not the eu/row split) and for the future drop-region migration.
+    country?: string;
     // Written by the Clerk user.created/user.updated webhook handler after a
     // successful upsert into the `users` table. Read by the home page via the
     // `publicMetadata` session-token claim to short-circuit the me.ensure

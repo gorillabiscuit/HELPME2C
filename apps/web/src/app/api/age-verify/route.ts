@@ -6,6 +6,16 @@ import { isOldEnough, thresholdFor } from '@/lib/age-gate';
 const schema = z.object({
   birthDate: z.string().refine((s) => !Number.isNaN(new Date(s).getTime()), 'Invalid date'),
   region: z.enum(['eu', 'row']),
+  // ISO-3166-1 alpha-2. Validated shape-only here; we don't gate on
+  // "is this a real country" because both the Vercel IP-default
+  // (x-vercel-ip-country) and the static dropdown list produce valid
+  // codes. Optional during the rollout so cached older-client bundles
+  // still work; the cold-start research handoff treats country as
+  // SHOULD-ASK rather than MUST-ASK.
+  country: z
+    .string()
+    .regex(/^[A-Z]{2}$/, 'Invalid country code')
+    .optional(),
 });
 
 // POST /api/age-verify
@@ -44,11 +54,17 @@ export async function POST(req: Request) {
   }
 
   const client = await clerkClient();
+  // Preserve other public_metadata fields (dbSynced, future additions) by
+  // reading existing metadata first and merging — Clerk's updateUser
+  // replaces publicMetadata wholesale.
+  const existing = await client.users.getUser(userId);
   await client.users.updateUser(userId, {
     publicMetadata: {
+      ...existing.publicMetadata,
       ageVerified: true,
       ageVerifiedAt: new Date().toISOString(),
       region: parsed.data.region,
+      ...(parsed.data.country ? { country: parsed.data.country } : {}),
     },
   });
 

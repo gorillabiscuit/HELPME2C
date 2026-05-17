@@ -48,6 +48,11 @@ Self-declared birth date at signup. Thresholds:
 
 Signups below the regional threshold are rejected at the form level. The gate is a legal shield — if a user misrepresents their age, the documented declaration transfers the risk.
 
+**Amendment 2026-05-17 (cold-start research, PR for TICKET 2 schema):**
+The age-check now collects ISO-3166-1 alpha-2 **country** alongside birth date. Country is IP-defaulted via Vercel's `x-vercel-ip-country` header and editable by the user. The legal-gate region (`eu`/`row`) is derived from country at submit time (EU 27 + EEA 3 + UK + Switzerland → `eu`); the user no longer chooses region directly. Country is stored in `users.country` (nullable for pre-rollout rows) and in Clerk `publicMetadata.country`; `users.region` is preserved during the transition for backwards-compatibility with the legal-gate consumers, and a separate Phase 1B ticket will derive-from-country and drop the column once all rows are backfilled. The motivation for country granularity is streaming-availability filtering (TMDB `watch_region` requires per-country granularity) and a defensible per-user data-residency story.
+
+A new `users.household` column (`solo` / `partner` / `family` / `housemates`, default `solo`) is added in the same schema migration. The user-facing collection surface ships in a follow-up PR; existing rows get the `solo` default until they re-onboard. Used to route group-recommendation aggregation strategy; not used for any taste-prior or demographic inference.
+
 ### 6. Privacy policy + Terms of Service
 
 Generated template (Termly or iubenda) is acceptable for MVP launch. Lawyer review is **required before public marketing launch** (paid acquisition, press push, or any deliberate effort to drive non-tester traffic). Pre-launch testers + early adopters can survive on a template; legal exposure scales with user count and revenue.

@@ -19,6 +19,11 @@ export async function ensureUserFromClerk(
 ): Promise<typeof users.$inferSelect> {
   const displayName = [snapshot.firstName, snapshot.lastName].filter(Boolean).join(' ') || null;
   const region = snapshot.publicMetadata.region ?? 'eu';
+  // ISO-3166-1 alpha-2 from age-check. undefined for users who haven't
+  // re-verified post the country-addition rollout. Passed through as
+  // undefined (not null) so Drizzle skips the column on insert/update
+  // rather than clobbering an existing value with NULL.
+  const country = snapshot.publicMetadata.country;
   const ageVerified = snapshot.publicMetadata.ageVerified ?? false;
   const ageVerifiedAt = snapshot.publicMetadata.ageVerifiedAt
     ? new Date(snapshot.publicMetadata.ageVerifiedAt)
@@ -30,6 +35,7 @@ export async function ensureUserFromClerk(
       clerkId: snapshot.id,
       displayName,
       region,
+      country,
       ageVerified,
       ageVerifiedAt,
     })
@@ -38,6 +44,10 @@ export async function ensureUserFromClerk(
       set: {
         displayName,
         region,
+        // Only update country when the snapshot provides one — otherwise
+        // a webhook firing for an unrelated user.updated event would clobber
+        // a user-set country with NULL.
+        ...(country !== undefined ? { country } : {}),
         ageVerified,
         ageVerifiedAt,
         updatedAt: new Date(),

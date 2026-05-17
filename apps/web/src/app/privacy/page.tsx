@@ -10,9 +10,13 @@ export default function PrivacyPage() {
         For now: we use cookies for essential functionality (always on) and — with your consent —
         for product analytics and session replay. Trailer previews embed YouTube, which receives
         your IP address and sets its own cookies when an embed loads; the &ldquo;Open on
-        YouTube&rdquo; link in the preview lets you watch on YouTube directly instead. We host data
-        in the EU. We hard-delete personal data within 30 days of an account-deletion request and
-        anonymise behavioural signals so no rejoin path remains. We do not sell your data.
+        YouTube&rdquo; link in the preview lets you watch on YouTube directly instead. We collect
+        your <strong>country</strong> at signup (pre-filled from your IP, editable) so we can show
+        you what&apos;s streamable where you are, and your <strong>household</strong> setting (solo
+        / with a partner / family / housemates) so group recommendations work for the people you
+        actually watch with — neither is used as a demographic taste prior. We host data in the EU.
+        We hard-delete personal data within 30 days of an account-deletion request and anonymise
+        behavioural signals so no rejoin path remains. We do not sell your data.
       </p>
     </main>
   );

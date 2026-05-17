@@ -23,11 +23,15 @@ import {
 // a download dialog.
 //
 // Schema versioning: the response includes
-// `schema: "helpme2c.account-export.v3"` — bumped from v2 in this commit
-// when (a) group name was denormalised onto memberships, (b) the
-// owned-group invite token was redacted, and (c) the `excluded_from_export`
-// rationale list was added to the payload itself. Bump again when
-// adding/renaming top-level keys.
+// `schema: "helpme2c.account-export.v4"`.
+// - v2 → v3: (a) group name denormalised onto memberships, (b) owned-group
+//   invite token redacted, (c) `excluded_from_export` rationale list added.
+// - v3 → v4: `user.our_database` now carries `country` (ISO-3166-1 alpha-2,
+//   nullable for pre-rollout users) and `household` (solo/partner/family/
+//   housemates, defaults 'solo'). Bumped because user-visible fields were
+//   added — even though no top-level keys changed, the user can see the new
+//   data in their export and the version bump makes that observable.
+// Bump again when adding/renaming top-level keys or user-visible fields.
 //
 // Title metadata is denormalised in (every per-title row joins to
 // titles) so the export is human-readable without having to cross-
@@ -67,7 +71,7 @@ export async function GET() {
     const clerkUser = await clerk.users.getUser(userId);
     return jsonAttachment(
       {
-        schema: 'helpme2c.account-export.v2',
+        schema: 'helpme2c.account-export.v4',
         exportedAt: new Date().toISOString(),
         note: 'No HelpME2C DB row found — only Clerk identity is exported.',
         user: {
@@ -183,7 +187,7 @@ export async function GET() {
   const clerkUser = await clerk.users.getUser(userId);
 
   const exportData = {
-    schema: 'helpme2c.account-export.v3',
+    schema: 'helpme2c.account-export.v4',
     exportedAt: new Date().toISOString(),
     // Make the deliberate omissions visible to the recipient. A
     // regulator or curious user shouldn't have to read our source to
