@@ -18,7 +18,8 @@ export function ConsentBanner() {
       <div className="mx-auto flex max-w-4xl flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <p className="text-sm text-foreground">
           We use cookies for essential site functions, and — with your consent — for analytics and
-          session replay so we can improve recommendations. See our{' '}
+          session replay so we can improve recommendations. Opening a trailer preview also loads a
+          YouTube embed, which sets its own cookies. See our{' '}
           <a href="/privacy" className="underline">
             privacy policy
           </a>
