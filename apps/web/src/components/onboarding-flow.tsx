@@ -187,8 +187,8 @@ export function OnboardingFlow({
         <h1 className="text-4xl font-semibold tracking-tight">Rate shows you&apos;ve loved</h1>
         <p className="mt-3 text-base text-text-body">
           Click a poster you&apos;ve watched and loved — that&apos;s a 10/10 rating, and it teaches
-          us your taste. Five or six is plenty to start; you can refine ratings and add more anytime
-          from <em>Your taste</em>.
+          us your taste. Pick 3 to get started; 5 is great, 10 is plenty. You can refine ratings and
+          add more anytime from <em>Your taste</em>.
         </p>
       </header>
 
@@ -277,7 +277,7 @@ export function OnboardingFlow({
             {ratedCount === 1 ? 'title rated' : 'titles rated'}
           </p>
           <Button onClick={() => router.push('/')}>
-            {ratedCount === 0 ? 'Skip for now' : 'Continue'}
+            {ratedCount === 0 ? 'Skip for now' : ratedCount < 3 ? 'Continue' : 'Show me my recs'}
           </Button>
         </div>
       </div>
