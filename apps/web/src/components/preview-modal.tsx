@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
-import { Maximize2, Volume2, VolumeX, X } from 'lucide-react';
+import { ExternalLink, Maximize2, Volume2, VolumeX, X } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
 
@@ -74,8 +74,21 @@ export function PreviewModal({ open, onOpenChange, videoId, titleText }: Preview
   //   modestbranding=1              — minimal YouTube branding (wordmark stays per ToS)
   //   mute=0|1                      — audio per user preference + session override
   //   enablejsapi=1                 — enables postMessage control if we ever want it
+  //   origin=<our origin>           — required for YouTube to trust the embed
+  //                                   without serving the "Sign in to confirm
+  //                                   that you're not a bot" challenge. Computed
+  //                                   client-side so we don't ship "origin=localhost"
+  //                                   in a production SSR'd HTML payload — wait
+  //                                   until mount, then render the iframe.
   const mute = audioOn ? 0 : 1;
-  const embedSrc = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(videoId)}?autoplay=1&playsinline=1&controls=0&rel=0&modestbranding=1&mute=${mute}&enablejsapi=1`;
+  const [origin, setOrigin] = useState<string | null>(null);
+  useEffect(() => {
+    if (open) setOrigin(window.location.origin);
+  }, [open]);
+  const embedSrc = origin
+    ? `https://www.youtube-nocookie.com/embed/${encodeURIComponent(videoId)}?autoplay=1&playsinline=1&controls=0&rel=0&modestbranding=1&mute=${mute}&enablejsapi=1&origin=${encodeURIComponent(origin)}`
+    : null;
+  const youtubeWatchUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
@@ -118,14 +131,31 @@ export function PreviewModal({ open, onOpenChange, videoId, titleText }: Preview
               isFullscreen ? 'h-full w-full' : 'aspect-video w-full',
             )}
           >
-            <iframe
-              key={embedSrc}
-              src={embedSrc}
-              title={`Trailer for ${titleText}`}
-              className="absolute inset-0 h-full w-full"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-            />
+            {embedSrc ? (
+              <iframe
+                key={embedSrc}
+                src={embedSrc}
+                title={`Trailer for ${titleText}`}
+                className="absolute inset-0 h-full w-full"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              />
+            ) : null}
+
+            {/* Escape hatch when YouTube's bot-detection serves the "Sign
+                in to confirm that you're not a bot" wall inside the
+                iframe. JS can't detect that (cross-origin), so we always
+                offer a direct link out. Bottom-left so it's visible
+                without obscuring the player chrome. */}
+            <a
+              href={youtubeWatchUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="absolute bottom-2 left-2 z-10 inline-flex items-center gap-1.5 rounded-md bg-black/60 px-2.5 py-1.5 text-xs text-white transition hover:bg-black/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+            >
+              <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Open on YouTube</span>
+            </a>
           </div>
 
           {/* Custom chrome — overlay buttons in the top-right. */}
