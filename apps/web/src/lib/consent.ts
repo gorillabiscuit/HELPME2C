@@ -7,7 +7,10 @@ export interface ConsentRecord {
   // ISO-8601 UTC with Z suffix per CLAUDE.md §2.
   timestamp: string;
   categories: {
-    // Strictly necessary — auth, security, session. Always on per ADR-0012 §4.
+    // Strictly necessary — auth, security, session. Always on per ADR-0012 §4
+    // (as amended by ADR-0025: embedded YouTube trailer previews also fall
+    // outside these toggles in Phase 1A and are treated as essential-by-
+    // product-design; a proper 4th "Embedded media" toggle is queued for 1B).
     essential: true;
     analytics: boolean;
     sessionReplay: boolean;

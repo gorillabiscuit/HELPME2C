@@ -68,6 +68,11 @@ export function PreviewModal({ open, onOpenChange, videoId, titleText }: Preview
     }
   };
 
+  // Phase 1A: YouTube trailer embeds are NOT gated by the cookie-consent
+  // toggles in lib/consent.ts. The product treats opening the modal as the
+  // consenting gesture (rationale + Phase 1B remediation plan in ADR-0025).
+  // Don't add a consent check around the iframe without revisiting that ADR.
+  //
   // Embed domain is www.youtube.com (NOT youtube-nocookie.com). The privacy-
   // enhanced domain ships zero cookies, which means YouTube can't see the
   // user's YouTube session — every embed looks anonymous and gets served the
