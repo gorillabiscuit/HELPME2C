@@ -167,7 +167,20 @@ export function OnboardingFlow({
         </div>
 
         <div className="mt-12 flex items-center gap-4">
-          <Button size="lg" onClick={() => setPhase('picker')}>
+          <Button
+            size="lg"
+            onClick={() => {
+              // Set client state first (instant UI swap to picker), then
+              // push the ?start=pick marker into the URL. The marker
+              // tells the Server Component in apps/web/src/app/onboarding/page.tsx
+              // not to redirect us to /library?view=ranked when our first
+              // rating triggers TitleQuickActions' router.refresh(). The
+              // URL survives router.refresh, so the picker stays mounted
+              // for the whole picking session.
+              setPhase('picker');
+              router.replace('/onboarding?start=pick');
+            }}
+          >
             Let&apos;s go
           </Button>
           <Link

@@ -40,8 +40,17 @@ export default async function OnboardingPage({ searchParams }: OnboardingPagePro
   // /onboarding is the first-visit funnel. Returning users who already
   // have any rated titles get the permanent refine surface — the Ranked
   // view inside Library (formerly /taste, merged 2026-05-14).
+  //
+  // CRITICAL: the redirect is gated on the user NOT being in an active
+  // picking session (signalled by ?start=pick). Without that gate, rating
+  // any single title triggers TitleQuickActions' router.refresh(), which
+  // re-runs this Server Component, which sees hasAnyRating=true, and
+  // bounces the user out of the picker after their first pick. The
+  // OnboardingFlow client component pushes ?start=pick into the URL when
+  // the user clicks "Let's go", and the marker survives router.refresh.
   const hasAnyRating = watchEntries.some(({ entry }) => entry.rating !== null);
-  if (hasAnyRating) {
+  const isInPickerSession = params.start === 'pick';
+  if (hasAnyRating && !isInPickerSession) {
     redirect('/library?view=ranked');
   }
 
@@ -55,8 +64,9 @@ export default async function OnboardingPage({ searchParams }: OnboardingPagePro
   }));
 
   // ?start=pick → skip the intro phase. Used by the empty-dashboard
-  // "Pick favourites" CTA; users who clicked it have already opted
-  // into picking and shouldn't see the value-prop screen.
+  // "Pick favourites" CTA AND by OnboardingFlow itself when the user
+  // clicks "Let's go" (the picker writes the marker so the redirect
+  // above doesn't fire mid-pick).
   const initialPhase = params.start === 'pick' ? 'picker' : 'intro';
 
   return (
