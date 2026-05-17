@@ -37,11 +37,26 @@ export function AgeCheckForm({ initialCountry }: AgeCheckFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Browser back-forward cache (bfcache) will otherwise restore this
-  // page's in-memory snapshot when the user navigates back from
-  // /onboarding — skipping the server-side ageVerified check in
-  // app/age-check/page.tsx entirely. router.refresh() forces a fresh
-  // RSC fetch which re-runs the redirect.
+  // Two caches can restore a stale /age-check page when the user hits
+  // the browser back button from /onboarding — both bypass the
+  // server-side ageVerified check that's supposed to bounce them forward:
+  //
+  //   1. Next.js Router Cache. App Router keeps RSC payloads client-side
+  //      for ~30s after a navigation; back-nav within that window replays
+  //      the cached output WITHOUT re-running the Server Component.
+  //   2. Browser bfcache. The page's in-memory snapshot (including form
+  //      state) is restored on back-nav, again skipping the server.
+  //
+  // Defence: any time this form mounts, ask the server for fresh data
+  // via router.refresh(). If ageVerified has flipped to true since this
+  // client cached the page, the Server Component will redirect to
+  // /onboarding before the form re-renders. The pageshow listener
+  // covers the bfcache-specific case where the component might already
+  // be mounted (some browsers don't re-fire useEffect on bfcache
+  // restore).
+  useEffect(() => {
+    router.refresh();
+  }, [router]);
   useEffect(() => {
     function onPageShow(event: PageTransitionEvent) {
       if (event.persisted) {
