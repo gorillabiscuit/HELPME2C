@@ -29,8 +29,7 @@ export default async function HomePage() {
   // Pre-computed personal recs from the nightly Inngest job (commit 4a133cd)
   // via the recommendations.list reader (commit 959ef37). Empty array means
   // either the user has no taste signal yet (cold-start, no anchors) or the
-  // cron hasn't run for them yet — DashboardHome shows the same empty state
-  // either way, with a CTA pointing at /onboarding.
+  // cron hasn't run for them yet.
   //
   // Country comes from Vercel's geo header so the streaming-availability
   // filter (M5.4 per ADR-0021) is country-strict. Falls back to US when
@@ -44,6 +43,21 @@ export default async function HomePage() {
         filtered: false,
         filter: { active: false, providers: [], hiddenCount: 0 },
       };
+
+  // Bounce signed-in users with no recs straight to /onboarding. /onboarding
+  // then routes internally:
+  //   - cold-start (no ratings) → renders the intro + picker
+  //   - just-picked (anchors exist, recs computing) → redirects to
+  //     /library?view=ranked so the user sees what they just picked
+  // Without this redirect, cold-start users would see the dashboard's
+  // empty state with a "Browse popular shows" CTA that points at
+  // /library?view=discover — which sends them away from the structured
+  // first-time flow into the general browse surface. The DashboardHome
+  // empty-state branch still exists as defense in depth for any race
+  // condition (its CTA is updated to /onboarding in the same PR).
+  if (userId && recs.items.length === 0) {
+    redirect('/onboarding');
+  }
 
   return userId ? (
     <DashboardHome firstName={user?.firstName} recs={recs.items} filter={recs.filter} />
