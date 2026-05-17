@@ -14,6 +14,12 @@
 //   RESET_OK=yes pnpm dlx tsx --env-file=.env.local \
 //     scripts/reset-user.ts --email=you@example.com
 //
+// Add --clear-age-verified to ALSO clear ageVerified in Clerk
+// publicMetadata + the users row, so the next browser visit lands on
+// /age-check instead of skipping ahead to /onboarding:
+//   RESET_OK=yes pnpm dlx tsx --env-file=.env.local \
+//     scripts/reset-user.ts --email=you@example.com --clear-age-verified
+//
 // Refuses to run without RESET_OK=yes so it can't fire by accident.
 // Modelled on scripts/db-wipe.ts; same FK-cascade reasoning as
 // apps/web/src/app/api/account/delete/route.ts.
@@ -81,6 +87,43 @@ async function resolveClerkIdFromEmail(email: string): Promise<string> {
   return matches[0].id;
 }
 
+async function clearClerkAgeVerified(clerkId: string): Promise<void> {
+  const secretKey = process.env.CLERK_SECRET_KEY;
+  if (!secretKey) {
+    console.error(
+      'CLERK_SECRET_KEY not set. --clear-age-verified requires Clerk admin ' +
+        'access. Pull fresh env (`vercel env pull .env.local` from apps/web).',
+    );
+    process.exit(1);
+  }
+
+  // PATCH user metadata. Clerk's metadata endpoint merges by replacing
+  // each provided top-level key, so explicitly setting age fields to
+  // null/false unwinds them. We also clear country here — the age-check
+  // flow rewrites it on next verify, and leaving the stale value would
+  // confuse the user testing the picker default behaviour. region stays
+  // as-is (not relevant to the age gate's redirect logic).
+  const res = await fetch(`https://api.clerk.com/v1/users/${clerkId}/metadata`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${secretKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      public_metadata: {
+        ageVerified: false,
+        ageVerifiedAt: null,
+        country: null,
+      },
+    }),
+  });
+  if (!res.ok) {
+    console.error(`Clerk metadata PATCH failed: ${res.status} ${res.statusText}`);
+    console.error(await res.text());
+    process.exit(1);
+  }
+}
+
 async function main(): Promise<void> {
   if (process.env.RESET_OK !== 'yes') {
     console.error(
@@ -93,8 +136,10 @@ async function main(): Promise<void> {
 
   const clerkIdArg = getFlag('--clerk-id');
   const emailArg = getFlag('--email');
+  const clearAgeVerified = process.argv.includes('--clear-age-verified');
   if (!clerkIdArg && !emailArg) {
     console.error('Usage: --clerk-id=user_XXXXXXXXXXXXXXXXXXXX OR --email=you@example.com');
+    console.error('Optional: --clear-age-verified (also clears Clerk publicMetadata.ageVerified)');
     process.exit(1);
   }
   if (clerkIdArg && emailArg) {
@@ -130,7 +175,9 @@ async function main(): Promise<void> {
     `Resetting user_id=${userId} (clerk_id=${clerkId}` +
       (emailArg ? `, email=${emailArg}` : '') +
       `, age_verified=${userRow.age_verified}). ` +
-      'Users row + Clerk identity + ageVerified are preserved.',
+      (clearAgeVerified
+        ? 'Users row + Clerk identity preserved; ageVerified WILL be cleared.'
+        : 'Users row + Clerk identity + ageVerified are preserved.'),
   );
 
   // FK-safe deletion order. The two non-trivial bits:
@@ -151,6 +198,24 @@ async function main(): Promise<void> {
   await sql`DELETE FROM user_streaming_providers WHERE user_id = ${userId}`;
   await sql`DELETE FROM watch_entries WHERE user_id = ${userId}`;
 
+  if (clearAgeVerified) {
+    // Clerk publicMetadata is the source of truth (the /age-check page
+    // reads it via clerkClient.users.getUser to decide whether to
+    // redirect to /onboarding). The DB columns are synced from there
+    // via the Clerk webhook, but we clear them in the same transaction
+    // here so the next page render sees consistent state immediately
+    // instead of waiting for the webhook race.
+    await clearClerkAgeVerified(clerkId);
+    await sql`
+      UPDATE users
+      SET age_verified = false,
+          age_verified_at = NULL,
+          country = NULL
+      WHERE id = ${userId}
+    `;
+    console.log('Cleared ageVerified in Clerk publicMetadata + users row.');
+  }
+
   const counts = await sql`
     SELECT
       (SELECT COUNT(*)::int FROM watch_entries           WHERE user_id  = ${userId}) AS watch_entries,
@@ -167,7 +232,11 @@ async function main(): Promise<void> {
     'Post-reset row counts (all per-user tables should be 0; user_row_kept should be 1):',
   );
   console.log(JSON.stringify(counts[0], null, 2));
-  console.log('Next browser visit will route through /onboarding intro screen.');
+  console.log(
+    clearAgeVerified
+      ? 'Next browser visit will route through /age-check (then /onboarding intro).'
+      : 'Next browser visit will route through /onboarding intro screen.',
+  );
 }
 
 main().catch((e) => {

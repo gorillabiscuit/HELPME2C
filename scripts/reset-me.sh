@@ -9,11 +9,21 @@
 #
 # Usage:
 #   ./scripts/reset-me.sh                  # resets the default accounts (Wouter)
-#   ./scripts/reset-me.sh user_OTHER       # resets a single different user by clerk-id
-#   ./scripts/reset-me.sh other@email.com  # resets a single different user by email
+#                                          # keeps ageVerified=true (fast path
+#                                          # for retesting the onboarding picker)
+#   ./scripts/reset-me.sh --full           # same, but ALSO clears ageVerified
+#                                          # so the next visit lands on /age-check
+#                                          # (use when testing the age-check
+#                                          # flow itself, e.g. country picker)
+#   ./scripts/reset-me.sh user_OTHER       # single user by clerk-id (fast path)
+#   ./scripts/reset-me.sh other@email.com  # single user by email (fast path)
+#   ./scripts/reset-me.sh --full user_OTHER
+#   ./scripts/reset-me.sh other@email.com --full
 #
-# Detection rule for the arg: contains '@' → treated as email, otherwise
-# as clerk-id. Email lookup uses Clerk's admin API and requires
+# Flag order doesn't matter. --full is positionally independent.
+#
+# Detection rule for non-flag args: contains '@' → treated as email,
+# otherwise as clerk-id. Email lookup uses Clerk's admin API and requires
 # CLERK_SECRET_KEY in apps/web/.env.local (already there if you've ever
 # run the web app locally; refresh with `vercel env pull .env.local`
 # from apps/web if not).
@@ -23,28 +33,45 @@
 
 set -euo pipefail
 
-# Identities to wipe when no arg is passed. Each entry is either a
-# Clerk user id (`user_…`) or an email (contains `@`).
+# Identities to wipe when no positional arg is passed. Each entry is
+# either a Clerk user id (`user_…`) or an email (contains `@`).
 DEFAULT_IDENTITIES=(
   "user_3DoxZCe03EfMSKxhZGhM64LjflK"
   "wschreuders@gmail.com"
 )
 
-if [ $# -gt 0 ]; then
-  IDENTITIES=("$1")
+# Parse args: separate --full from positional identity arg(s).
+FULL=0
+POSITIONAL=()
+for arg in "$@"; do
+  case "$arg" in
+    --full) FULL=1 ;;
+    *) POSITIONAL+=("$arg") ;;
+  esac
+done
+
+if [ ${#POSITIONAL[@]} -gt 0 ]; then
+  IDENTITIES=("${POSITIONAL[@]}")
 else
   IDENTITIES=("${DEFAULT_IDENTITIES[@]}")
+fi
+
+EXTRA_FLAGS=()
+if [ "$FULL" -eq 1 ]; then
+  EXTRA_FLAGS+=("--clear-age-verified")
 fi
 
 cd "$(dirname "$0")/../apps/web"
 
 for identity in "${IDENTITIES[@]}"; do
   echo "──────────────────────────────────────────────────────────────"
-  echo "Resetting: $identity"
+  echo "Resetting: $identity${EXTRA_FLAGS[*]:+ (full)}"
   echo "──────────────────────────────────────────────────────────────"
   if [[ "$identity" == *"@"* ]]; then
-    RESET_OK=yes pnpm dlx tsx --env-file=.env.local scripts/reset-user.ts --email="$identity"
+    RESET_OK=yes pnpm dlx tsx --env-file=.env.local scripts/reset-user.ts \
+      --email="$identity" "${EXTRA_FLAGS[@]}"
   else
-    RESET_OK=yes pnpm dlx tsx --env-file=.env.local scripts/reset-user.ts --clerk-id="$identity"
+    RESET_OK=yes pnpm dlx tsx --env-file=.env.local scripts/reset-user.ts \
+      --clerk-id="$identity" "${EXTRA_FLAGS[@]}"
   fi
 done
