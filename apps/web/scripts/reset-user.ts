@@ -10,6 +10,10 @@
 //   RESET_OK=yes pnpm dlx tsx --env-file=.env.local \
 //     scripts/reset-user.ts --clerk-id=user_XXXXXXXXXXXXXXXXXXXX
 //
+// Or by email (looks up the clerk_id via Clerk's admin API):
+//   RESET_OK=yes pnpm dlx tsx --env-file=.env.local \
+//     scripts/reset-user.ts --email=you@example.com
+//
 // Refuses to run without RESET_OK=yes so it can't fire by accident.
 // Modelled on scripts/db-wipe.ts; same FK-cascade reasoning as
 // apps/web/src/app/api/account/delete/route.ts.
@@ -21,22 +25,84 @@ interface UserRow {
   age_verified: boolean;
 }
 
-async function main(): Promise<void> {
-  if (process.env.RESET_OK !== 'yes') {
+interface ClerkUser {
+  id: string;
+}
+
+function getFlag(name: string): string | undefined {
+  // Support both `--flag=value` and `--flag value` styles.
+  for (const arg of process.argv) {
+    if (arg.startsWith(`${name}=`)) return arg.slice(name.length + 1);
+  }
+  const idx = process.argv.indexOf(name);
+  if (idx === -1) return undefined;
+  return process.argv[idx + 1];
+}
+
+async function resolveClerkIdFromEmail(email: string): Promise<string> {
+  const secretKey = process.env.CLERK_SECRET_KEY;
+  if (!secretKey) {
     console.error(
-      'Refusing to run without RESET_OK=yes. This script deletes every ' +
-        'user-data row for the given clerk-id. Set RESET_OK=yes in the ' +
-        'invocation if you really want to reset.',
+      'CLERK_SECRET_KEY not set. Email lookup requires Clerk admin access. ' +
+        'Pull fresh env (`vercel env pull .env.local` from apps/web) or pass ' +
+        '--clerk-id instead.',
     );
     process.exit(1);
   }
 
-  const flagIdx = process.argv.indexOf('--clerk-id');
-  const clerkId = flagIdx === -1 ? undefined : process.argv[flagIdx + 1];
-  if (!clerkId) {
-    console.error('Usage: --clerk-id=user_XXXXXXXXXXXXXXXXXXXX');
+  // Direct REST call avoids pulling Clerk SDK into the script (transitive
+  // only via @clerk/nextjs, not safe to import directly from a Node script
+  // context). The endpoint is documented at
+  // https://clerk.com/docs/reference/backend-api/tag/Users#operation/GetUserList
+  const url = `https://api.clerk.com/v1/users?email_address=${encodeURIComponent(email)}&limit=10`;
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${secretKey}` },
+  });
+  if (!res.ok) {
+    console.error(`Clerk lookup failed: ${res.status} ${res.statusText}`);
+    console.error(await res.text());
     process.exit(1);
   }
+  const matches = (await res.json()) as ClerkUser[];
+
+  if (matches.length === 0) {
+    console.error(`No Clerk user found with email = ${email}. Nothing to reset.`);
+    // Exit 0 — "no such user" is idempotent for a reset operation.
+    process.exit(0);
+  }
+  if (matches.length > 1) {
+    console.error(
+      `Email ${email} matches ${matches.length} Clerk users. Disambiguate by ` +
+        `passing --clerk-id directly. Candidates: ${matches.map((u) => u.id).join(', ')}`,
+    );
+    process.exit(1);
+  }
+  return matches[0].id;
+}
+
+async function main(): Promise<void> {
+  if (process.env.RESET_OK !== 'yes') {
+    console.error(
+      'Refusing to run without RESET_OK=yes. This script deletes every ' +
+        'user-data row for the given clerk-id (or email-resolved clerk-id). ' +
+        'Set RESET_OK=yes in the invocation if you really want to reset.',
+    );
+    process.exit(1);
+  }
+
+  const clerkIdArg = getFlag('--clerk-id');
+  const emailArg = getFlag('--email');
+  if (!clerkIdArg && !emailArg) {
+    console.error('Usage: --clerk-id=user_XXXXXXXXXXXXXXXXXXXX OR --email=you@example.com');
+    process.exit(1);
+  }
+  if (clerkIdArg && emailArg) {
+    console.error('Pass either --clerk-id or --email, not both.');
+    process.exit(1);
+  }
+
+  const clerkId = clerkIdArg ?? (await resolveClerkIdFromEmail(emailArg!));
 
   const sql = neon(process.env.DATABASE_URL!);
 
@@ -47,14 +113,23 @@ async function main(): Promise<void> {
     LIMIT 1
   `) as UserRow[];
   if (userRows.length === 0) {
-    console.error(`No user found with clerk_id = ${clerkId}`);
-    process.exit(1);
+    // For email lookups this is meaningfully different from "Clerk user
+    // doesn't exist" — the Clerk user might exist but never finished
+    // signup (no DB row created). Exit 0 either way; nothing to wipe.
+    console.error(
+      `No DB row found for clerk_id = ${clerkId}` +
+        (emailArg ? ` (resolved from email ${emailArg})` : '') +
+        '. Nothing to reset.',
+    );
+    process.exit(0);
   }
   const userRow = userRows[0];
   const userId = userRow.id;
 
   console.log(
-    `Resetting user_id=${userId} (clerk_id=${clerkId}, age_verified=${userRow.age_verified}). ` +
+    `Resetting user_id=${userId} (clerk_id=${clerkId}` +
+      (emailArg ? `, email=${emailArg}` : '') +
+      `, age_verified=${userRow.age_verified}). ` +
       'Users row + Clerk identity + ageVerified are preserved.',
   );
 
