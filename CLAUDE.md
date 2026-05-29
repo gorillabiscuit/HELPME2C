@@ -12,7 +12,18 @@ Keep this file under 500 lines. Detail goes in `docs/decisions/` (ADRs), per-pac
 - **Differentiator:** group recommendations with ghost-profile inference + theme-based cross-medium taxonomy.
 - **Phase:** 1A (MVP, web only, registered users only). Target: TBD; no time pressure; ship when ready.
 - **Tracker:** Linear — workspace `wouterschreuders`, team `HelpME2C` (key `HM2C`), project `HelpME2C` (per [ADR-0018](docs/decisions/0018-project-tracker.md)).
-- **Read first:** `PROJECT.md` (product scope), `docs/decisions/0000-architecture-overview.md` (system shape).
+- **Read first:** `PROJECT.md` (product scope, including the North Star — see below), `docs/decisions/0000-architecture-overview.md` (system shape).
+
+### North Star (the relevance gate)
+
+The North Star — *an application that successfully helps two people discover shows they both want to watch* — lives in full in `PROJECT.md`. Read the block there for the metric (joint watches per week caused by our recommendations), the scaffolding proxies that approximate it before partner mode and "Watch now" ship, and the explicit "what does NOT serve this" list.
+
+The relevance gate is the first-pass filter applied to every non-trivial unit of work:
+
+- **Before starting a ticket or refactor:** can the work be honestly traced to the North Star in one sentence? If yes, proceed. If no, stop and surface — either the work is misallocated, or the North Star statement in `PROJECT.md` needs to be revisited.
+- **During pre-PR review (§7):** the diff is checked for honest traceability as part of the meta-check. A PR that can't be tied back to the metric without contortion is a red flag, not necessarily a blocker — infrastructure work is sometimes two steps removed from the metric — but the trace has to be statable in one sentence.
+
+The gate is a thinking discipline, not a literal blocker. Its job is to catch drift toward sign-ups, sessions, ratings volume, and time-in-app — all of which feel productive and none of which are the metric. When in doubt, write the one-sentence trace and read it aloud; if it sounds like an excuse, it probably is one.
 
 ### Repo structure
 
@@ -162,7 +173,7 @@ When the human says one of: `ship it`, `ready to PR`, `open the PR`, `submit the
 
 1. **Run the gates.** `pnpm typecheck && pnpm lint && pnpm test` (or whatever the canonical pre-commit equivalent is at the time). Report PASS/FAIL summary. If anything fails, stop and fix before continuing.
 2. **Walk the diff.** `git diff origin/main...HEAD`. Tag every chunk Scaffolding / Decision / Logic / External / Security per §6 (apply §6.1 escalation + §6.2 acknowledgement).
-3. **Pessimistic meta-check.** Spawn a fresh sub-agent (Explore type, no view of this conversation). Brief: *"Read CLAUDE.md, the relevant ADRs, and the branch diff (`git diff origin/main...HEAD`). Look for: rule violations (banned patterns, missing ADRs, missing DEPS.md entries), category/naming/scope mismatches, brittleness, things that pass the gates but a senior reviewer would flag. Report as Definitely-issue / Likely-issue / Maybe-issue / Looks-clean — file:line + quoted snippet per finding. Bias toward suspicion; assume at least three issues missed."* Resolution rule: every Definitely and Likely is fixed in the diff or has a Review-Note trailer. Maybes get a one-line decision.
+3. **Pessimistic meta-check.** Spawn a fresh sub-agent (Explore type, no view of this conversation). Brief: *"Read CLAUDE.md, the North Star block in PROJECT.md, the relevant ADRs, and the branch diff (`git diff origin/main...HEAD`). Look for: rule violations (banned patterns, missing ADRs, missing DEPS.md entries), category/naming/scope mismatches, brittleness, drift from the North Star (work that cannot honestly trace to the metric in one sentence), things that pass the gates but a senior reviewer would flag. Report as Definitely-issue / Likely-issue / Maybe-issue / Looks-clean — file:line + quoted snippet per finding. Bias toward suspicion; assume at least three issues missed."* Resolution rule: every Definitely and Likely is fixed in the diff or has a Review-Note trailer. Maybes get a one-line decision.
 4. **Acceptance-criteria mapping.** Read the ticket. For each AC bullet, point at file:line or "not satisfied".
 5. **Commit hygiene + scope check.** One logical change per commit (per §5)? New deps in their own commits? Anything in the diff outside the ticket's scope?
 6. **Rebase check.** `git rev-list --left-right --count origin/main...HEAD`. Flag if behind.
