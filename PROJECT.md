@@ -4,6 +4,37 @@
 
 ---
 
+## North Star
+_(added retrofit, 2026-05-29)_
+
+**Mission.** An application that successfully helps two people discover shows they both want to watch.
+
+**Metric.** Per week, the number of *joint watches* caused by our recommendations.
+
+A **joint watch** = a partner pair landing on the same show because of our recommendation. A "pair" is one or two registered users; any non-registered participant is represented by a ghost profile inferred from demographic + explicit-preference inputs. We never require both people to sign up.
+
+Measured concretely as: **the number of "Watch now on [Netflix / Prime / Crunchyroll / etc]" clicks per week, made from a partner-mode recommendation surface, on a show the pair hadn't already chosen.**
+
+Until partner mode and the "Watch now" buttons ship, we measure two scaffolding proxies that together approximate the destination:
+
+- **Individual "Watch now" clicks** on previously-unknown recommended shows — proves the engine recommends well to one person, which is the prerequisite for recommending well to two.
+- **Watchlist additions** of previously-unknown recommended shows — proves intent even before the Watch-now action is wired.
+
+As partner mode and Watch-now ship, the joint-watch count becomes the headline; the solo proxies become health checks underneath.
+
+**Note on the cadence.** "Per week" is a measurement frame, not part of the definition of success. We use it because it matches the real cadence at which couples decide what to watch tonight, and because it lets us tell within days whether a shipped change worked. The mission above is the soul of the thing; "per week" is just how we keep the metric honest and moving.
+
+**What this means for what we build.** Every feature has to make it more likely that two people end up watching a show together because of us. Cross-medium recommendations, cross-era discovery, theme-based taxonomy, ghost profiles, mood / context filters, and the individual recommendation engine itself are all *tactics* in service of the joint watch. The solo experience is foundational scaffolding, not the destination. Partner mode is the destination from day one — even during the period when the immediate engineering work is on the solo case, because the solo case has to be good enough to build the pair case on top of.
+
+**What does NOT serve this.** Anything that grows sign-ups, ratings volume, sessions, or time-in-app *without* growing joint watches. Solo features that don't ladder up to partner mode. Recommending shows already on either person's list — overlap on table-stakes content isn't discovery. Polished onboarding that doesn't culminate in a couple actually putting something on tonight.
+
+**Gaming risks to watch.**
+
+- Surfacing very mainstream shows as "joint picks" inflates the count without representing real discovery. Health-check: fraction of joint watches that fall outside both partners' established taste clusters.
+- Once attributed Watch-now clicks become available, watchlist additions must drop strictly below them in priority — keeping a softer proxy in the headline position would let the metric drift.
+
+---
+
 ## What this is
 
 A **cross-medium, theme-based recommendation engine** for TV and anime. Matches viewers to shows based on character arcs, narrative tropes, and themes — not flat genre or popularity rankings. Built around two differentiators that no existing platform solves well:
@@ -49,6 +80,8 @@ Four archetypes, in priority order:
 
 ### Phase 1A (MVP launch)
 
+**Catalog floor (Phase 1A precondition, added 2026-05-29).** Mainstream prestige TV and a meaningful long-tail anime depth must be in the catalog *before* user-testing quality ratings are run. Specifically: a target user with mainstream TV taste (the "couch co-watcher" archetype) must be able to find their anchor shows during onboarding without bouncing. Evidence from internal testing (2026-05): a mainstream-TV pilot user bounced because Baby Reindeer and Fleabag weren't in the catalog. Until this floor is cleared, the quality-rating tests below produce noise, not signal.
+
 - Functional: every Phase 1A scope item shipped, accessible to a public web URL
 - Cold-start: a new user with 5–10 onboarding likes gets recommendations they consider non-trivially relevant in user testing (target: 4/5 quality rating from ≥10 testers)
 - Group recommendation: a 2-person registered-user pair gets a ranked list of titles with measurable quality (≥3/5 average satisfaction in testing)
@@ -75,7 +108,7 @@ Numbers are aspirational; refine after launch with real data.
 - **Import from MyAnimeList and AniList.** XML / GraphQL. The tertiary archetype (power tracker) needs this to even consider switching.
 - **Content database.** Local Postgres copy of titles synced from TMDB (TV + film) and AniList (anime). Title metadata + tags + theme taxonomy + streaming availability per region.
 - **Personal recommendations.** Theme-based scoring using AniList tag overlap as the primary signal, blended with user-rating preferences. No ML model in Phase 1A — rule-based scoring is fine. The ML layer comes in Phase 2.
-- **Group recommendations: registered users only.** 2–5 registered users per group. Intersection of taste vectors, weighted average with floor constraint (no member should hate the result). No ghost profiles in Phase 1A.
+- **Group / partner recommendations, including ghost-profile partners.** 2–5 participants per group, where each participant is either a registered user *or* a ghost profile inferred from demographic + explicit-preference inputs. Intersection of taste vectors, weighted average with floor constraint (no member should hate the result). _Sequencing note (amended 2026-05-29): ghost profiles were previously deferred to Phase 1B; brought into Phase 1A because the product definition requires that we never force both people to sign up — partner mode and ghost-profile partner mode are the same feature in two configurations, not sequenced features. See §North Star._
 - **Streaming availability.** Per title, per region, sourced from TMDB watch providers. "Where to watch" panel on each title page. Filter by user's connected subscriptions.
 - **Web app only.** Next.js. Mobile (RN/Expo) is Phase 2.
 - **Privacy controls.** Public / friends-only / private per list, per title. Data export endpoint, data deletion endpoint. **GDPR-compliant from day 1** (legal requirement, not optional). See ADR-0012 for the full compliance approach.
@@ -83,7 +116,6 @@ Numbers are aspirational; refine after launch with real data.
 
 ### OUT of Phase 1A — explicit deferrals
 
-- **Ghost profiles** for unregistered group members → Phase 1B
 - **Mood / context layer** on recommendations → Phase 1B
 - **React Native mobile app** → Phase 2
 - **Push notifications** (episode drops, group invites) → Phase 2
