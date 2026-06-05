@@ -54,4 +54,23 @@ export const extractThemesAllEvent = eventType('themes/extract.all', {
   }>(),
 });
 
+// Catalog broadening — pulls non-English and deeper global slices from
+// TMDB. Manual trigger only (no cron); run once to seed the catalog with
+// a wide cross-language surface.
+//   catalog/broaden.all — orchestrator: builds the slice list, fans out
+//     one .slice event per language/medium combination.
+//   catalog/broaden.slice — worker: paginates one TMDB discover slice
+//     to exhaustion (no business cap; stops at TMDB's total_pages).
+export const catalogBroadenAllEvent = eventType('catalog/broaden.all', {
+  schema: staticSchema<Record<string, never>>(),
+});
+
+export const catalogBroadenSliceEvent = eventType('catalog/broaden.slice', {
+  schema: staticSchema<{
+    label: string;
+    mediaType: 'tv' | 'movie';
+    params: Record<string, string>;
+  }>(),
+});
+
 export const inngest = new Inngest({ id: 'helpme2c' });
