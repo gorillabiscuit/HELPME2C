@@ -4,6 +4,8 @@ import {
   anilistSyncAnimeAll,
   anilistSyncAnimePage,
   applyThemes,
+  catalogBroadenAll,
+  catalogBroadenSlice,
   extractThemesAll,
   extractThemesBatch,
   recommendAllGroups,
@@ -28,5 +30,7 @@ export const { GET, POST, PUT } = serve({
     recommendAllGroups,
     extractThemesBatch,
     extractThemesAll,
+    catalogBroadenAll,
+    catalogBroadenSlice,
   ],
 });
