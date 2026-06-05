@@ -48,6 +48,15 @@ const SLICE_CONCURRENCY = 3;
 // content is expected to be well under this for any single slice.
 const MAX_PAGES_SAFETY_CAP = 1_000;
 
+// Sort by quality (vote average) not momentum (popularity). Popularity
+// decays over time — Fleabag, Baby Reindeer, The Wire all score under 15
+// today despite being culturally significant. Vote average is stable and
+// surfaces quality across all time periods, which is what this app is for.
+// The vote_count floor filters stub entries and low-signal titles without
+// enough ratings to trust the average.
+const SORT_BY = 'vote_average.desc';
+const MIN_VOTE_COUNT = '200';
+
 const LANGUAGES = ['ko', 'ja', 'fr', 'de', 'es', 'it', 'zh', 'pt', 'hi', 'ar'] as const;
 
 interface SliceSpec {
@@ -56,15 +65,31 @@ interface SliceSpec {
   params: Record<string, string>;
 }
 
+// Base params applied to every slice: sort by vote average (quality, stable
+// across time) instead of popularity (momentum, decays). The vote_count floor
+// removes stub entries — titles with <200 ratings don't have enough signal
+// to trust the average score.
+const BASE_PARAMS: Record<string, string> = {
+  sort_by: SORT_BY,
+  'vote_count.gte': MIN_VOTE_COUNT,
+};
+
 function buildSlices(): SliceSpec[] {
-  const slices: SliceSpec[] = [{ label: 'films global', mediaType: 'movie', params: {} }];
+  const slices: SliceSpec[] = [
+    { label: 'films global', mediaType: 'movie', params: { ...BASE_PARAMS } },
+    { label: 'tv global', mediaType: 'tv', params: { ...BASE_PARAMS } },
+  ];
   for (const lang of LANGUAGES) {
     slices.push({
       label: `films ${lang}`,
       mediaType: 'movie',
-      params: { with_original_language: lang },
+      params: { ...BASE_PARAMS, with_original_language: lang },
     });
-    slices.push({ label: `tv ${lang}`, mediaType: 'tv', params: { with_original_language: lang } });
+    slices.push({
+      label: `tv ${lang}`,
+      mediaType: 'tv',
+      params: { ...BASE_PARAMS, with_original_language: lang },
+    });
   }
   return slices;
 }
