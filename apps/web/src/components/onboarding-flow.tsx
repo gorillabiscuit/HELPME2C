@@ -45,7 +45,7 @@ interface OnboardingFlowProps {
    * the intro for users arriving via a deliberate "start picking" CTA
    * elsewhere in the app (e.g. the empty-dashboard "Pick favourites"
    * button — they've already opted in by clicking). Default `'intro'`. */
-  initialPhase?: 'intro' | 'picker' | 'dislikes';
+  initialPhase?: 'intro' | 'picker' | 'dislikes' | 'preferences';
 }
 
 const MEDIA_TYPE_LABEL: Record<string, string> = {
@@ -71,7 +71,7 @@ export function OnboardingFlow({
   // Two-step flow: intro (value prop) → picker. The intro is the first
   // thing a new signed-up user sees after age-check; entries from
   // "Pick favourites" pass initialPhase='picker' to skip it.
-  const [phase, setPhase] = useState<'intro' | 'picker' | 'dislikes'>(initialPhase);
+  const [phase, setPhase] = useState<'intro' | 'picker' | 'dislikes' | 'preferences'>(initialPhase);
 
   // IDs of titles the user liked in Screen 1 — passed to the mainstream
   // query so the dislike grid doesn't show titles they've already rated.
@@ -123,6 +123,29 @@ export function OnboardingFlow({
     setDislikedIds((s) => new Set(s).add(titleId));
     dislikeMutation.mutate({ titleId, kind: 'tracking', rating: 1 });
   };
+
+  // Screen 3 — feature preference state. Each axis is null (not answered),
+  // -1 (left option chosen), or +1 (right option chosen).
+  const [prefs, setPrefs] = useState<{
+    tone: number | null;
+    pacing: number | null;
+    ending: number | null;
+    intensity: number | null;
+    complexity: number | null;
+    moral: number | null;
+    violenceVeto: boolean | null;
+    sexualContentVeto: boolean | null;
+  }>({
+    tone: null,
+    pacing: null,
+    ending: null,
+    intensity: null,
+    complexity: null,
+    moral: null,
+    violenceVeto: null,
+    sexualContentVeto: null,
+  });
+  const prefsMutation = trpc.preferences.upsert.useMutation();
 
   const searchEnabled = debouncedQuery.trim().length >= MIN_QUERY_LENGTH;
   const searchQuery = trpc.titles.search.useQuery(
@@ -304,8 +327,117 @@ export function OnboardingFlow({
               <span className="font-semibold text-foreground">{dislikedIds.size}</span>{' '}
               {dislikedIds.size === 1 ? 'title marked' : 'titles marked'}
             </p>
-            <Button onClick={() => router.push('/')}>
-              {dislikedIds.size === 0 ? 'Skip for now' : 'Show me my recs'}
+            <Button onClick={() => setPhase('preferences')}>
+              {dislikedIds.size === 0
+                ? 'Skip — what do you like watching?'
+                : 'Next — a few quick questions'}
+            </Button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (phase === 'preferences') {
+    const answeredCount = Object.values(prefs).filter((v) => v !== null).length;
+
+    const axes: Array<{
+      key: keyof typeof prefs;
+      left: string;
+      right: string;
+    }> = [
+      { key: 'tone', left: 'Dark and brooding', right: 'Light and playful' },
+      { key: 'pacing', left: 'Slow and atmospheric', right: 'Fast-paced and propulsive' },
+      { key: 'ending', left: 'Downbeat or ambiguous', right: 'Uplifting resolution' },
+      { key: 'intensity', left: 'Cosy and easy-going', right: 'Emotionally intense' },
+      { key: 'complexity', left: 'Straightforward story', right: 'Complex structure or ideas' },
+      { key: 'moral', left: 'Clear heroes and villains', right: 'Morally grey protagonists' },
+    ];
+
+    return (
+      <main className="mx-auto max-w-2xl px-6 pt-12 pb-32">
+        <header className="mb-10 max-w-xl">
+          <h1 className="text-4xl font-semibold tracking-tight">A few quick questions</h1>
+          <p className="mt-3 text-base text-text-body">
+            Pick whichever option fits you better. Skip anything you don&apos;t have a strong
+            feeling about.
+          </p>
+        </header>
+
+        <div className="space-y-4">
+          {axes.map(({ key, left, right }) => {
+            const val = prefs[key] as number | null;
+            return (
+              <div key={key} className="rounded-xl border border-border p-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setPrefs((p) => ({ ...p, [key]: -1 }))}
+                    className={cn(
+                      'rounded-lg border px-4 py-3 text-sm font-medium text-left transition',
+                      val === -1
+                        ? 'border-foreground bg-foreground text-background'
+                        : 'border-border hover:border-input',
+                    )}
+                  >
+                    {left}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPrefs((p) => ({ ...p, [key]: 1 }))}
+                    className={cn(
+                      'rounded-lg border px-4 py-3 text-sm font-medium text-left transition',
+                      val === 1
+                        ? 'border-foreground bg-foreground text-background'
+                        : 'border-border hover:border-input',
+                    )}
+                  >
+                    {right}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Content vetoes — checkboxes, not forced choice */}
+          <div className="rounded-xl border border-border p-4 space-y-3">
+            <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+              Content I&apos;d rather avoid
+            </p>
+            {(
+              [
+                { key: 'violenceVeto' as const, label: 'Graphic violence' },
+                { key: 'sexualContentVeto' as const, label: 'Sexual content' },
+              ] as const
+            ).map(({ key, label }) => (
+              <label key={key} className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={prefs[key] === true}
+                  onChange={(e) => setPrefs((p) => ({ ...p, [key]: e.target.checked || null }))}
+                  className="h-4 w-4 rounded border-border"
+                />
+                <span className="text-sm">{label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="fixed inset-x-0 bottom-0 border-t border-border bg-white/95 backdrop-blur">
+          <div className="mx-auto flex max-w-2xl items-center justify-between px-6 py-3">
+            <p className="text-sm text-text-body">
+              <span className="font-semibold text-foreground">{answeredCount}</span> of{' '}
+              {axes.length + 2} answered
+            </p>
+            <Button
+              onClick={() => {
+                if (answeredCount > 0) {
+                  prefsMutation.mutate(prefs);
+                }
+                router.push('/');
+              }}
+            >
+              {answeredCount === 0 ? 'Skip for now' : 'Show me my recs'}
             </Button>
           </div>
         </div>
