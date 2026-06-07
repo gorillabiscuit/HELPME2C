@@ -103,16 +103,41 @@ export function OnboardingFlow({
     return () => clearTimeout(t);
   }, [query]);
 
-  // Dislike phase — mainstream titles (sorted by vote count) for Screen 2.
-  // Only fetched when the user reaches the dislikes phase.
+  // Dislike phase — mainstream titles for Screen 2.
+  // seenDislikeIds grows on each refresh so we never show the same title twice.
+  const [seenDislikeIds, setSeenDislikeIds] = useState<string[]>([]);
   const mainstreamQuery = trpc.titles.mainstream.useQuery(
-    { limit: 36, excludeTitleIds: likedTitleIds },
+    { limit: 36, excludeTitleIds: [...likedTitleIds, ...seenDislikeIds] },
     { enabled: phase === 'dislikes' },
   );
+
+  const handleDislikeRefresh = () => {
+    const currentIds = (mainstreamQuery.data ?? []).map((t) => t.id);
+    setSeenDislikeIds((prev) => [...new Set([...prev, ...currentIds])]);
+  };
 
   // Like = 10/10 rating + status:completed. Fires on poster tap.
   const likeMutation = trpc.watch.upsert.useMutation();
   const [likedLocalIds, setLikedLocalIds] = useState<Set<string>>(new Set());
+
+  // Like grid refresh — tracks seen IDs to exclude on next fetch.
+  const [seenLikeIds, setSeenLikeIds] = useState<string[]>([]);
+  const [likeRefreshCount, setLikeRefreshCount] = useState(0);
+  const popularRefreshQuery = trpc.titles.popular.useQuery(
+    { limit: 50, excludeTitleIds: seenLikeIds },
+    { enabled: likeRefreshCount > 0 },
+  );
+  const handleLikeRefresh = () => {
+    const currentIds = (
+      likeRefreshCount === 0 ? initialPopular : (popularRefreshQuery.data ?? [])
+    ).map((t) => t.id);
+    setSeenLikeIds((prev) => [...new Set([...prev, ...currentIds, ...Array.from(likedLocalIds)])]);
+    setLikeRefreshCount((n) => n + 1);
+  };
+  // After first refresh, use the client query result instead of the server prop.
+  const activeLikePool =
+    likeRefreshCount > 0 ? (popularRefreshQuery.data ?? initialPopular) : initialPopular;
+  const likePoolLoading = likeRefreshCount > 0 && popularRefreshQuery.isFetching;
 
   // Local set of title IDs the user skipped ("Haven't seen it").
   // Not written to the DB — just hides the card for the session.
@@ -180,8 +205,8 @@ export function OnboardingFlow({
   const showingSearchResults = searchEnabled;
   const rawTitlesToShow: TitleSummary[] = showingSearchResults
     ? (searchQuery.data ?? [])
-    : initialPopular;
-  const isLoadingResults = showingSearchResults && searchQuery.isFetching;
+    : activeLikePool;
+  const isLoadingResults = (showingSearchResults && searchQuery.isFetching) || likePoolLoading;
 
   // Hide titles the user has already rated/added from the popular grid
   // so each action makes room for a new title to rate. Mid-fade cards
@@ -193,16 +218,17 @@ export function OnboardingFlow({
   // know it" — neither writes a watch entry, so the entry-based check
   // alone wouldn't hide them.
   const hiddenIds = useMemo(() => new Set(hiddenTitleIds), [hiddenTitleIds]);
-  const titlesToShow = showingSearchResults
-    ? rawTitlesToShow
-    : rawTitlesToShow.filter((title) => {
-        if (exiting.has(title.id)) return true;
-        if (hiddenIds.has(title.id)) return false;
-        if (skippedIds.has(title.id)) return false;
-        if (likedLocalIds.has(title.id)) return false;
-        const entry = entryByTitleId.get(title.id);
-        return !entry || (entry.status === null && entry.rating === null);
-      });
+  const titlesToShow = rawTitlesToShow.filter((title) => {
+    if (exiting.has(title.id)) return true;
+    if (likedLocalIds.has(title.id)) return false;
+    if (!showingSearchResults) {
+      if (hiddenIds.has(title.id)) return false;
+      if (skippedIds.has(title.id)) return false;
+      const entry = entryByTitleId.get(title.id);
+      return !entry || (entry.status === null && entry.rating === null);
+    }
+    return true;
+  });
 
   if (phase === 'intro') {
     return (
@@ -333,14 +359,22 @@ export function OnboardingFlow({
 
         <div className="fixed inset-x-0 bottom-0 border-t border-border bg-white/95 backdrop-blur">
           <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
-            <p className="text-sm text-text-body">
-              <span className="font-semibold text-foreground">{dislikedIds.size}</span>{' '}
-              {dislikedIds.size === 1 ? 'title marked' : 'titles marked'}
-            </p>
+            <div className="flex items-center gap-4">
+              <p className="text-sm text-text-body">
+                <span className="font-semibold text-foreground">{dislikedIds.size}</span>{' '}
+                {dislikedIds.size === 1 ? 'marked' : 'marked'}
+              </p>
+              <button
+                type="button"
+                onClick={handleDislikeRefresh}
+                disabled={mainstreamQuery.isFetching}
+                className="text-sm text-muted-foreground underline-offset-2 hover:underline disabled:opacity-50"
+              >
+                {mainstreamQuery.isFetching ? 'Loading…' : 'Show me different ones'}
+              </button>
+            </div>
             <Button onClick={() => setPhase('preferences')}>
-              {dislikedIds.size === 0
-                ? 'Skip — what do you like watching?'
-                : 'Next — a few quick questions'}
+              {dislikedIds.size === 0 ? 'None here — skip' : 'Next'}
             </Button>
           </div>
         </div>
@@ -555,10 +589,22 @@ export function OnboardingFlow({
           until they rate something. */}
       <div className="fixed inset-x-0 bottom-0 border-t border-border bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
-          <p className="text-sm text-text-body">
-            <span className="font-semibold text-foreground">{ratedCount}</span>{' '}
-            {ratedCount === 1 ? 'title rated' : 'titles rated'}
-          </p>
+          <div className="flex items-center gap-4">
+            <p className="text-sm text-text-body">
+              <span className="font-semibold text-foreground">{ratedCount}</span>{' '}
+              {ratedCount === 1 ? 'picked' : 'picked'}
+            </p>
+            {!showingSearchResults && (
+              <button
+                type="button"
+                onClick={handleLikeRefresh}
+                disabled={likePoolLoading}
+                className="text-sm text-muted-foreground underline-offset-2 hover:underline disabled:opacity-50"
+              >
+                {likePoolLoading ? 'Loading…' : 'Show me different ones'}
+              </button>
+            )}
+          </div>
           <Button
             onClick={() => {
               if (ratedCount === 0) {

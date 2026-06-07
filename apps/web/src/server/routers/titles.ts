@@ -56,6 +56,10 @@ export const titlesRouter = router({
            * card right now", so the popular grid honours that even when
            * the engine still considers the title surface-able later. */
           excludeRecFeedback: z.boolean().optional().default(false),
+          /** Explicit title IDs to exclude — used by the onboarding
+           * "Show me different ones" refresh to avoid re-showing titles
+           * already seen in a previous batch. */
+          excludeTitleIds: z.array(z.string().uuid()).optional().default([]),
         })
         .optional(),
     )
@@ -110,7 +114,9 @@ export const titlesRouter = router({
               .then((rows) => rows.map((r) => r.titleId))
           : Promise.resolve<string[]>([]),
       ]);
-      const userTouchedIds = Array.from(new Set([...watchTouchedIds, ...feedbackTouchedIds]));
+      const userTouchedIds = Array.from(
+        new Set([...watchTouchedIds, ...feedbackTouchedIds, ...(input?.excludeTitleIds ?? [])]),
+      );
       const hasExclusion = userTouchedIds.length > 0;
 
       // Caller specified a single mediaType — stratification doesn't
