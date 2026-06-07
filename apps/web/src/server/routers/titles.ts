@@ -225,4 +225,81 @@ export const titlesRouter = router({
         .limit(input.limit * 3);
       return dedupeByFranchise(rows).slice(0, input.limit);
     }),
+
+  // Top-N titles sorted by vote count — used by the onboarding dislike
+  // picker. Vote count correlates with how widely a title has been SEEN,
+  // which is what matters here: a user can only meaningfully dislike
+  // something they've actually watched. `popularity_score` is recency-
+  // weighted (newer titles score higher) and biases toward current hits;
+  // vote count rewards enduring mainstream recognition.
+  //
+  // Excludes titles the user has already acted on (liked in Screen 1,
+  // or any existing watch entry) so the dislike grid shows fresh titles.
+  mainstream: protectedProcedure
+    .input(
+      z.object({
+        limit: z.number().int().min(1).max(50).optional().default(36),
+        excludeTitleIds: z.array(z.string().uuid()).optional().default([]),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      // Always exclude existing watch entries so the dislike grid doesn't
+      // show titles already rated positively in Screen 1.
+      const watchedIds = await ctx.db
+        .select({ titleId: watchEntries.titleId })
+        .from(watchEntries)
+        .innerJoin(users, eq(watchEntries.userId, users.id))
+        .where(eq(users.clerkId, ctx.userId))
+        .then((rows) => rows.map((r) => r.titleId));
+
+      const excludeIds = Array.from(new Set([...watchedIds, ...input.excludeTitleIds]));
+
+      const projection = {
+        id: titles.id,
+        title: titles.title,
+        originalTitle: titles.originalTitle,
+        mediaType: titles.mediaType,
+        releaseYear: titles.releaseYear,
+        posterUrl: titles.posterUrl,
+        popularityScore: titles.popularityScore,
+        trailerProvider: titles.trailerProvider,
+        trailerVideoId: titles.trailerVideoId,
+      } as const;
+
+      // Stratify across media types (same approach as `popular`) so the
+      // dislike grid isn't all anime. Overfetch 3× for franchise dedup.
+      const perType = Math.ceil((input.limit / 3) * 3);
+      const mediaTypeResults = await Promise.all(
+        (['tv', 'film', 'anime'] as const).map((mt) => {
+          const where =
+            excludeIds.length > 0
+              ? and(eq(titles.mediaType, mt), notInArray(titles.id, excludeIds))
+              : eq(titles.mediaType, mt);
+          return ctx.db
+            .select(projection)
+            .from(titles)
+            .where(where)
+            .orderBy(sql`${titles.popularityScore} DESC NULLS LAST, ${titles.title} ASC`)
+            .limit(perType * 3);
+        }),
+      );
+
+      // Dedup each medium, then round-robin interleave.
+      const [tvRows, filmRows, animeRows] = mediaTypeResults as [
+        (typeof mediaTypeResults)[0],
+        (typeof mediaTypeResults)[0],
+        (typeof mediaTypeResults)[0],
+      ];
+      const dedupedTv = dedupeByFranchise(tvRows).slice(0, perType);
+      const dedupedFilm = dedupeByFranchise(filmRows).slice(0, perType);
+      const dedupedAnime = dedupeByFranchise(animeRows).slice(0, perType);
+      const interleaved: typeof dedupedTv = [];
+      const maxLen = Math.max(dedupedTv.length, dedupedFilm.length, dedupedAnime.length);
+      for (let i = 0; i < maxLen && interleaved.length < input.limit; i++) {
+        if (dedupedTv[i]) interleaved.push(dedupedTv[i]!);
+        if (dedupedFilm[i] && interleaved.length < input.limit) interleaved.push(dedupedFilm[i]!);
+        if (dedupedAnime[i] && interleaved.length < input.limit) interleaved.push(dedupedAnime[i]!);
+      }
+      return interleaved;
+    }),
 });

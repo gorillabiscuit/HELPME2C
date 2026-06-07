@@ -45,7 +45,7 @@ interface OnboardingFlowProps {
    * the intro for users arriving via a deliberate "start picking" CTA
    * elsewhere in the app (e.g. the empty-dashboard "Pick favourites"
    * button — they've already opted in by clicking). Default `'intro'`. */
-  initialPhase?: 'intro' | 'picker';
+  initialPhase?: 'intro' | 'picker' | 'dislikes';
 }
 
 const MEDIA_TYPE_LABEL: Record<string, string> = {
@@ -71,7 +71,11 @@ export function OnboardingFlow({
   // Two-step flow: intro (value prop) → picker. The intro is the first
   // thing a new signed-up user sees after age-check; entries from
   // "Pick favourites" pass initialPhase='picker' to skip it.
-  const [phase, setPhase] = useState<'intro' | 'picker'>(initialPhase);
+  const [phase, setPhase] = useState<'intro' | 'picker' | 'dislikes'>(initialPhase);
+
+  // IDs of titles the user liked in Screen 1 — passed to the mainstream
+  // query so the dislike grid doesn't show titles they've already rated.
+  const [likedTitleIds, setLikedTitleIds] = useState<string[]>([]);
 
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -100,6 +104,25 @@ export function OnboardingFlow({
     const t = setTimeout(() => setDebouncedQuery(query), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(t);
   }, [query]);
+
+  // Dislike phase — mainstream titles (sorted by vote count) for Screen 2.
+  // Only fetched when the user reaches the dislikes phase.
+  const mainstreamQuery = trpc.titles.mainstream.useQuery(
+    { limit: 36, excludeTitleIds: likedTitleIds },
+    { enabled: phase === 'dislikes' },
+  );
+
+  // Write a 1/10 dislike rating. Uses the same watch.upsert path as likes
+  // but with rating:1 — the bipolar formula maps this to a strong negative
+  // weight in the taste vector.
+  const dislikeMutation = trpc.watch.upsert.useMutation();
+  const [dislikedIds, setDislikedIds] = useState<Set<string>>(new Set());
+
+  const handleDislike = (titleId: string) => {
+    if (dislikedIds.has(titleId)) return;
+    setDislikedIds((s) => new Set(s).add(titleId));
+    dislikeMutation.mutate({ titleId, kind: 'tracking', rating: 1 });
+  };
 
   const searchEnabled = debouncedQuery.trim().length >= MIN_QUERY_LENGTH;
   const searchQuery = trpc.titles.search.useQuery(
@@ -208,6 +231,88 @@ export function OnboardingFlow({
     );
   }
 
+  if (phase === 'dislikes') {
+    const dislikeTitles = mainstreamQuery.data ?? [];
+    return (
+      <main className="mx-auto max-w-5xl px-6 pt-12 pb-32">
+        <header className="mb-8 max-w-2xl">
+          <h1 className="text-4xl font-semibold tracking-tight">What really isn&apos;t for you?</h1>
+          <p className="mt-3 text-base text-text-body">
+            Tap anything you&apos;ve watched and genuinely didn&apos;t enjoy. This is just as useful
+            as what you love — it tells us what to avoid. Skip anything you haven&apos;t seen.
+          </p>
+        </header>
+
+        {mainstreamQuery.isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : (
+          <ul className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
+            {dislikeTitles.map((title) => {
+              const isDisliked = dislikedIds.has(title.id);
+              const displayTitle = franchiseDisplayName(title.title);
+              return (
+                <li key={title.id}>
+                  <button
+                    type="button"
+                    onClick={() => handleDislike(title.id)}
+                    className="group w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 rounded-lg"
+                  >
+                    <div
+                      className={cn(
+                        'relative aspect-[2/3] overflow-hidden rounded-lg border bg-muted transition',
+                        isDisliked
+                          ? 'border-destructive ring-2 ring-destructive'
+                          : 'border-border group-hover:border-input',
+                      )}
+                    >
+                      {title.posterUrl ? (
+                        <Image
+                          src={title.posterUrl}
+                          alt=""
+                          fill
+                          sizes="(min-width: 1024px) 200px, (min-width: 640px) 33vw, 50vw"
+                          className={cn('object-cover transition', isDisliked && 'opacity-60')}
+                        />
+                      ) : null}
+                      {isDisliked && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-destructive/20">
+                          <span className="text-3xl">✕</span>
+                        </div>
+                      )}
+                    </div>
+                    <h3 className="mt-2 truncate text-sm font-medium text-foreground">
+                      {displayTitle}
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      {[
+                        MEDIA_TYPE_LABEL[title.mediaType] ?? title.mediaType,
+                        title.releaseYear?.toString(),
+                      ]
+                        .filter((s): s is string => Boolean(s))
+                        .join(' · ')}
+                    </p>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        <div className="fixed inset-x-0 bottom-0 border-t border-border bg-white/95 backdrop-blur">
+          <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
+            <p className="text-sm text-text-body">
+              <span className="font-semibold text-foreground">{dislikedIds.size}</span>{' '}
+              {dislikedIds.size === 1 ? 'title marked' : 'titles marked'}
+            </p>
+            <Button onClick={() => router.push('/')}>
+              {dislikedIds.size === 0 ? 'Skip for now' : 'Show me my recs'}
+            </Button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="mx-auto max-w-5xl px-6 pt-12 pb-32">
       <header className="mb-8 max-w-2xl">
@@ -309,8 +414,26 @@ export function OnboardingFlow({
             <span className="font-semibold text-foreground">{ratedCount}</span>{' '}
             {ratedCount === 1 ? 'title rated' : 'titles rated'}
           </p>
-          <Button onClick={() => router.push('/')}>
-            {ratedCount === 0 ? 'Skip for now' : ratedCount < 3 ? 'Continue' : 'Show me my recs'}
+          <Button
+            onClick={() => {
+              if (ratedCount === 0) {
+                router.push('/');
+                return;
+              }
+              // Capture the IDs of titles rated positively so the dislike
+              // grid can exclude them.
+              const liked = initialEntries
+                .filter((e) => e.rating !== null && e.rating >= 7)
+                .map((e) => e.titleId);
+              setLikedTitleIds(liked);
+              setPhase('dislikes');
+            }}
+          >
+            {ratedCount === 0
+              ? 'Skip for now'
+              : ratedCount < 3
+                ? 'Continue'
+                : "Next — what don't you like?"}
           </Button>
         </div>
       </div>
