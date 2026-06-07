@@ -45,6 +45,32 @@ export interface TitleTagSet {
   readonly tags: ReadonlyArray<TaggedTitleTag>;
 }
 
+/**
+ * A single LLM-extracted theme slug on a title, with confidence 0..1.
+ * Sourced from `title_themes` — distinct from the AniList/TMDB tag system.
+ */
+export interface TitleFacetEntry {
+  readonly slug: string;
+  readonly confidence: number;
+}
+
+/**
+ * A title plus its LLM-extracted facet slugs. Passed in alongside TitleTagSet
+ * so the scoring kernel can incorporate facet overlap as a secondary signal.
+ * Keyed by titleId so the caller can build a Map for O(1) lookup.
+ */
+export interface TitleFacetSet {
+  readonly titleId: string;
+  readonly facets: ReadonlyArray<TitleFacetEntry>;
+}
+
+/**
+ * Per-slug aggregate weight derived from a user's history titles' facet tags.
+ * Analogous to UserTasteVector but operating on vocabulary slugs rather than
+ * raw AniList/TMDB tag IDs. Negative values are possible (dislike picks).
+ */
+export type FacetTasteVector = ReadonlyMap<string, number>;
+
 /** Aggregate per-tag weight contribution from a user's history. */
 export type UserTasteVector = ReadonlyMap<string, number>;
 
@@ -108,15 +134,37 @@ const DEFAULT_LIMIT = 200;
  * Length-normalisation could be added as a separate step if cosine
  * similarity becomes the desired metric.
  */
+/**
+ * Return type for extractTasteVector — the tag-level vector plus the
+ * optional facet-level vector derived from LLM-extracted theme slugs.
+ *
+ * Callers that don't pass `userFacets` get an empty facetVector; the
+ * scoring kernel treats an empty facetVector as "no facet signal" and
+ * falls back to tag-overlap-only scoring — same behaviour as before.
+ */
+export interface TasteVectors {
+  readonly tasteVector: UserTasteVector;
+  readonly facetVector: FacetTasteVector;
+}
+
 export function extractTasteVector(
   history: UserHistory,
   userTitles: ReadonlyArray<TitleTagSet>,
-): UserTasteVector {
+  userFacets: ReadonlyArray<TitleFacetSet> = [],
+): TasteVectors {
   const tagWeights = new Map<string, number>();
   const titlesById = new Map<string, TitleTagSet>();
   for (const title of userTitles) {
     titlesById.set(title.titleId, title);
   }
+
+  // Build facet lookup: titleId → facet entries.
+  const facetsById = new Map<string, TitleFacetSet>();
+  for (const f of userFacets) {
+    facetsById.set(f.titleId, f);
+  }
+
+  const slugWeights = new Map<string, number>();
 
   for (const anchor of history.anchors) {
     const title = titlesById.get(anchor.titleId);
@@ -126,6 +174,16 @@ export function extractTasteVector(
         tag.tagId,
         (tagWeights.get(tag.tagId) ?? 0) + tag.weight * ANCHOR_CONTRIBUTION,
       );
+    }
+    // Facet contribution from anchor — full positive weight × confidence.
+    const facetSet = facetsById.get(anchor.titleId);
+    if (facetSet) {
+      for (const f of facetSet.facets) {
+        slugWeights.set(
+          f.slug,
+          (slugWeights.get(f.slug) ?? 0) + f.confidence * ANCHOR_CONTRIBUTION,
+        );
+      }
     }
   }
 
@@ -137,9 +195,17 @@ export function extractTasteVector(
     for (const tag of title.tags) {
       tagWeights.set(tag.tagId, (tagWeights.get(tag.tagId) ?? 0) + tag.weight * multiplier);
     }
+    // Facet contribution from rated title — multiplier carries sign (negative
+    // for disliked titles), so dislikes subtract from the facet vector.
+    const facetSet = facetsById.get(rated.titleId);
+    if (facetSet) {
+      for (const f of facetSet.facets) {
+        slugWeights.set(f.slug, (slugWeights.get(f.slug) ?? 0) + f.confidence * multiplier);
+      }
+    }
   }
 
-  return tagWeights;
+  return { tasteVector: tagWeights, facetVector: slugWeights };
 }
 
 /**
@@ -199,15 +265,27 @@ export function recommendForUser(
   candidates: ReadonlyArray<TitleTagSet>,
   limit: number = DEFAULT_LIMIT,
   themeMembership: ReadonlyArray<TagThemeMembership> = [],
+  facetVector: FacetTasteVector = new Map(),
+  candidateFacets: ReadonlyArray<TitleFacetSet> = [],
+  facetWeight: number = 0.4,
 ): Recommendation[] {
   const tagThemes = buildTagThemeIndex(themeMembership);
   const tasteTheme = buildTasteTheme(taste, tagThemes);
+  const facetsById = new Map(candidateFacets.map((f) => [f.titleId, f]));
 
   const scored: Recommendation[] = [];
   for (const candidate of candidates) {
     scored.push({
       titleId: candidate.titleId,
-      score: scoreCandidate(taste, candidate, tagThemes, tasteTheme),
+      score: scoreCandidate(
+        taste,
+        candidate,
+        tagThemes,
+        tasteTheme,
+        facetsById.get(candidate.titleId),
+        facetVector,
+        facetWeight,
+      ),
     });
   }
 
@@ -241,13 +319,6 @@ export function recommendForUser(
 // will be calibrated against the offline eval harness in the next chunk
 // per the ADR's "required before any group-rec code lands" gate.
 // ---------------------------------------------------------------------------
-
-/** A user participating in a group rec session. Carries a userId so the
- * caller can correlate per-user scores back to display data. */
-export interface GroupMember {
-  readonly userId: string;
-  readonly taste: UserTasteVector;
-}
 
 /** Tunable parameters for group scoring. See ADR-0020 §what-we-chose. */
 export interface GroupScoreParams {
@@ -308,16 +379,26 @@ const DEFAULT_GROUP_PARAMS: GroupScoreParams = { vetoThreshold: 0.5, lambda: 0.5
  *     candidate is vetoed by some member — likely an "incompatible
  *     group" UX state)
  */
+/** A group member — now carries an optional facet vector alongside the tag taste. */
+export interface GroupMember {
+  readonly userId: string;
+  readonly taste: UserTasteVector;
+  readonly facetVector?: FacetTasteVector;
+}
+
 export function recommendForGroup(
   members: ReadonlyArray<GroupMember>,
   candidates: ReadonlyArray<TitleTagSet>,
   params: GroupScoreParams = DEFAULT_GROUP_PARAMS,
   themeMembership: ReadonlyArray<TagThemeMembership> = [],
   limit: number = DEFAULT_LIMIT,
+  candidateFacets: ReadonlyArray<TitleFacetSet> = [],
+  facetWeight: number = 0.4,
 ): GroupRecommendation[] {
   if (members.length === 0 || candidates.length === 0) return [];
 
   const tagThemes = buildTagThemeIndex(themeMembership);
+  const facetsById = new Map(candidateFacets.map((f) => [f.titleId, f]));
 
   // Precompute per-member: tasteTheme + raw score for every candidate +
   // per-member max raw score (for normalisation). One pass over
@@ -327,7 +408,18 @@ export function recommendForGroup(
   // §what-would-change-our-mind — should veto).
   const memberContexts = members.map((m) => {
     const tasteTheme = buildTasteTheme(m.taste, tagThemes);
-    const rawScores = candidates.map((c) => scoreCandidate(m.taste, c, tagThemes, tasteTheme));
+    const memberFacetVector = m.facetVector ?? new Map();
+    const rawScores = candidates.map((c) =>
+      scoreCandidate(
+        m.taste,
+        c,
+        tagThemes,
+        tasteTheme,
+        facetsById.get(c.titleId),
+        memberFacetVector,
+        facetWeight,
+      ),
+    );
     let maxRaw = 0;
     for (const s of rawScores) {
       if (s > maxRaw) maxRaw = s;

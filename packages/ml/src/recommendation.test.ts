@@ -35,7 +35,7 @@ describe('extractTasteVector', () => {
       ratings: [],
     };
 
-    const taste = extractTasteVector(history, userTitles);
+    const { tasteVector: taste } = extractTasteVector(history, userTitles);
 
     expect(taste.get('actionT')).toBe(80);
     expect(taste.get('dramaT')).toBe(50);
@@ -51,11 +51,11 @@ describe('extractTasteVector', () => {
         ],
       },
     ];
-    const tasteFromAnchor = extractTasteVector(
+    const { tasteVector: tasteFromAnchor } = extractTasteVector(
       { anchors: [{ titleId: 't1' }], ratings: [] },
       userTitles,
     );
-    const tasteFromTen = extractTasteVector(
+    const { tasteVector: tasteFromTen } = extractTasteVector(
       { anchors: [], ratings: [{ titleId: 't1', rating: 10 }] },
       userTitles,
     );
@@ -73,7 +73,7 @@ describe('extractTasteVector', () => {
         tags: [{ tagId: 'actionT', weight: 80 }],
       },
     ];
-    const taste = extractTasteVector(
+    const { tasteVector: taste } = extractTasteVector(
       { anchors: [], ratings: [{ titleId: 't1', rating: 1 }] },
       userTitles,
     );
@@ -88,11 +88,11 @@ describe('extractTasteVector', () => {
         tags: [{ tagId: 'actionT', weight: 80 }],
       },
     ];
-    const tasteHigh = extractTasteVector(
+    const { tasteVector: tasteHigh } = extractTasteVector(
       { anchors: [], ratings: [{ titleId: 't1', rating: 10 }] },
       userTitles,
     );
-    const tasteLow = extractTasteVector(
+    const { tasteVector: tasteLow } = extractTasteVector(
       { anchors: [], ratings: [{ titleId: 't1', rating: 1 }] },
       userTitles,
     );
@@ -111,15 +111,15 @@ describe('extractTasteVector', () => {
         tags: [{ tagId: 'actionT', weight: 100 }],
       },
     ];
-    const tasteFive = extractTasteVector(
+    const { tasteVector: tasteFive } = extractTasteVector(
       { anchors: [], ratings: [{ titleId: 't1', rating: 5 }] },
       userTitles,
     );
-    const tasteSix = extractTasteVector(
+    const { tasteVector: tasteSix } = extractTasteVector(
       { anchors: [], ratings: [{ titleId: 't1', rating: 6 }] },
       userTitles,
     );
-    const tasteTen = extractTasteVector(
+    const { tasteVector: tasteTen } = extractTasteVector(
       { anchors: [], ratings: [{ titleId: 't1', rating: 10 }] },
       userTitles,
     );
@@ -147,7 +147,7 @@ describe('extractTasteVector', () => {
         tags: [{ tagId: 'actionT', weight: 80 }],
       },
     ];
-    const taste = extractTasteVector(
+    const { tasteVector: taste } = extractTasteVector(
       { anchors: [{ titleId: 't1' }, { titleId: 't2' }], ratings: [] },
       userTitles,
     );
@@ -168,7 +168,7 @@ describe('extractTasteVector', () => {
 
     // 'tMissing' is referenced by the user but absent from userTitles —
     // function must not throw and must skip its contribution.
-    const run = (): UserTasteVector =>
+    const run = () =>
       extractTasteVector(
         {
           anchors: [{ titleId: 't1' }, { titleId: 'tMissing' }],
@@ -178,12 +178,12 @@ describe('extractTasteVector', () => {
       );
 
     expect(run).not.toThrow();
-    const taste = run();
+    const { tasteVector: taste } = run();
     expect(taste.get('actionT')).toBe(60);
   });
 
   it('returns an empty vector for empty history and empty userTitles', () => {
-    const taste = extractTasteVector({ anchors: [], ratings: [] }, []);
+    const { tasteVector: taste } = extractTasteVector({ anchors: [], ratings: [] }, []);
     expect(taste.size).toBe(0);
   });
 
@@ -195,11 +195,11 @@ describe('extractTasteVector', () => {
       },
     ];
 
-    const tasteAnchorOnly = extractTasteVector(
+    const { tasteVector: tasteAnchorOnly } = extractTasteVector(
       { anchors: [{ titleId: 't1' }], ratings: [] },
       userTitles,
     );
-    const tasteAnchorPlusRating = extractTasteVector(
+    const { tasteVector: tasteAnchorPlusRating } = extractTasteVector(
       {
         anchors: [{ titleId: 't1' }],
         ratings: [{ titleId: 't1', rating: 8 }],

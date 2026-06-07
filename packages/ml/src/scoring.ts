@@ -9,7 +9,13 @@
 // internal to the package, callers use recommendForUser /
 // recommendForGroup / explainGroupRecommendation.
 
-import type { TagThemeMembership, TitleTagSet, UserTasteVector } from './recommendation';
+import type {
+  FacetTasteVector,
+  TagThemeMembership,
+  TitleFacetSet,
+  TitleTagSet,
+  UserTasteVector,
+} from './recommendation';
 
 /** tagId → list of (themeId, strength) memberships. Built once per
  * scoring call so per-candidate iteration is O(1) per tag. */
@@ -68,23 +74,35 @@ export function buildTasteTheme(
 }
 
 /**
- * Score one candidate against one user's taste. Combines direct
- * tag-overlap with the cross-medium-only theme bridge (a tag the user
- * has direct signal in scores via tag-overlap ONLY; the theme dimension
- * fires only for tags absent from taste — see the JSDoc on
- * recommendForUser for the full rule).
+ * Score one candidate against one user's taste. Combines:
+ *
+ *   1. Direct tag-overlap (AniList/TMDB tags)
+ *   2. Cross-medium theme bridge (tag→theme→tag, for anime↔TV matching)
+ *   3. Facet overlap (LLM-extracted vocabulary slugs × user's facet vector)
+ *
+ * The facet term is weighted by `facetWeight` (default 0.4) so it acts as
+ * a secondary discovery signal rather than competing with direct tag overlap.
+ * Tune upward for more adventurous recommendations, downward for safer ones.
+ *
+ * Facet scoring rule: for each slug on the candidate, if the user's facet
+ * vector has a weight for that slug, accumulate `facetWeight × slugWeight ×
+ * confidence`. Negative facet weights (from dislike picks) subtract, pushing
+ * candidates with those facets down the ranking.
  *
  * recommendForUser calls this once per candidate; recommendForGroup
- * calls it once per (member × candidate); explainGroupRecommendation
- * calls a parallel breakdown variant for the same candidate.
+ * calls it once per (member × candidate).
  */
 export function scoreCandidate(
   taste: UserTasteVector,
   candidate: TitleTagSet,
   tagThemes: TagThemeIndex,
   tasteTheme: TasteThemeVector,
+  candidateFacets: TitleFacetSet | undefined = undefined,
+  facetVector: FacetTasteVector = new Map(),
+  facetWeight: number = 0.4,
 ): number {
   let score = 0;
+
   for (const tag of candidate.tags) {
     const tasteWeight = taste.get(tag.tagId);
     if (tasteWeight !== undefined) {
@@ -103,5 +121,17 @@ export function scoreCandidate(
       score += themeWeight * tag.weight * (m.strength / 100);
     }
   }
+
+  // Facet term — secondary signal, weighted down relative to tag overlap.
+  // An empty facetVector or missing candidateFacets produces zero contribution,
+  // making this term backward-compatible with callers that don't pass facets.
+  if (candidateFacets && facetVector.size > 0) {
+    for (const f of candidateFacets.facets) {
+      const userFacetWeight = facetVector.get(f.slug);
+      if (userFacetWeight === undefined) continue;
+      score += facetWeight * userFacetWeight * f.confidence;
+    }
+  }
+
   return score;
 }
