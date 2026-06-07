@@ -1,8 +1,9 @@
-import { and, eq, ilike, notInArray, or, sql } from 'drizzle-orm';
+import { and, eq, ilike, inArray, notInArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { mediaTypeEnum, recFeedback, titles, users, watchEntries } from '../schema';
 import { dedupeByFranchise } from '../lib/franchise';
 import { protectedProcedure, router } from '../trpc';
+import { searchTmdbAndIngest } from '@/inngest/functions/tmdb-sync';
 
 // Auto-synced with the Drizzle pgEnum values, same single-source-of-truth
 // pattern as watch.ts.
@@ -298,7 +299,54 @@ export const titlesRouter = router({
         return a.title.localeCompare(b.title);
       });
 
-      return dedupeByFranchise(sorted).slice(0, input.limit);
+      const deduped = dedupeByFranchise(sorted).slice(0, input.limit);
+
+      // On-demand ingest: if our catalog has no matches for a query of ≥3
+      // characters, fetch from TMDB in real-time and upsert. This handles
+      // the "catalog gap" — culturally significant titles that haven't been
+      // picked up by the batch broaden run yet (e.g. a show that ended
+      // before we launched, or an obscure title below our vote_count floor).
+      //
+      // We ingest at most 5 titles, then re-query our DB so the response
+      // still comes from the single source of truth (our catalog), not
+      // directly from TMDB. This means the latency hit is only paid on the
+      // first search; subsequent searches for the same title hit the DB.
+      //
+      // Guard: only fire if ≥3 chars AND zero local results. Short queries
+      // (<3 chars) are already rejected above; this check is for the case
+      // where trimmed ≥ 2 but still empty in the catalog.
+      if (deduped.length === 0 && trimmed.length >= 3) {
+        try {
+          const ingestedIds = await searchTmdbAndIngest(trimmed, 5);
+          if (ingestedIds.length > 0) {
+            // Re-query the DB for the freshly ingested titles so callers
+            // get our canonical shape (not raw TMDB data).
+            const fresh = await ctx.db
+              .select({
+                id: titles.id,
+                title: titles.title,
+                originalTitle: titles.originalTitle,
+                mediaType: titles.mediaType,
+                releaseYear: titles.releaseYear,
+                posterUrl: titles.posterUrl,
+                popularityScore: titles.popularityScore,
+                trailerProvider: titles.trailerProvider,
+                trailerVideoId: titles.trailerVideoId,
+              })
+              .from(titles)
+              .where(and(inArray(titles.id, ingestedIds), where))
+              .limit(input.limit);
+            // Sort freshly ingested results by TMDB popularity (best proxy
+            // for relevance when the local DB was empty).
+            return fresh.sort((a, b) => (b.popularityScore ?? 0) - (a.popularityScore ?? 0));
+          }
+        } catch {
+          // Best-effort: TMDB being down should not break local search.
+          // Return [] (empty) rather than surfacing a 500.
+        }
+      }
+
+      return deduped;
     }),
 
   // Top-N titles sorted by vote count — used by the onboarding dislike

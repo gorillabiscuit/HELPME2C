@@ -347,6 +347,72 @@ export async function processTmdbMovie(movieId: number): Promise<string | null> 
 }
 
 // Show-batch size inside a single step.run. Per docs/runbooks/inngest.md
+// Search TMDB for a query string and ingest the top results into our catalog.
+// Used for on-demand ingest: when a user searches for a show that isn't in
+// our DB yet, we fetch it from TMDB in real-time so it appears immediately.
+//
+// Strategy: run both /search/tv and /search/movie concurrently, take the
+// top `limit` results by TMDB popularity from the combined set, then
+// processTmdbTvShow / processTmdbMovie for each. Returns the internal DB IDs
+// of titles that were successfully upserted (new AND existing).
+//
+// Caller note: this hits TMDB with 2 search requests + up to `limit * 2`
+// detail requests. Keep limit ≤ 5 for search; burst is acceptable because
+// on-demand ingest fires only on cache misses (zero local results).
+export async function searchTmdbAndIngest(query: string, limit: number = 5): Promise<string[]> {
+  interface TmdbSearchResult {
+    id: number;
+    popularity: number;
+    media_type?: string;
+  }
+  interface TmdbSearchPage {
+    results: TmdbSearchResult[];
+  }
+
+  const encoded = encodeURIComponent(query);
+  const [tvPage, moviePage] = await Promise.allSettled([
+    tmdbGet<TmdbSearchPage>(`/search/tv?query=${encoded}&language=en-US&page=1`),
+    tmdbGet<TmdbSearchPage>(`/search/movie?query=${encoded}&language=en-US&page=1`),
+  ]);
+
+  const tvResults: Array<{ id: number; popularity: number; mediaType: 'tv' | 'movie' }> =
+    tvPage.status === 'fulfilled'
+      ? tvPage.value.results.map((r) => ({
+          id: r.id,
+          popularity: r.popularity,
+          mediaType: 'tv' as const,
+        }))
+      : [];
+  const movieResults: Array<{ id: number; popularity: number; mediaType: 'tv' | 'movie' }> =
+    moviePage.status === 'fulfilled'
+      ? moviePage.value.results.map((r) => ({
+          id: r.id,
+          popularity: r.popularity,
+          mediaType: 'movie' as const,
+        }))
+      : [];
+
+  // Merge, sort by TMDB popularity, take top `limit`.
+  const merged = [...tvResults, ...movieResults]
+    .sort((a, b) => b.popularity - a.popularity)
+    .slice(0, limit);
+
+  const upserted: string[] = [];
+  await Promise.allSettled(
+    merged.map(async ({ id, mediaType }) => {
+      try {
+        const titleId =
+          mediaType === 'tv' ? await processTmdbTvShow(id) : await processTmdbMovie(id);
+        if (titleId) upserted.push(titleId);
+      } catch {
+        // Best-effort: a single TMDB failure doesn't abort the rest.
+      }
+    }),
+  );
+
+  return upserted;
+}
+
 // the Inngest free tier caps step runs at ~1k/day; 1-step-per-show would
 // burn 2000 step runs per nightly cron and silently truncate. Batching
 // 10 shows per step.run drops the budget to ~300 step runs/cron — well
