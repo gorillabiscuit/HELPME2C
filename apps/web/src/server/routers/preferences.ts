@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
-import { titleThemes, users, userPreferences, type UserPreferencesData } from '../schema';
+import { titles, titleThemes, users, userPreferences, type UserPreferencesData } from '../schema';
 import { protectedProcedure, router } from '../trpc';
 import { THEME_VOCABULARY } from '../themes/vocabulary';
 
@@ -56,115 +56,115 @@ export const preferencesRouter = router({
       return { ok: true };
     }),
 
-  // Generate an AI insight from the user's like or dislike picks.
-  // Calls Claude Haiku with the theme slugs of picked titles and returns
-  // a conversational insight + specific options for the user to validate.
-  // Each option carries the vocabulary slugs it maps to so the result
-  // is immediately structured — no second inference step needed.
+  // Generate per-show insights for the user's picks.
+  // One Claude call returns a question + options for EACH show individually.
+  // The UI steps through shows one at a time showing the poster.
   generateInsight: protectedProcedure
     .input(
       z.object({
-        titleIds: z.array(z.string().uuid()).min(2).max(20),
+        titleIds: z.array(z.string().uuid()).min(1).max(20),
         mode: z.enum(['like', 'dislike']),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      // Load theme slugs for the picked titles.
-      const themeRows = await ctx.db
-        .select({
-          titleId: titleThemes.titleId,
-          slug: titleThemes.themeSlug,
-          confidence: titleThemes.confidence,
-        })
-        .from(titleThemes)
-        .where(inArray(titleThemes.titleId, input.titleIds));
+      // Load title metadata + theme slugs in parallel.
+      const [titleRows, themeRows] = await Promise.all([
+        ctx.db
+          .select({ id: titles.id, title: titles.title, posterUrl: titles.posterUrl })
+          .from(titles)
+          .where(inArray(titles.id, input.titleIds)),
+        ctx.db
+          .select({
+            titleId: titleThemes.titleId,
+            slug: titleThemes.themeSlug,
+            confidence: titleThemes.confidence,
+          })
+          .from(titleThemes)
+          .where(inArray(titleThemes.titleId, input.titleIds)),
+      ]);
 
-      // Group slugs by title, keep only high-confidence ones.
-      const byTitle = new Map<string, string[]>();
+      const titleMap = new Map(titleRows.map((t) => [t.id, t]));
+
+      // Group slugs by title, high-confidence only.
+      const slugsByTitle = new Map<string, string[]>();
       for (const row of themeRows) {
         if (row.confidence < 0.7) continue;
-        const slugs = byTitle.get(row.titleId) ?? [];
+        const slugs = slugsByTitle.get(row.titleId) ?? [];
         slugs.push(row.slug);
-        byTitle.set(row.titleId, slugs);
+        slugsByTitle.set(row.titleId, slugs);
       }
 
-      // Count slug frequency across all picks to surface the common threads.
-      const slugFreq = new Map<string, number>();
-      for (const slugs of byTitle.values()) {
-        for (const slug of slugs) {
-          slugFreq.set(slug, (slugFreq.get(slug) ?? 0) + 1);
-        }
-      }
-
-      // Take slugs that appear in at least 2 titles — the actual shared signal.
-      const sharedSlugs = [...slugFreq.entries()]
-        .filter(([, count]) => count >= Math.min(2, input.titleIds.length))
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 12)
-        .map(([slug]) => slug);
-
-      // Build hint descriptions for each shared slug so Claude understands
-      // what each one means without hallucinating.
-      const slugHints = sharedSlugs
-        .map((slug) => {
-          const entry = THEME_VOCABULARY.find((t) => t.slug === slug);
-          return entry ? `- ${slug}: ${entry.hint}` : null;
+      // Build the prompt block for each show.
+      const showBlocks = input.titleIds
+        .filter((id) => titleMap.has(id))
+        .map((id) => {
+          const t = titleMap.get(id)!;
+          const slugs = (slugsByTitle.get(id) ?? []).slice(0, 8);
+          const slugHints = slugs
+            .map((s) => {
+              const entry = THEME_VOCABULARY.find((v) => v.slug === s);
+              return entry ? `${s}: ${entry.hint}` : null;
+            })
+            .filter(Boolean)
+            .join('; ');
+          return `Title: "${t.title}"\nThemes: ${slugHints || '(none found)'}`;
         })
-        .filter(Boolean)
-        .join('\n');
+        .join('\n\n');
 
-      const modeContext =
-        input.mode === 'like'
-          ? 'these are shows the person LOVED'
-          : 'these are shows the person did NOT enjoy';
+      const verb = input.mode === 'like' ? 'loved' : 'did NOT enjoy';
+      const prompt = `You are helping personalise a TV/film recommendation engine. The user ${verb} each of these shows.
 
-      const prompt = `You are helping build a personalised recommendation engine. ${modeContext}.
+For EACH show, generate:
+1. A short question asking what they ${input.mode === 'like' ? 'loved' : "didn't like"} about that specific show (name the show in the question, keep it conversational)
+2. 4 specific options — concrete emotional/thematic reasons, anchored to that show's actual content. NOT generic ("great acting", "good story"). Each option maps to 1-2 of the theme slugs.
+3. A "Something else" option with no slugs.
 
-The picks share these themes (slug: hint):
-${slugHints || '(no strong shared themes found)'}
+${showBlocks}
 
-Your task:
-1. Write a SHORT, conversational insight (1-2 sentences) identifying the most interesting pattern across these picks. Be specific — name what they have in common. Don't be generic ("great storytelling"). Sound like a smart friend, not a bot.
-2. Write a short follow-up question (one sentence).
-3. Generate 4-5 specific, distinct options explaining what might have ${input.mode === 'like' ? 'drawn them to' : 'put them off'} these shows. Options must be concrete emotional/thematic hooks — NOT generic ("good writing", "great characters"). Each option maps to 1-3 of the theme slugs above.
-4. Include a "Something else" option with no slugs.
-
-Return ONLY valid JSON, no markdown, no explanation:
-{
-  "insight": "...",
-  "question": "...",
-  "options": [
-    { "label": "...", "slugs": ["slug1", "slug2"] },
-    { "label": "Something else — tell us", "slugs": [] }
-  ]
-}`;
+Return ONLY a JSON array, one entry per show, in the same order. No markdown:
+[
+  {
+    "titleId": "...",
+    "question": "What did you love about [Show]?",
+    "options": [
+      { "label": "...", "slugs": ["slug1"] },
+      { "label": "Something else — tell us", "slugs": [] }
+    ]
+  }
+]`;
 
       const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
       let raw: string;
       try {
         const response = await client.messages.create({
           model: 'claude-haiku-4-5-20251001',
-          max_tokens: 600,
+          max_tokens: 1200,
           messages: [
             { role: 'user', content: prompt },
-            { role: 'assistant', content: '{' },
+            { role: 'assistant', content: '[' },
           ],
         });
         const block = response.content[0];
-        raw = '{' + (block?.type === 'text' ? block.text : '');
+        raw = '[' + (block?.type === 'text' ? block.text : '');
       } catch {
-        return null; // graceful fallback — caller skips insight screen
+        return null;
       }
 
       try {
-        const parsed = JSON.parse(raw) as {
-          insight: string;
+        const parsed = JSON.parse(raw) as Array<{
+          titleId: string;
           question: string;
           options: Array<{ label: string; slugs: string[] }>;
-        };
-        // Validate shape minimally.
-        if (!parsed.insight || !parsed.question || !Array.isArray(parsed.options)) return null;
-        return parsed;
+        }>;
+        if (!Array.isArray(parsed)) return null;
+        // Attach poster URL for display.
+        return parsed
+          .filter((p) => p.titleId && p.question && Array.isArray(p.options))
+          .map((p) => ({
+            ...p,
+            titleName: titleMap.get(p.titleId)?.title ?? '',
+            posterUrl: titleMap.get(p.titleId)?.posterUrl ?? null,
+          }));
       } catch {
         return null;
       }

@@ -75,10 +75,19 @@ export function OnboardingFlow({
 
   // Insight screen state — populated by the generateInsight mutation.
   type InsightOption = { label: string; slugs: string[] };
-  type InsightData = { insight: string; question: string; options: InsightOption[] };
-  const [insightData, setInsightData] = useState<InsightData | null>(null);
+  type PerShowInsight = {
+    titleId: string;
+    titleName: string;
+    posterUrl: string | null;
+    question: string;
+    options: InsightOption[];
+  };
+  const [insightShows, setInsightShows] = useState<PerShowInsight[]>([]);
+  const [insightIndex, setInsightIndex] = useState(0);
   const [selectedOptionIndices, setSelectedOptionIndices] = useState<Set<number>>(new Set());
   const [insightFreeText, setInsightFreeText] = useState('');
+  // Accumulated slugs across all shows in the session.
+  const [accumulatedSlugs, setAccumulatedSlugs] = useState<string[]>([]);
   const generateInsightMutation = trpc.preferences.generateInsight.useMutation();
   const saveInsightMutation = trpc.preferences.saveInsight.useMutation();
 
@@ -305,49 +314,91 @@ export function OnboardingFlow({
   // Shared insight screen — used for both like insight and dislike insight.
   if (phase === 'insight' || phase === 'dislike-insight') {
     const isDislikeInsight = phase === 'dislike-insight';
-    const isLoading = generateInsightMutation.isPending || !insightData;
-    const hasSomethingElse = selectedOptionIndices.has((insightData?.options.length ?? 0) - 1);
+    const isLoading = generateInsightMutation.isPending || insightShows.length === 0;
+    const currentShow = insightShows[insightIndex];
+    const hasSomethingElse =
+      currentShow && selectedOptionIndices.has(currentShow.options.length - 1);
+    const total = insightShows.length;
 
-    const handleSaveAndContinue = () => {
-      const selected = insightData
-        ? [...selectedOptionIndices]
-            .flatMap((i) => insightData.options[i]?.slugs ?? [])
-            .filter((s, i, arr) => arr.indexOf(s) === i)
-        : [];
-
-      if (selected.length > 0) {
-        saveInsightMutation.mutate({
-          slugs: selected,
-          mode: isDislikeInsight ? 'dislike' : 'like',
-          freeText: insightFreeText || undefined,
-        });
-      }
-
-      if (isDislikeInsight) {
-        setPhase('preferences');
+    const advanceOrFinish = (newSlugs: string[]) => {
+      const merged = [...new Set([...accumulatedSlugs, ...newSlugs])];
+      const isLast = insightIndex >= total - 1;
+      if (isLast) {
+        // Save all accumulated slugs and move on.
+        if (merged.length > 0) {
+          saveInsightMutation.mutate({
+            slugs: merged,
+            mode: isDislikeInsight ? 'dislike' : 'like',
+            freeText: insightFreeText || undefined,
+          });
+        }
+        setAccumulatedSlugs([]);
+        setPhase(isDislikeInsight ? 'preferences' : 'dislikes');
       } else {
+        setAccumulatedSlugs(merged);
+        setInsightIndex((n) => n + 1);
         setSelectedOptionIndices(new Set());
         setInsightFreeText('');
-        setPhase('dislikes');
       }
     };
 
+    const handleNext = () => {
+      const selected = currentShow
+        ? [...selectedOptionIndices]
+            .flatMap((i) => currentShow.options[i]?.slugs ?? [])
+            .filter((s, i, arr) => arr.indexOf(s) === i)
+        : [];
+      advanceOrFinish(selected);
+    };
+
+    const handleSkipAll = () => {
+      saveInsightMutation.mutate({
+        slugs: accumulatedSlugs,
+        mode: isDislikeInsight ? 'dislike' : 'like',
+      });
+      setAccumulatedSlugs([]);
+      setPhase(isDislikeInsight ? 'preferences' : 'dislikes');
+    };
+
     return (
-      <main className="mx-auto max-w-2xl px-6 pt-12 pb-32">
+      <main className="mx-auto max-w-xl px-6 pt-10 pb-32">
         {isLoading ? (
           <div className="flex flex-col items-center justify-center py-24 gap-4">
             <div className="h-8 w-8 rounded-full border-2 border-foreground border-t-transparent animate-spin" />
-            <p className="text-sm text-muted-foreground">Analysing your picks…</p>
+            <p className="text-sm text-muted-foreground">Thinking about your picks…</p>
           </div>
-        ) : insightData ? (
+        ) : !currentShow ? (
+          <p className="text-muted-foreground">Couldn&apos;t analyse your picks.</p>
+        ) : (
           <>
-            <header className="mb-8">
-              <p className="text-lg text-text-body leading-relaxed">{insightData.insight}</p>
-              <h1 className="mt-4 text-2xl font-semibold tracking-tight">{insightData.question}</h1>
-            </header>
+            {/* Progress */}
+            {total > 1 && (
+              <p className="mb-6 text-xs text-muted-foreground uppercase tracking-wider">
+                {insightIndex + 1} of {total}
+              </p>
+            )}
 
+            {/* Show poster + question */}
+            <div className="flex gap-5 mb-8 items-start">
+              {currentShow.posterUrl && (
+                <div className="relative w-20 shrink-0 aspect-[2/3] overflow-hidden rounded-lg border border-border bg-muted">
+                  <Image
+                    src={currentShow.posterUrl}
+                    alt={currentShow.titleName}
+                    fill
+                    sizes="80px"
+                    className="object-cover"
+                  />
+                </div>
+              )}
+              <h1 className="text-xl font-semibold tracking-tight leading-snug pt-1">
+                {currentShow.question}
+              </h1>
+            </div>
+
+            {/* Options */}
             <div className="space-y-3">
-              {insightData.options.map((option, i) => {
+              {currentShow.options.map((option, i) => {
                 const isSelected = selectedOptionIndices.has(i);
                 return (
                   <button
@@ -385,24 +436,23 @@ export function OnboardingFlow({
               />
             )}
           </>
-        ) : (
-          // Claude failed or returned nothing — skip gracefully.
-          <p className="text-muted-foreground">
-            {isDislikeInsight ? "Couldn't analyse your picks." : "Couldn't analyse your picks."}
-          </p>
         )}
 
         <div className="fixed inset-x-0 bottom-0 border-t border-border bg-white/95 backdrop-blur">
-          <div className="mx-auto flex max-w-2xl items-center justify-between px-6 py-3">
+          <div className="mx-auto flex max-w-xl items-center justify-between px-6 py-3">
             <button
               type="button"
-              onClick={handleSaveAndContinue}
+              onClick={handleSkipAll}
               className="text-sm text-muted-foreground underline-offset-2 hover:underline"
             >
-              Skip
+              Skip all
             </button>
-            <Button onClick={handleSaveAndContinue} disabled={isLoading}>
-              {selectedOptionIndices.size === 0 ? 'Skip' : 'Next'}
+            <Button onClick={handleNext} disabled={isLoading}>
+              {selectedOptionIndices.size === 0
+                ? 'Skip'
+                : insightIndex >= total - 1
+                  ? 'Done'
+                  : 'Next'}
             </Button>
           </div>
         </div>
@@ -523,7 +573,13 @@ export function OnboardingFlow({
                   setPhase('dislike-insight');
                   generateInsightMutation.mutate(
                     { titleIds: dislikedArr, mode: 'dislike' },
-                    { onSuccess: (data) => setInsightData(data ?? null) },
+                    {
+                      onSuccess: (data) => {
+                        setInsightShows(data ?? []);
+                        setInsightIndex(0);
+                        setAccumulatedSlugs([]);
+                      },
+                    },
                   );
                 } else {
                   setPhase('preferences');
@@ -778,7 +834,13 @@ export function OnboardingFlow({
                 setPhase('insight');
                 generateInsightMutation.mutate(
                   { titleIds: liked, mode: 'like' },
-                  { onSuccess: (data) => setInsightData(data ?? null) },
+                  {
+                    onSuccess: (data) => {
+                      setInsightShows(data ?? []);
+                      setInsightIndex(0);
+                      setAccumulatedSlugs([]);
+                    },
+                  },
                 );
               } else {
                 setPhase('dislikes');
