@@ -147,13 +147,14 @@ export function OnboardingFlow({
     setSkippedIds((s) => new Set(s).add(titleId));
   };
 
-  // Dislike = 1/10 rating. Fires on poster tap in the dislikes phase.
+  // Dislike = 1/10 rating. Same optimistic pattern as likes — card
+  // disappears immediately, mutation fires in background.
   const dislikeMutation = trpc.watch.upsert.useMutation();
-  const [dislikedIds, setDislikedIds] = useState<Set<string>>(new Set());
+  const [dislikedLocalIds, setDislikedLocalIds] = useState<Set<string>>(new Set());
 
   const handleDislike = (titleId: string) => {
-    if (dislikedIds.has(titleId)) return;
-    setDislikedIds((s) => new Set(s).add(titleId));
+    setDislikedLocalIds((s) => new Set(s).add(titleId));
+    handleActionComplete(titleId);
     dislikeMutation.mutate({ titleId, kind: 'tracking', rating: 1 });
   };
 
@@ -291,7 +292,10 @@ export function OnboardingFlow({
   }
 
   if (phase === 'dislikes') {
-    const dislikeTitles = mainstreamQuery.data ?? [];
+    const dislikeShowingSearch = searchEnabled;
+    const dislikeTitles = dislikeShowingSearch
+      ? (searchQuery.data ?? []).filter((t) => !dislikedLocalIds.has(t.id))
+      : (mainstreamQuery.data ?? []);
     return (
       <main className="mx-auto max-w-5xl px-6 pt-12 pb-32">
         <header className="mb-8 max-w-2xl">
@@ -302,43 +306,53 @@ export function OnboardingFlow({
           </p>
         </header>
 
-        {mainstreamQuery.isLoading ? (
+        <div className="mb-8 max-w-md">
+          <Input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search any title…"
+          />
+        </div>
+
+        {mainstreamQuery.isLoading && !dislikeShowingSearch ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : (
           <ul className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
-            {dislikeTitles.map((title) => {
-              const isDisliked = dislikedIds.has(title.id);
-              const displayTitle = franchiseDisplayName(title.title);
-              return (
-                <li key={title.id}>
-                  <button
-                    type="button"
-                    onClick={() => handleDislike(title.id)}
-                    className="group w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 rounded-lg"
+            {dislikeTitles
+              .filter((t) => !dislikedLocalIds.has(t.id) && !exiting.has(t.id))
+              .map((title) => {
+                const displayTitle = franchiseDisplayName(title.title);
+                return (
+                  <li
+                    key={title.id}
+                    className={cn(
+                      'transition-all duration-200 ease-out',
+                      exiting.has(title.id) && 'pointer-events-none scale-95 opacity-0',
+                    )}
                   >
-                    <div
-                      className={cn(
-                        'relative aspect-[2/3] overflow-hidden rounded-lg border bg-muted transition',
-                        isDisliked
-                          ? 'border-destructive ring-2 ring-destructive'
-                          : 'border-border group-hover:border-input',
-                      )}
+                    <button
+                      type="button"
+                      onClick={() => handleDislike(title.id)}
+                      className="group relative block w-full cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 rounded-lg"
                     >
-                      {title.posterUrl ? (
-                        <Image
-                          src={title.posterUrl}
-                          alt=""
-                          fill
-                          sizes="(min-width: 1024px) 200px, (min-width: 640px) 33vw, 50vw"
-                          className={cn('object-cover transition', isDisliked && 'opacity-60')}
-                        />
-                      ) : null}
-                      {isDisliked && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-destructive/20">
-                          <span className="text-3xl">✕</span>
+                      <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-border bg-muted transition group-hover:border-foreground group-hover:shadow-md">
+                        {title.posterUrl ? (
+                          <Image
+                            src={title.posterUrl}
+                            alt=""
+                            fill
+                            sizes="(min-width: 1024px) 200px, (min-width: 640px) 33vw, 50vw"
+                            className="object-cover"
+                          />
+                        ) : null}
+                        <div className="absolute inset-0 flex items-end justify-center pb-3 opacity-0 transition group-hover:opacity-100 group-active:opacity-100 bg-gradient-to-t from-black/60 to-transparent">
+                          <span className="text-sm font-semibold text-white">
+                            Didn&apos;t like it ✕
+                          </span>
                         </div>
-                      )}
-                    </div>
+                      </div>
+                    </button>
                     <h3 className="mt-2 truncate text-sm font-medium text-foreground">
                       {displayTitle}
                     </h3>
@@ -350,10 +364,16 @@ export function OnboardingFlow({
                         .filter((s): s is string => Boolean(s))
                         .join(' · ')}
                     </p>
-                  </button>
-                </li>
-              );
-            })}
+                    <button
+                      type="button"
+                      onClick={() => handleSkip(title.id)}
+                      className="mt-1 text-xs text-muted-foreground underline-offset-2 hover:underline"
+                    >
+                      Haven&apos;t seen it
+                    </button>
+                  </li>
+                );
+              })}
           </ul>
         )}
 
@@ -361,20 +381,22 @@ export function OnboardingFlow({
           <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
             <div className="flex items-center gap-4">
               <p className="text-sm text-text-body">
-                <span className="font-semibold text-foreground">{dislikedIds.size}</span>{' '}
-                {dislikedIds.size === 1 ? 'marked' : 'marked'}
+                <span className="font-semibold text-foreground">{dislikedLocalIds.size}</span>{' '}
+                {dislikedLocalIds.size === 1 ? 'marked' : 'marked'}
               </p>
-              <button
-                type="button"
-                onClick={handleDislikeRefresh}
-                disabled={mainstreamQuery.isFetching}
-                className="text-sm text-muted-foreground underline-offset-2 hover:underline disabled:opacity-50"
-              >
-                {mainstreamQuery.isFetching ? 'Loading…' : 'Show me different ones'}
-              </button>
+              {!dislikeShowingSearch && (
+                <button
+                  type="button"
+                  onClick={handleDislikeRefresh}
+                  disabled={mainstreamQuery.isFetching}
+                  className="text-sm text-muted-foreground underline-offset-2 hover:underline disabled:opacity-50"
+                >
+                  {mainstreamQuery.isFetching ? 'Loading…' : 'Show me different ones'}
+                </button>
+              )}
             </div>
             <Button onClick={() => setPhase('preferences')}>
-              {dislikedIds.size === 0 ? 'None here — skip' : 'Next'}
+              {dislikedLocalIds.size === 0 ? 'None here — skip' : 'Next'}
             </Button>
           </div>
         </div>
