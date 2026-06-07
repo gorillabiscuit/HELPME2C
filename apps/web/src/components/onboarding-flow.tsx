@@ -43,7 +43,7 @@ interface OnboardingFlowProps {
    * the intro for users arriving via a deliberate "start picking" CTA
    * elsewhere in the app (e.g. the empty-dashboard "Pick favourites"
    * button — they've already opted in by clicking). Default `'intro'`. */
-  initialPhase?: 'intro' | 'picker' | 'dislikes' | 'preferences';
+  initialPhase?: 'intro' | 'picker' | 'insight' | 'dislikes' | 'dislike-insight' | 'preferences';
 }
 
 const MEDIA_TYPE_LABEL: Record<string, string> = {
@@ -69,7 +69,18 @@ export function OnboardingFlow({
   // Two-step flow: intro (value prop) → picker. The intro is the first
   // thing a new signed-up user sees after age-check; entries from
   // "Pick favourites" pass initialPhase='picker' to skip it.
-  const [phase, setPhase] = useState<'intro' | 'picker' | 'dislikes' | 'preferences'>(initialPhase);
+  const [phase, setPhase] = useState<
+    'intro' | 'picker' | 'insight' | 'dislikes' | 'dislike-insight' | 'preferences'
+  >(initialPhase);
+
+  // Insight screen state — populated by the generateInsight mutation.
+  type InsightOption = { label: string; slugs: string[] };
+  type InsightData = { insight: string; question: string; options: InsightOption[] };
+  const [insightData, setInsightData] = useState<InsightData | null>(null);
+  const [selectedOptionIndices, setSelectedOptionIndices] = useState<Set<number>>(new Set());
+  const [insightFreeText, setInsightFreeText] = useState('');
+  const generateInsightMutation = trpc.preferences.generateInsight.useMutation();
+  const saveInsightMutation = trpc.preferences.saveInsight.useMutation();
 
   // IDs of titles the user liked in Screen 1 — passed to the mainstream
   // query so the dislike grid doesn't show titles they've already rated.
@@ -291,6 +302,114 @@ export function OnboardingFlow({
     );
   }
 
+  // Shared insight screen — used for both like insight and dislike insight.
+  if (phase === 'insight' || phase === 'dislike-insight') {
+    const isDislikeInsight = phase === 'dislike-insight';
+    const isLoading = generateInsightMutation.isPending || !insightData;
+    const hasSomethingElse = selectedOptionIndices.has((insightData?.options.length ?? 0) - 1);
+
+    const handleSaveAndContinue = () => {
+      const selected = insightData
+        ? [...selectedOptionIndices]
+            .flatMap((i) => insightData.options[i]?.slugs ?? [])
+            .filter((s, i, arr) => arr.indexOf(s) === i)
+        : [];
+
+      if (selected.length > 0) {
+        saveInsightMutation.mutate({
+          slugs: selected,
+          mode: isDislikeInsight ? 'dislike' : 'like',
+          freeText: insightFreeText || undefined,
+        });
+      }
+
+      if (isDislikeInsight) {
+        setPhase('preferences');
+      } else {
+        setSelectedOptionIndices(new Set());
+        setInsightFreeText('');
+        setPhase('dislikes');
+      }
+    };
+
+    return (
+      <main className="mx-auto max-w-2xl px-6 pt-12 pb-32">
+        {isLoading ? (
+          <div className="flex flex-col items-center justify-center py-24 gap-4">
+            <div className="h-8 w-8 rounded-full border-2 border-foreground border-t-transparent animate-spin" />
+            <p className="text-sm text-muted-foreground">Analysing your picks…</p>
+          </div>
+        ) : insightData ? (
+          <>
+            <header className="mb-8">
+              <p className="text-lg text-text-body leading-relaxed">{insightData.insight}</p>
+              <h1 className="mt-4 text-2xl font-semibold tracking-tight">{insightData.question}</h1>
+            </header>
+
+            <div className="space-y-3">
+              {insightData.options.map((option, i) => {
+                const isSelected = selectedOptionIndices.has(i);
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() =>
+                      setSelectedOptionIndices((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(i)) next.delete(i);
+                        else next.add(i);
+                        return next;
+                      })
+                    }
+                    className={cn(
+                      'w-full rounded-xl border px-5 py-4 text-left text-sm font-medium transition',
+                      isSelected
+                        ? 'border-foreground bg-foreground text-background'
+                        : 'border-border hover:border-input',
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {hasSomethingElse && (
+              <textarea
+                className="mt-4 w-full rounded-xl border border-border px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring/50"
+                rows={3}
+                placeholder="Tell us in your own words…"
+                value={insightFreeText}
+                onChange={(e) => setInsightFreeText(e.target.value)}
+                maxLength={500}
+              />
+            )}
+          </>
+        ) : (
+          // Claude failed or returned nothing — skip gracefully.
+          <p className="text-muted-foreground">
+            {isDislikeInsight ? "Couldn't analyse your picks." : "Couldn't analyse your picks."}
+          </p>
+        )}
+
+        <div className="fixed inset-x-0 bottom-0 border-t border-border bg-white/95 backdrop-blur">
+          <div className="mx-auto flex max-w-2xl items-center justify-between px-6 py-3">
+            <button
+              type="button"
+              onClick={handleSaveAndContinue}
+              className="text-sm text-muted-foreground underline-offset-2 hover:underline"
+            >
+              Skip
+            </button>
+            <Button onClick={handleSaveAndContinue} disabled={isLoading}>
+              {selectedOptionIndices.size === 0 ? 'Skip' : 'Next'}
+            </Button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   if (phase === 'dislikes') {
     const dislikeShowingSearch = searchEnabled;
     const dislikeTitles = dislikeShowingSearch
@@ -395,7 +514,22 @@ export function OnboardingFlow({
                 </button>
               )}
             </div>
-            <Button onClick={() => setPhase('preferences')}>
+            <Button
+              onClick={() => {
+                const dislikedArr = [...dislikedLocalIds];
+                if (dislikedArr.length >= 3) {
+                  setSelectedOptionIndices(new Set());
+                  setInsightFreeText('');
+                  setPhase('dislike-insight');
+                  generateInsightMutation.mutate(
+                    { titleIds: dislikedArr, mode: 'dislike' },
+                    { onSuccess: (data) => setInsightData(data ?? null) },
+                  );
+                } else {
+                  setPhase('preferences');
+                }
+              }}
+            >
               {dislikedLocalIds.size === 0 ? 'None here — skip' : 'Next'}
             </Button>
           </div>
@@ -633,20 +767,29 @@ export function OnboardingFlow({
                 router.push('/');
                 return;
               }
-              // Capture the IDs of titles rated positively so the dislike
-              // grid can exclude them.
               const liked = initialEntries
                 .filter((e) => e.rating !== null && e.rating >= 7)
                 .map((e) => e.titleId);
               setLikedTitleIds(liked);
-              setPhase('dislikes');
+              setSelectedOptionIndices(new Set());
+              setInsightFreeText('');
+              // Generate insight if ≥3 picks — skip straight to dislikes if fewer.
+              if (liked.length >= 3) {
+                setPhase('insight');
+                generateInsightMutation.mutate(
+                  { titleIds: liked, mode: 'like' },
+                  { onSuccess: (data) => setInsightData(data ?? null) },
+                );
+              } else {
+                setPhase('dislikes');
+              }
             }}
           >
             {ratedCount === 0
               ? 'Skip for now'
               : ratedCount < 3
                 ? `${ratedCount} picked — keep going`
-                : "Next — what don't you like?"}
+                : 'Next'}
           </Button>
         </div>
       </div>

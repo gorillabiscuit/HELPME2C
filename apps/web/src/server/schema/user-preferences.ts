@@ -34,6 +34,13 @@ export interface UserPreferencesData {
   moral?: number | null;
   violenceVeto?: boolean | null;
   sexualContentVeto?: boolean | null;
+  // Vocabulary slugs surfaced via the AI insight conversation screen.
+  // Each entry is a slug the user confirmed they value (from like picks)
+  // or want to avoid (from dislike picks). Used to boost/suppress facet
+  // weights in the scoring layer. Stored as slug strings, not scores,
+  // so the mapping can be updated without re-running onboarding.
+  insightSlugs?: string[] | null;
+  insightAvoidSlugs?: string[] | null;
 }
 
 export const userPreferences = pgTable('user_preferences', {
