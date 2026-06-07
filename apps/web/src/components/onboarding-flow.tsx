@@ -553,11 +553,13 @@ export function OnboardingFlow({
             <Button
               onClick={() => {
                 const dislikedArr = [...dislikedLocalIds];
-                if (dislikedArr.length >= 3) {
+                // Same 5-show cap as the like insight — see comment there.
+                const dislikeInsightIds = dislikedArr.slice(-5);
+                if (dislikeInsightIds.length >= 3) {
                   setSelectedOptionIndices(new Set());
                   setPhase('dislike-insight');
                   generateInsightMutation.mutate(
-                    { titleIds: dislikedArr, mode: 'dislike' },
+                    { titleIds: dislikeInsightIds, mode: 'dislike' },
                     {
                       onSuccess: (data) => {
                         setInsightShows(data ?? []);
@@ -814,10 +816,15 @@ export function OnboardingFlow({
               setLikedTitleIds(liked);
               setSelectedOptionIndices(new Set());
               // Generate insight if ≥3 picks — skip straight to dislikes if fewer.
-              if (liked.length >= 3) {
+              // Cap at 5: research (arXiv 2510.27342) shows query fatigue sets in
+              // fast; 3–5 well-chosen questions outperform exhaustive elicitation.
+              // Take the last 5 so we ask about the most recent picks (freshest
+              // in memory, most deliberate).
+              const insightIds = liked.slice(-5);
+              if (insightIds.length >= 3) {
                 setPhase('insight');
                 generateInsightMutation.mutate(
-                  { titleIds: liked, mode: 'like' },
+                  { titleIds: insightIds, mode: 'like' },
                   {
                     onSuccess: (data) => {
                       setInsightShows(data ?? []);
@@ -834,8 +841,10 @@ export function OnboardingFlow({
             {ratedCount === 0
               ? 'Skip for now'
               : ratedCount < 3
-                ? `${ratedCount} picked — keep going`
-                : 'Next'}
+                ? `${ratedCount} of 5 — keep going`
+                : ratedCount < 5
+                  ? `${ratedCount} of 5 — or continue`
+                  : 'Next'}
           </Button>
         </div>
       </div>
