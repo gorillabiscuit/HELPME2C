@@ -111,24 +111,71 @@ export const preferencesRouter = router({
         })
         .join('\n\n');
 
-      const verb = input.mode === 'like' ? 'loved' : 'did NOT enjoy';
-      const prompt = `You are helping personalise a TV/film recommendation engine. The user ${verb} each of these shows.
+      // Prompt design principles (from preference-elicitation research):
+      //
+      // 1. RECOGNITION OVER GENERATION. Wilson & Schooler (1991): asking users
+      //    to analyse why they liked something *degrades* signal quality —
+      //    they confabulate plausible-sounding reasons that don't predict future
+      //    taste. Options must be things a viewer would immediately tap "yes,
+      //    that" without reflection. Concrete, surface-level, viewer-experience
+      //    language — not narrative-structural analysis.
+      //
+      // 2. AFFECTIVE FRAMING, NOT ANALYTICAL. Options should describe what it
+      //    FELT LIKE to watch the show: "made me laugh out loud", "felt warm
+      //    and cosy", "I kept thinking about it after". NOT: "subverted genre
+      //    expectations", "morally complex family dynamics", "explores identity
+      //    through a collective lens". The first kind is instantly recognizable;
+      //    the second requires the user to think analytically, which is exactly
+      //    the Wilson & Schooler introspection-harm trap.
+      //
+      // 3. NO "SOMETHING ELSE" — it is a discard signal, not a preference.
+      //    Replace with "None of these fit" so the user can skip cleanly.
+      //
+      // 4. DISLIKE MODE: include a viewer-state escape hatch ("I just wasn't
+      //    in the mood for it") that maps to NO slugs. Mood Management Theory
+      //    (Zillmann): mood-mismatch rejections must NOT corrupt the content
+      //    profile. This option should always appear last in dislike mode.
+      //
+      // 5. QUESTION FRAMING: short, warm, name the show. Avoid "What did you
+      //    love about…" (too analytical). Prefer "What made [Show] click for
+      //    you?" / "What put you off [Show]?" — casual, low-stakes.
+      const modeInstruction =
+        input.mode === 'like'
+          ? `The user LIKED each show. Generate a question + 4 options asking what made it click for them.
 
-For EACH show, generate:
-1. A short question asking what they ${input.mode === 'like' ? 'loved' : "didn't like"} about that specific show (name the show in the question, keep it conversational)
-2. 4 specific options — concrete emotional/thematic reasons, anchored to that show's actual content. NOT generic ("great acting", "good story"). Each option maps to 1-2 of the theme slugs.
-3. A "Something else" option with no slugs.
+QUESTION style: casual and warm. Name the show. E.g. "What made [Show] click for you?" or "What did you get out of [Show]?"
+
+OPTIONS rules:
+- Describe what it FELT LIKE to watch: "made me laugh", "felt warm and cosy", "I couldn't stop watching", "left me thinking for days", "loved watching the characters grow", "felt exciting and tense".
+- Do NOT use narrative-analysis language ("morally complex", "subverted expectations", "explores identity through…").
+- Each option maps to 1–2 slugs from the theme vocabulary that best match the feeling.
+- 4 content options + 1 skip: { "label": "None of these fit", "slugs": [] }`
+          : `The user DISLIKED each show. Generate a question + 4 options asking what put them off.
+
+QUESTION style: non-judgmental, brief. Name the show. E.g. "What put you off [Show]?" or "What wasn't working for you with [Show]?"
+
+OPTIONS rules:
+- Describe what it FELT LIKE in negative terms: "felt slow and hard to get into", "the tone was too dark for me", "didn't connect with any of the characters", "felt too intense / stressful to watch", "wasn't in the mood for this kind of show".
+- The LAST option must ALWAYS be: { "label": "I just wasn't in the mood for it", "slugs": [] } — this is a viewer-state escape hatch, NOT a content reason; it must have no slugs so it never down-weights content.
+- The other 3 content options each map to 1–2 slugs.
+- 3 content options + mood escape hatch + 1 skip: { "label": "None of these fit", "slugs": [] }`;
+
+      const prompt = `You are helping personalise a TV/film recommendation engine.
+
+${modeInstruction}
+
+For EACH show below, generate one entry. The "options" array must follow the rules above exactly.
 
 ${showBlocks}
 
-Return ONLY a JSON array, one entry per show, in the same order. No markdown:
+Return ONLY a JSON array, one entry per show, in the same order. No markdown, no explanation:
 [
   {
     "titleId": "...",
-    "question": "What did you love about [Show]?",
+    "question": "...",
     "options": [
       { "label": "...", "slugs": ["slug1"] },
-      { "label": "Something else — tell us", "slugs": [] }
+      { "label": "None of these fit", "slugs": [] }
     ]
   }
 ]`;
@@ -138,7 +185,7 @@ Return ONLY a JSON array, one entry per show, in the same order. No markdown:
       try {
         const response = await client.messages.create({
           model: 'claude-haiku-4-5-20251001',
-          max_tokens: 1200,
+          max_tokens: 1600,
           messages: [
             { role: 'user', content: prompt },
             { role: 'assistant', content: '[' },
