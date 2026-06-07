@@ -9,20 +9,18 @@ import { processCandidate, type CandidateTitle } from '@/server/themes/extract';
 const INNER_STEP_BATCH = 30;
 
 // Outer batch size for the fan-out — how many titles one .batch event
-// covers. ~60 titles per event keeps fan-out volume manageable: a
-// 5800-title full-catalog backfill fans out ~97 batch events. Each
+// covers. ~60 titles per event keeps fan-out volume manageable. Each
 // event maps to one Inngest function invocation with 2 inner step.runs
-// (60 / INNER_STEP_BATCH). Combined step budget for a bulk backfill:
-// ~194 step.runs — fits inside the 1k/day free tier comfortably with
-// the existing tmdb-sync / anilist-sync / recommend usage (~600/day).
+// (60 / INNER_STEP_BATCH).
 const FAN_OUT_BATCH_SIZE = 60;
 
-// Hard cap on the fan-out — protects against an unbounded events flood
-// if the catalog grows by orders of magnitude. 200 batches × 60 titles
-// = 12k titles per fan-out run. If the catalog gets bigger than that,
-// re-run after the first pass (the NOT EXISTS check filters out
-// already-extracted titles).
-const MAX_BATCHES_PER_FAN_OUT = 200;
+// Hard cap on the fan-out — protects against an unbounded events flood.
+// Catalog is ~88k titles as of 2026-06; ceil(88000 / 60) = 1467 batches
+// needed for a full pass. Set to 2000 to give headroom for catalog growth.
+// Note: with concurrency: 1 a full pass takes ~8h. If that's too slow,
+// raise the concurrency limit in extractThemesBatch (check Anthropic TPM
+// first — Tier 1 cap is 50K input tokens/min).
+const MAX_BATCHES_PER_FAN_OUT = 2000;
 
 interface CandidateRow {
   id: string;
