@@ -308,28 +308,26 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
   );
 
   // LLM-extracted facet slugs for candidates. The candidate set can be
-  // 10k+ titles — passing all IDs via inArray hits Postgres's parameter
-  // limit. Instead mirror the candidate filter: exclude titles in the
-  // user's library (small list) rather than including all candidates
-  // (huge list). Result is equivalent: title_themes rows for every
-  // title the user hasn't watched.
-  const candidateFacetRows =
-    userTitleIds.length > 0
-      ? await db
-          .select({
-            titleId: titleThemes.titleId,
-            slug: titleThemes.themeSlug,
-            confidence: titleThemes.confidence,
-          })
-          .from(titleThemes)
-          .where(notInArray(titleThemes.titleId, userTitleIds))
-      : await db
-          .select({
-            titleId: titleThemes.titleId,
-            slug: titleThemes.themeSlug,
-            confidence: titleThemes.confidence,
-          })
-          .from(titleThemes);
+  // 10k+ titles — too large for a single inArray call (Postgres param limit)
+  // and too large to load the full table (92k rows, times out). Instead batch
+  // the candidate IDs into chunks of 500 and query only those titles that
+  // actually have tags (i.e. are in the candidate set after tag filtering).
+  // Only titles with themes contribute facet signal anyway.
+  const FACET_CHUNK_SIZE = 500;
+  const candidateIdsWithTags = candidates.map((c) => c.titleId);
+  const candidateFacetRows: Array<{ titleId: string; slug: string; confidence: number }> = [];
+  for (let i = 0; i < candidateIdsWithTags.length; i += FACET_CHUNK_SIZE) {
+    const chunk = candidateIdsWithTags.slice(i, i + FACET_CHUNK_SIZE);
+    const rows = await db
+      .select({
+        titleId: titleThemes.titleId,
+        slug: titleThemes.themeSlug,
+        confidence: titleThemes.confidence,
+      })
+      .from(titleThemes)
+      .where(inArray(titleThemes.titleId, chunk));
+    candidateFacetRows.push(...rows);
+  }
   const candidateFacets: TitleFacetSet[] = Object.values(
     candidateFacetRows.reduce<Record<string, TitleFacetSet>>((acc, row) => {
       if (!acc[row.titleId]) acc[row.titleId] = { titleId: row.titleId, facets: [] };

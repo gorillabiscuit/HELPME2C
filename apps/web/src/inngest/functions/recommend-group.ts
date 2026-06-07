@@ -209,26 +209,23 @@ export async function recomputeGroupRecommendations(
     .from(tagThemes);
   const themeMembership: TagThemeMembership[] = themeRows;
 
-  // Facet slugs for candidates — mirror the candidate filter (exclude
-  // member library titles) rather than including all candidate IDs,
-  // which can be 10k+ and hits Postgres's parameter limit.
-  const candidateFacetRows =
-    allMemberTitleIds.length > 0
-      ? await db
-          .select({
-            titleId: titleThemes.titleId,
-            slug: titleThemes.themeSlug,
-            confidence: titleThemes.confidence,
-          })
-          .from(titleThemes)
-          .where(notInArray(titleThemes.titleId, allMemberTitleIds))
-      : await db
-          .select({
-            titleId: titleThemes.titleId,
-            slug: titleThemes.themeSlug,
-            confidence: titleThemes.confidence,
-          })
-          .from(titleThemes);
+  // Facet slugs for candidates — batch by 500 to stay under Postgres's
+  // parameter limit without loading the entire 92k-row title_themes table.
+  const FACET_CHUNK_SIZE = 500;
+  const candidateIdsWithTags = candidates.map((c) => c.titleId);
+  const candidateFacetRows: Array<{ titleId: string; slug: string; confidence: number }> = [];
+  for (let i = 0; i < candidateIdsWithTags.length; i += FACET_CHUNK_SIZE) {
+    const chunk = candidateIdsWithTags.slice(i, i + FACET_CHUNK_SIZE);
+    const rows = await db
+      .select({
+        titleId: titleThemes.titleId,
+        slug: titleThemes.themeSlug,
+        confidence: titleThemes.confidence,
+      })
+      .from(titleThemes)
+      .where(inArray(titleThemes.titleId, chunk));
+    candidateFacetRows.push(...rows);
+  }
   const candidateFacets: TitleFacetSet[] = Object.values(
     candidateFacetRows.reduce<Record<string, TitleFacetSet>>((acc, row) => {
       if (!acc[row.titleId]) acc[row.titleId] = { titleId: row.titleId, facets: [] };
