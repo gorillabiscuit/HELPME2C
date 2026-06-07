@@ -85,7 +85,6 @@ export function OnboardingFlow({
   const [insightShows, setInsightShows] = useState<PerShowInsight[]>([]);
   const [insightIndex, setInsightIndex] = useState(0);
   const [selectedOptionIndices, setSelectedOptionIndices] = useState<Set<number>>(new Set());
-  const [insightFreeText, setInsightFreeText] = useState('');
   // Accumulated slugs across all shows in the session.
   const [accumulatedSlugs, setAccumulatedSlugs] = useState<string[]>([]);
   const generateInsightMutation = trpc.preferences.generateInsight.useMutation();
@@ -316,29 +315,27 @@ export function OnboardingFlow({
     const isDislikeInsight = phase === 'dislike-insight';
     const isLoading = generateInsightMutation.isPending || insightShows.length === 0;
     const currentShow = insightShows[insightIndex];
-    const hasSomethingElse =
-      currentShow && selectedOptionIndices.has(currentShow.options.length - 1);
     const total = insightShows.length;
 
     const advanceOrFinish = (newSlugs: string[]) => {
       const merged = [...new Set([...accumulatedSlugs, ...newSlugs])];
       const isLast = insightIndex >= total - 1;
       if (isLast) {
-        // Save all accumulated slugs and move on.
-        if (merged.length > 0) {
-          saveInsightMutation.mutate({
-            slugs: merged,
-            mode: isDislikeInsight ? 'dislike' : 'like',
-            freeText: insightFreeText || undefined,
-          });
-        }
+        // Always save on the final show, even if merged is empty — a user who
+        // picked only viewer-state options ("not in the mood") produces no
+        // slugs intentionally, and that is valid (it means "don't down-weight
+        // anything"). Skipping the save would leave stale data from a previous
+        // onboarding run in place.
+        saveInsightMutation.mutate({
+          slugs: merged,
+          mode: isDislikeInsight ? 'dislike' : 'like',
+        });
         setAccumulatedSlugs([]);
         setPhase(isDislikeInsight ? 'preferences' : 'dislikes');
       } else {
         setAccumulatedSlugs(merged);
         setInsightIndex((n) => n + 1);
         setSelectedOptionIndices(new Set());
-        setInsightFreeText('');
       }
     };
 
@@ -424,17 +421,6 @@ export function OnboardingFlow({
                 );
               })}
             </div>
-
-            {hasSomethingElse && (
-              <textarea
-                className="mt-4 w-full rounded-xl border border-border px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring/50"
-                rows={3}
-                placeholder="Tell us in your own words…"
-                value={insightFreeText}
-                onChange={(e) => setInsightFreeText(e.target.value)}
-                maxLength={500}
-              />
-            )}
           </>
         )}
 
@@ -569,7 +555,6 @@ export function OnboardingFlow({
                 const dislikedArr = [...dislikedLocalIds];
                 if (dislikedArr.length >= 3) {
                   setSelectedOptionIndices(new Set());
-                  setInsightFreeText('');
                   setPhase('dislike-insight');
                   generateInsightMutation.mutate(
                     { titleIds: dislikedArr, mode: 'dislike' },
@@ -828,7 +813,6 @@ export function OnboardingFlow({
                 .map((e) => e.titleId);
               setLikedTitleIds(liked);
               setSelectedOptionIndices(new Set());
-              setInsightFreeText('');
               // Generate insight if ≥3 picks — skip straight to dislikes if fewer.
               if (liked.length >= 3) {
                 setPhase('insight');
