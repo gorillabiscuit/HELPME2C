@@ -7,6 +7,7 @@ import {
   type GroupMember,
   type RatedTitle,
   type TagThemeMembership,
+  type TitleFacetSet,
 } from '@helpme2c/ml';
 import { db } from '@/server/db';
 import {
@@ -15,6 +16,7 @@ import {
   groupRecommendations,
   groups,
   tagThemes,
+  titleThemes,
   titles,
   titleTags,
   watchEntries,
@@ -142,6 +144,25 @@ export async function recomputeGroupRecommendations(
   const memberTitles = groupTagsIntoTitleSets(memberTitleTagRows);
   const candidates = groupTagsIntoTitleSets(candidateTagRows);
 
+  // Facet slugs for all member history titles — used to build per-member
+  // facet taste vectors alongside the tag-level taste vectors.
+  const memberFacetRows = await db
+    .select({
+      titleId: titleThemes.titleId,
+      slug: titleThemes.themeSlug,
+      confidence: titleThemes.confidence,
+    })
+    .from(titleThemes)
+    .where(inArray(titleThemes.titleId, allMemberTitleIds));
+  // Index by titleId for O(1) lookup inside the member loop.
+  const memberFacetsByTitle = memberFacetRows.reduce<
+    Record<string, Array<{ slug: string; confidence: number }>>
+  >((acc, row) => {
+    if (!acc[row.titleId]) acc[row.titleId] = [];
+    acc[row.titleId]!.push({ slug: row.slug, confidence: row.confidence });
+    return acc;
+  }, {});
+
   // Build per-member taste vectors. ADR-0023: aggregate each member's
   // rated entries by franchise (mean rating per franchise) so the
   // group rec engine sees franchise-level signal, matching the
@@ -168,8 +189,18 @@ export async function recomputeGroupRecommendations(
       .filter((e) => e.kind === 'anchor')
       .map((e) => ({ titleId: e.titleId }));
 
-    const { tasteVector: taste } = extractTasteVector({ anchors, ratings }, memberTitles);
-    return { userId, taste };
+    // Build this member's facet sets from the shared index.
+    const memberTitleIds = Array.from(new Set(userEntries.map((e) => e.titleId)));
+    const memberFacets: TitleFacetSet[] = memberTitleIds
+      .filter((id) => memberFacetsByTitle[id])
+      .map((id) => ({ titleId: id, facets: memberFacetsByTitle[id]! }));
+
+    const { tasteVector: taste, facetVector } = extractTasteVector(
+      { anchors, ratings },
+      memberTitles,
+      memberFacets,
+    );
+    return { userId, taste, facetVector };
   });
 
   // Cross-medium theme bridge — same pull as recomputeUserRecommendations.
@@ -178,12 +209,37 @@ export async function recomputeGroupRecommendations(
     .from(tagThemes);
   const themeMembership: TagThemeMembership[] = themeRows;
 
+  // Facet slugs for candidates — used to score against each member's facet vector.
+  const candidateTitleIds = candidates.map((c) => c.titleId);
+  const candidateFacetRows =
+    candidateTitleIds.length > 0
+      ? await db
+          .select({
+            titleId: titleThemes.titleId,
+            slug: titleThemes.themeSlug,
+            confidence: titleThemes.confidence,
+          })
+          .from(titleThemes)
+          .where(inArray(titleThemes.titleId, candidateTitleIds))
+      : [];
+  const candidateFacets: TitleFacetSet[] = Object.values(
+    candidateFacetRows.reduce<Record<string, TitleFacetSet>>((acc, row) => {
+      if (!acc[row.titleId]) acc[row.titleId] = { titleId: row.titleId, facets: [] };
+      (acc[row.titleId]!.facets as Array<{ slug: string; confidence: number }>).push({
+        slug: row.slug,
+        confidence: row.confidence,
+      });
+      return acc;
+    }, {}),
+  );
+
   const recs = recommendForGroup(
     groupMembersForML,
     candidates,
     { vetoThreshold: VETO_THRESHOLD, lambda: LAMBDA },
     themeMembership,
     REC_LIMIT,
+    candidateFacets,
   );
 
   // Serialise perUserScores Map → plain object for JSONB storage.

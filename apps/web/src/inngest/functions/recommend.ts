@@ -8,6 +8,7 @@ import {
   type ExplanationReason,
   type RatedTitle,
   type TagThemeMembership,
+  type TitleFacetSet,
 } from '@helpme2c/ml';
 import { db } from '@/server/db';
 import {
@@ -15,6 +16,7 @@ import {
   tags,
   tagThemes,
   themes,
+  titleThemes,
   titles,
   titleTags,
   userRecommendations,
@@ -281,8 +283,68 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
     .from(tagThemes);
   const themeMembership: TagThemeMembership[] = themeRows;
 
-  const { tasteVector: taste } = extractTasteVector({ anchors, ratings }, userTitles);
-  const recs = recommendForUser(taste, candidates, REC_LIMIT, themeMembership);
+  // LLM-extracted facet slugs for user history titles — used to build the
+  // facet taste vector (which slugs the user's liked/disliked titles carry).
+  const userFacetRows =
+    userTitleIds.length > 0
+      ? await db
+          .select({
+            titleId: titleThemes.titleId,
+            slug: titleThemes.themeSlug,
+            confidence: titleThemes.confidence,
+          })
+          .from(titleThemes)
+          .where(inArray(titleThemes.titleId, userTitleIds))
+      : [];
+  const userFacets: TitleFacetSet[] = Object.values(
+    userFacetRows.reduce<Record<string, TitleFacetSet>>((acc, row) => {
+      if (!acc[row.titleId]) acc[row.titleId] = { titleId: row.titleId, facets: [] };
+      (acc[row.titleId]!.facets as Array<{ slug: string; confidence: number }>).push({
+        slug: row.slug,
+        confidence: row.confidence,
+      });
+      return acc;
+    }, {}),
+  );
+
+  // LLM-extracted facet slugs for candidates — used to score candidates
+  // against the user's facet taste vector.
+  const candidateIdsForFacets = candidates.map((c) => c.titleId);
+  const candidateFacetRows =
+    candidateIdsForFacets.length > 0
+      ? await db
+          .select({
+            titleId: titleThemes.titleId,
+            slug: titleThemes.themeSlug,
+            confidence: titleThemes.confidence,
+          })
+          .from(titleThemes)
+          .where(inArray(titleThemes.titleId, candidateIdsForFacets))
+      : [];
+  const candidateFacets: TitleFacetSet[] = Object.values(
+    candidateFacetRows.reduce<Record<string, TitleFacetSet>>((acc, row) => {
+      if (!acc[row.titleId]) acc[row.titleId] = { titleId: row.titleId, facets: [] };
+      (acc[row.titleId]!.facets as Array<{ slug: string; confidence: number }>).push({
+        slug: row.slug,
+        confidence: row.confidence,
+      });
+      return acc;
+    }, {}),
+  );
+
+  const { tasteVector: taste, facetVector } = extractTasteVector(
+    { anchors, ratings },
+    userTitles,
+    userFacets,
+  );
+  const recs = recommendForUser(
+    taste,
+    candidates,
+    REC_LIMIT,
+    themeMembership,
+    facetVector,
+    candidateFacets,
+  );
 
   // Resolve tag + theme names for the explain pass. Both tables are
   // small (~few hundred rows each); single SELECT per cron run is
