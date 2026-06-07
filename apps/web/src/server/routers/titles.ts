@@ -129,15 +129,53 @@ export const titlesRouter = router({
         return dedupeByFranchise(rows).slice(0, limit);
       }
 
-      // No filter — stratify across all three media types. Overfetch
-      // 2× per type before dedup so each bucket has enough survivors to
-      // contribute its share to the round-robin merge. The +touched term
-      // keeps the un-actioned pool at ≥ limit*2 even after the user has
-      // burned through a lot of cards — without it, a long onboarding
-      // session would deplete the picker as soon as actioned count
-      // outgrew the static fetch window.
-      const perType = limit * 2 + userTouchedIds.length;
+      // Look up user's country to set a culturally appropriate media-type
+      // ratio. Equal thirds (the old approach) over-represents anime for
+      // most of the world and under-represents it for East Asian users.
+      //
+      // Ratio = [tvSlots, filmSlots, animeSlots] out of `limit` titles.
+      // High-anime markets (JP/KR/CN/TW/HK/SG + neighbours): 30/20/50
+      // Mid-anime markets (US/CA — large fanbases): 45/30/25
+      // Default (EU, AU, UK, rest of world): 50/35/15
+      const userRow = await ctx.db
+        .select({ country: users.country })
+        .from(users)
+        .where(eq(users.clerkId, ctx.userId))
+        .limit(1)
+        .then((rows) => rows[0] ?? null);
+      const country = userRow?.country?.toUpperCase() ?? null;
+
+      const HIGH_ANIME = new Set([
+        'JP',
+        'KR',
+        'CN',
+        'TW',
+        'HK',
+        'SG',
+        'TH',
+        'VN',
+        'PH',
+        'MY',
+        'ID',
+      ]);
+      const MID_ANIME = new Set(['US', 'CA', 'AU', 'NZ']);
+
+      const [tvRatio, filmRatio] =
+        country && HIGH_ANIME.has(country)
+          ? [0.3, 0.2, 0.5]
+          : country && MID_ANIME.has(country)
+            ? [0.45, 0.3, 0.25]
+            : [0.5, 0.35, 0.15]; // EU and rest of world
+
+      const tvSlots = Math.round(limit * tvRatio);
+      const filmSlots = Math.round(limit * filmRatio);
+      const animeSlots = limit - tvSlots - filmSlots; // remainder avoids rounding drift
+
+      const slotsByType = { tv: tvSlots, film: filmSlots, anime: animeSlots } as const;
       const mediaTypes = ['tv', 'film', 'anime'] as const;
+
+      // Overfetch 3× per type so franchise dedup has room to find enough
+      // unique representatives to fill each type's slot allocation.
       const buckets = await Promise.all(
         mediaTypes.map((mt) =>
           ctx.db
@@ -149,27 +187,41 @@ export const titlesRouter = router({
                 : eq(titles.mediaType, mt),
             )
             .orderBy(sql`${titles.popularityScore} DESC NULLS LAST, ${titles.title} ASC`)
-            .limit(perType),
+            .limit(slotsByType[mt] * 3 + userTouchedIds.length),
         ),
       );
 
-      // Dedup each bucket independently. Franchises don't cross media
-      // types in practice (anime adaptations live as separate AniList
-      // rows from their live-action versions; ignoring cross-type
-      // dedup is correct AND keeps the algorithm simple).
-      const dedupedBuckets = buckets.map((bucket) => dedupeByFranchise(bucket));
+      const [tvBucket, filmBucket, animeBucket] = buckets as [
+        (typeof buckets)[0],
+        (typeof buckets)[0],
+        (typeof buckets)[0],
+      ];
+      const dedupedBuckets = {
+        tv: dedupeByFranchise(tvBucket).slice(0, slotsByType.tv),
+        film: dedupeByFranchise(filmBucket).slice(0, slotsByType.film),
+        anime: dedupeByFranchise(animeBucket).slice(0, slotsByType.anime),
+      };
 
-      // Round-robin interleave: tv[0], film[0], anime[0], tv[1], ...
-      // Empty buckets are skipped naturally — if the catalog has no TV
-      // titles yet, the merge falls through to film + anime.
-      const merged: (typeof dedupedBuckets)[number] = [];
-      const maxRows = Math.max(...dedupedBuckets.map((b) => b.length));
-      for (let i = 0; i < maxRows && merged.length < limit; i++) {
-        for (const bucket of dedupedBuckets) {
+      // Interleave by ratio rather than strict round-robin so the grid
+      // feels balanced: every ~2 TV/film cards is followed by 1 anime
+      // card (for the default ratio), not anime-TV-film-anime-TV-film.
+      const merged: typeof dedupedBuckets.tv = [];
+      const queues = {
+        tv: [...dedupedBuckets.tv],
+        film: [...dedupedBuckets.film],
+        anime: [...dedupedBuckets.anime],
+      };
+      while (merged.length < limit) {
+        let added = false;
+        for (const mt of mediaTypes) {
           if (merged.length >= limit) break;
-          const row = bucket[i];
-          if (row) merged.push(row);
+          const item = queues[mt].shift();
+          if (item) {
+            merged.push(item);
+            added = true;
+          }
         }
+        if (!added) break; // all queues exhausted
       }
       return merged;
     }),

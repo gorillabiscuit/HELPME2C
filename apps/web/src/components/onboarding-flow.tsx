@@ -7,8 +7,6 @@ import Link from 'next/link';
 import { trpc } from '@/lib/trpc';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { PreviewOverlay } from '@/components/preview-overlay';
-import { TitleQuickActions } from '@/components/title-quick-actions';
 import { franchiseDisplayName } from '@/server/lib/franchise';
 import { cn } from '@/lib/utils';
 
@@ -112,9 +110,19 @@ export function OnboardingFlow({
     { enabled: phase === 'dislikes' },
   );
 
-  // Write a 1/10 dislike rating. Uses the same watch.upsert path as likes
-  // but with rating:1 — the bipolar formula maps this to a strong negative
-  // weight in the taste vector.
+  // Like = 10/10 rating + status:completed. Fires on poster tap.
+  const likeMutation = trpc.watch.upsert.useMutation();
+  const [likedLocalIds, setLikedLocalIds] = useState<Set<string>>(new Set());
+
+  // Local set of title IDs the user skipped ("Haven't seen it").
+  // Not written to the DB — just hides the card for the session.
+  const [skippedIds, setSkippedIds] = useState<Set<string>>(new Set());
+
+  const handleSkip = (titleId: string) => {
+    setSkippedIds((s) => new Set(s).add(titleId));
+  };
+
+  // Dislike = 1/10 rating. Fires on poster tap in the dislikes phase.
   const dislikeMutation = trpc.watch.upsert.useMutation();
   const [dislikedIds, setDislikedIds] = useState<Set<string>>(new Set());
 
@@ -190,8 +198,10 @@ export function OnboardingFlow({
     : rawTitlesToShow.filter((title) => {
         if (exiting.has(title.id)) return true;
         if (hiddenIds.has(title.id)) return false;
+        if (skippedIds.has(title.id)) return false;
+        if (likedLocalIds.has(title.id)) return false;
         const entry = entryByTitleId.get(title.id);
-        return !entry || entry.status === null;
+        return !entry || (entry.status === null && entry.rating === null);
       });
 
   if (phase === 'intro') {
@@ -448,11 +458,10 @@ export function OnboardingFlow({
   return (
     <main className="mx-auto max-w-5xl px-6 pt-12 pb-32">
       <header className="mb-8 max-w-2xl">
-        <h1 className="text-4xl font-semibold tracking-tight">Rate shows you&apos;ve loved</h1>
+        <h1 className="text-4xl font-semibold tracking-tight">Tap shows you love</h1>
         <p className="mt-3 text-base text-text-body">
-          Click a poster you&apos;ve watched and loved — that&apos;s a 10/10 rating, and it teaches
-          us your taste. Pick 3 to get started; 5 is great, 10 is plenty. You can refine ratings and
-          add more anytime from <em>Your taste</em>.
+          Tap a poster to say you loved it. Haven&apos;t seen it? Skip it. Pick 3 to get started — 5
+          or more gives us a lot to work with.
         </p>
       </header>
 
@@ -480,13 +489,7 @@ export function OnboardingFlow({
         <ul className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
           {titlesToShow.map((title) => {
             const mediaTypeLabel = MEDIA_TYPE_LABEL[title.mediaType] ?? title.mediaType;
-            // In onboarding the user is rating "the show" not "the season".
-            // Strip season suffixes for display so "My Hero Academia 2nd
-            // Season" reads as "My Hero Academia". The rec engine already
-            // rolls ratings up by franchise, so storing against this
-            // specific titleId is fine — only the display needed fixing.
             const displayTitle = franchiseDisplayName(title.title);
-            const entry = entryByTitleId.get(title.id);
             const isExiting = exiting.has(title.id);
             return (
               <li
@@ -496,11 +499,22 @@ export function OnboardingFlow({
                   isExiting && 'pointer-events-none scale-95 opacity-0',
                 )}
               >
-                <Link
-                  href={`/titles/${title.id}`}
-                  className="group block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2"
+                {/* Tap the poster = loved it */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Mark liked locally so the filter keeps it hidden
+                    // even after router.refresh() re-renders the list.
+                    setLikedLocalIds((s) => new Set(s).add(title.id));
+                    handleActionComplete(title.id);
+                    likeMutation.mutate(
+                      { titleId: title.id, kind: 'tracking', status: 'completed', rating: 10 },
+                      { onSuccess: () => router.refresh() },
+                    );
+                  }}
+                  className="group relative block w-full cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 rounded-lg"
                 >
-                  <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-border bg-muted transition group-hover:border-input">
+                  <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-border bg-muted transition group-hover:border-foreground group-hover:shadow-md">
                     {title.posterUrl ? (
                       <Image
                         src={title.posterUrl}
@@ -510,27 +524,26 @@ export function OnboardingFlow({
                         className="object-cover"
                       />
                     ) : null}
-                    <PreviewOverlay
-                      trailerProvider={title.trailerProvider}
-                      trailerVideoId={title.trailerVideoId}
-                      titleText={displayTitle}
-                    />
+                    <div className="absolute inset-0 flex items-end justify-center pb-3 opacity-0 transition group-hover:opacity-100 group-active:opacity-100 bg-gradient-to-t from-black/60 to-transparent">
+                      <span className="text-sm font-semibold text-white">Loved it ♥</span>
+                    </div>
                   </div>
-                  <h3 className="mt-2 truncate text-sm font-medium text-foreground group-hover:underline">
-                    {displayTitle}
-                  </h3>
-                  <p className="text-xs text-muted-foreground">
-                    {[mediaTypeLabel, title.releaseYear?.toString()]
-                      .filter((s): s is string => Boolean(s))
-                      .join(' · ')}
-                  </p>
-                </Link>
-                <TitleQuickActions
-                  titleId={title.id}
-                  currentState={entry ? { status: entry.status, rating: entry.rating } : null}
-                  size="compact"
-                  onActionComplete={() => handleActionComplete(title.id)}
-                />
+                </button>
+                <h3 className="mt-2 truncate text-sm font-medium text-foreground">
+                  {displayTitle}
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  {[mediaTypeLabel, title.releaseYear?.toString()]
+                    .filter((s): s is string => Boolean(s))
+                    .join(' · ')}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => handleSkip(title.id)}
+                  className="mt-1 text-xs text-muted-foreground underline-offset-2 hover:underline"
+                >
+                  Haven&apos;t seen it
+                </button>
               </li>
             );
           })}
@@ -564,7 +577,7 @@ export function OnboardingFlow({
             {ratedCount === 0
               ? 'Skip for now'
               : ratedCount < 3
-                ? 'Continue'
+                ? `${ratedCount} picked — keep going`
                 : "Next — what don't you like?"}
           </Button>
         </div>

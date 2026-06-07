@@ -30,6 +30,13 @@ export default async function OnboardingPage({ searchParams }: OnboardingPagePro
   await requireAgeVerified();
 
   const caller = appRouter.createCaller(await createContext());
+
+  // Ensure the user row exists in the DB before any mutations fire.
+  // me.ensure is idempotent (ON CONFLICT DO UPDATE) — safe to call on
+  // every page load. Without this, fresh sign-ups landing directly on
+  // /onboarding have no user row and all mutations return 404/500.
+  await caller.me.ensure();
+
   const [popularTitles, watchEntries, feedbackEntries, params] = await Promise.all([
     // limit 50 + server-side exclusion of watch_entries AND rec_feedback:
     // every router.refresh() after a card action re-queries and brings
