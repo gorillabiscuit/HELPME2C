@@ -168,7 +168,7 @@ export async function recomputeGroupRecommendations(
       .filter((e) => e.kind === 'anchor')
       .map((e) => ({ titleId: e.titleId }));
 
-    const taste = extractTasteVector({ anchors, ratings }, memberTitles);
+    const { tasteVector: taste } = extractTasteVector({ anchors, ratings }, memberTitles);
     return { userId, taste };
   });
 

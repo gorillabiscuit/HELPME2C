@@ -281,7 +281,7 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
     .from(tagThemes);
   const themeMembership: TagThemeMembership[] = themeRows;
 
-  const taste = extractTasteVector({ anchors, ratings }, userTitles);
+  const { tasteVector: taste } = extractTasteVector({ anchors, ratings }, userTitles);
   const recs = recommendForUser(taste, candidates, REC_LIMIT, themeMembership);
 
   // Resolve tag + theme names for the explain pass. Both tables are
