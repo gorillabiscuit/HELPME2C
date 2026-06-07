@@ -1,0 +1,118 @@
+fields:
+  - name: core_claim
+    description: >
+      What is the central claim about what drives narrative enjoyment or
+      engagement? What dimension does this framework say matters most?
+    detail_level: detailed
+
+  - name: descriptive_vs_experiential
+    description: >
+      Does this framework capture what a story is ABOUT (descriptive/topical)
+      or what it FEELS LIKE to experience it (experiential/affective)?
+      Or does it operate at a different level entirely (structural, motivational,
+      values-based)? Be specific about which dimension it occupies.
+    detail_level: detailed
+
+  - name: key_dimensions
+    description: >
+      The specific axes, categories, or variables the framework proposes.
+      List them concretely — these are the candidate additions to our vocabulary.
+    detail_level: detailed
+
+  - name: cross_cultural_validity
+    description: >
+      Has this framework been validated across cultures and languages, or is
+      it implicitly Western/English-centric? What evidence exists either way?
+      What breaks down in cross-cultural application?
+    detail_level: detailed
+
+  - name: empirical_grounding
+    description: >
+      Has this framework been validated against actual enjoyment, completion,
+      or preference data? What is the quality of the evidence — experimental,
+      correlational, computational, anecdotal? What would be needed to validate
+      LLM-extracted dimensions against this framework?
+    detail_level: detailed
+
+  - name: operationalisability
+    description: >
+      Can the dimensions of this framework be reliably extracted from a
+      synopsis or short description by an LLM? What is the extraction unit
+      (whole work / arc / scene / character)? What are the failure modes —
+      where would an LLM get it wrong?
+    detail_level: detailed
+
+  - name: motivation_served
+    description: >
+      What viewer motivation or need does this framework map to? Is it about
+      hedonic enjoyment (fun, pleasure, escapism), eudaimonic appreciation
+      (meaning, being moved), mood regulation, identity expression, social
+      connection, or something else? How does it apply to GROUP viewing decisions
+      where two people must share or trade off motivations?
+    detail_level: moderate
+
+  - name: receiver_dependence
+    description: >
+      Are the dimensions of this framework properties of the WORK ALONE, or
+      do they emerge from an interaction between the work and a specific
+      viewer's traits, mood, or values? This distinction matters for a
+      two-person recommender — some axes are absolute (gore level), others
+      are relational (whether a story's values resonate). Be explicit.
+    detail_level: detailed
+
+  - name: blind_spots
+    description: >
+      What does this framework miss or fail to capture? Where does it break
+      down? What kinds of enjoyment or appeal are invisible to it?
+    detail_level: detailed
+
+  - name: vocabulary_implications
+    description: >
+      Concrete, actionable implications for HelpME2C's theme vocabulary.
+      Propose specific slugs to add, modify, or remove. Suggest how dimensions
+      from this framework could be encoded in a controlled vocabulary that an
+      LLM extracts from a synopsis. Flag any dimensions that are NOT
+      extractable from synopsis alone and require different data sources.
+    detail_level: detailed
+
+  - name: relationship_to_existing_vocabulary
+    description: >
+      How does this framework relate to the existing HelpME2C vocabulary
+      slugs? Which existing slugs does it validate, which does it suggest
+      are misaligned, and which gaps does it reveal?
+
+      Existing vocabulary categories for reference:
+      Relationship/emotion: found-family, grief-and-loss, forbidden-love,
+      coming-of-age, friendship-tested, parent-child-rift, redemption-arc,
+      unrequited-longing, toxic-relationship, loneliness-and-isolation,
+      platonic-soulmates.
+      Power/society: power-corrupts, class-conflict, institutional-failure,
+      revolution-and-rebellion, corruption-and-cover-up, propaganda-and-truth,
+      legacy-of-empire, celebrity-and-fame.
+      Moral: moral-compromise, vigilante-justice, ethical-dilemma,
+      guilt-and-atonement, impossible-choice, betrayal-and-forgiveness,
+      vengeance-and-its-cost, complicity-with-evil.
+      Identity/self: identity-crisis, coming-out, impostor-syndrome, alter-ego,
+      gender-and-roles, mental-illness-portrayal, addiction-and-recovery,
+      trauma-survival, finding-purpose.
+      Genre/structure: mystery-investigation, whodunit, heist-and-caper,
+      survival-and-endurance, chase-and-escape, single-incident-fallout,
+      ensemble-mosaic, workplace-procedural, fish-out-of-water, mentor-and-pupil,
+      underdog-rise, rise-and-fall.
+      War/violence: war-and-its-toll, soldier-coming-home, civilian-under-occupation,
+      generational-trauma.
+      Speculative: post-apocalyptic-survival, dystopian-society, time-loop,
+      alternate-history, first-contact, technology-runs-amok, magic-system-cost,
+      existential-horror, folk-horror, cosmic-horror.
+      Texture: slow-burn, nonlinear-storytelling, magical-realism, absurdist-comedy,
+      dark-comedy, satire-of-power, biographical-portrait, character-study,
+      meditation-on-time, meditation-on-death.
+    detail_level: detailed
+
+  - name: key_sources
+    description: >
+      Primary papers, books, or datasets. Include URLs where available.
+      Flag which sources are freely accessible vs paywalled.
+    detail_level: brief
+
+uncertain: []

@@ -1,0 +1,123 @@
+fields:
+  - name: core_claim
+    description: >
+      What does this framework or instrument claim to measure, and why does it
+      matter for predicting media preference? What is the theoretical link between
+      this construct and viewing enjoyment?
+    detail_level: detailed
+
+  - name: predictive_validity_for_media
+    description: >
+      What is the empirical evidence that this construct predicts media preference,
+      content choice, or viewing enjoyment? Effect sizes, study designs, sample
+      sizes. Distinguish between: predicts genre preference, predicts thematic
+      preference, predicts narrative style preference, predicts completion rate.
+      Be specific — "correlated with Openness (r=0.3)" is more useful than "linked to personality."
+    detail_level: detailed
+
+  - name: instrument_design
+    description: >
+      What does the actual measurement instrument look like? Number of items,
+      response format (Likert / forced-choice / behavioural), typical completion
+      time, validated short forms. What is the minimum viable version for a
+      low-friction onboarding context (target: under 2 minutes, 6–10 items)?
+    detail_level: detailed
+
+  - name: cold_start_applicability
+    description: >
+      How directly applicable is this to a cold-start recommendation context
+      where the user has provided zero viewing history? What signal quality does
+      it provide before the first interaction? Does it work for cross-medium
+      preference inference (predicting TV preference from personality alone)?
+    detail_level: detailed
+
+  - name: group_compatibility_use
+    description: >
+      How does this framework extend to TWO-PERSON joint recommendations?
+      Can personality profiles be combined meaningfully? What aggregation models
+      exist (averaging, intersection, least-misery)? What evidence exists for
+      which combination strategy predicts joint satisfaction? This is the
+      HelpME2C core use case — be specific about the two-person application.
+    detail_level: detailed
+
+  - name: quiz_ux_implications
+    description: >
+      What does this imply for a consumer-facing onboarding quiz? Is it
+      suitable for direct elicitation ("rate how much you agree") or must it
+      be disguised/gamified to get honest answers? Acquiescence bias, social
+      desirability bias, faking — which apply and how severe are they?
+      What question format minimises friction while maximising signal?
+    detail_level: detailed
+
+  - name: cross_cultural_validity
+    description: >
+      Has this been validated across cultures and languages? What breaks down
+      in non-Western, non-English contexts? Given HelpME2C's multilingual
+      catalog (Korean, Japanese, French, German, Spanish, Italian, Chinese,
+      Portuguese, Hindi, Arabic content), this is critical — a personality
+      instrument that only works for Western users is a problem.
+    detail_level: detailed
+
+  - name: privacy_consent_implications
+    description: >
+      What are the privacy and consent implications of collecting this data?
+      GDPR Article 9 (special category data — personality profiling can be
+      inferred to relate to health, beliefs, or political opinions). Is explicit
+      consent required? Can the data be stored, or must it be used only
+      transiently? Are there specific privacy risks (re-identification,
+      sensitive inferences)?
+    detail_level: moderate
+
+  - name: relationship_to_theme_vocabulary
+    description: >
+      How does this personality construct map to the HelpME2C theme vocabulary
+      dimensions? Which slugs does high/low variance on this construct predict
+      preference for? For example: high Openness → nonlinear-storytelling,
+      earned-ambiguity, slow-burn; high sensation-seeking → chase-and-escape,
+      survival-and-endurance, existential-horror. Be as specific as possible.
+
+      Existing vocabulary categories for reference:
+      Relationship/emotion: found-family, grief-and-loss, forbidden-love,
+      coming-of-age, friendship-tested, parent-child-rift, redemption-arc,
+      unrequited-longing, toxic-relationship, loneliness-and-isolation,
+      platonic-soulmates.
+      Power/society: power-corrupts, class-conflict, institutional-failure,
+      revolution-and-rebellion, corruption-and-cover-up, propaganda-and-truth,
+      legacy-of-empire, celebrity-and-fame.
+      Moral: moral-compromise, vigilante-justice, ethical-dilemma,
+      guilt-and-atonement, impossible-choice, betrayal-and-forgiveness,
+      vengeance-and-its-cost, complicity-with-evil.
+      Identity/self: identity-crisis, coming-out, impostor-syndrome, alter-ego,
+      gender-and-roles, mental-illness-portrayal, addiction-and-recovery,
+      trauma-survival, finding-purpose.
+      Genre/structure: mystery-investigation, whodunit, heist-and-caper,
+      survival-and-endurance, chase-and-escape, single-incident-fallout,
+      ensemble-mosaic, workplace-procedural, fish-out-of-water, mentor-and-pupil,
+      underdog-rise, rise-and-fall.
+      War/violence: war-and-its-toll, soldier-coming-home, civilian-under-occupation,
+      generational-trauma.
+      Speculative: post-apocalyptic-survival, dystopian-society, time-loop,
+      alternate-history, first-contact, technology-runs-amok, magic-system-cost,
+      existential-horror, folk-horror, cosmic-horror.
+      Texture: slow-burn, nonlinear-storytelling, magical-realism, absurdist-comedy,
+      dark-comedy, satire-of-power, biographical-portrait, character-study,
+      meditation-on-time, meditation-on-death.
+    detail_level: detailed
+
+  - name: implementation_recommendation
+    description: >
+      Concrete recommendation for whether and how to incorporate this into
+      HelpME2C's onboarding. Propose: include / exclude / partial (which
+      aspects). If include: how many items, in what format, at what point in
+      onboarding. If exclude: what would need to be true to include it later.
+      Flag any dependencies on other instruments (e.g. "only useful if combined
+      with values elicitation").
+    detail_level: detailed
+
+  - name: key_sources
+    description: >
+      Primary papers, books, or datasets. Include URLs where available.
+      Flag which sources are freely accessible vs paywalled.
+    detail_level: brief
+
+uncertain: []

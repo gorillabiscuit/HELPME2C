@@ -1,0 +1,148 @@
+topic: >
+  Theme taxonomy design for narrative recommendation systems — what dimensions
+  best predict why people enjoy stories, how to capture experiential feel vs
+  descriptive content, cross-cultural applicability, existing academic and
+  industry approaches
+
+items:
+  # Academic / psychological — motivation & engagement
+  - id: narrative-transportation
+    name: 'Narrative Transportation Theory (Green & Brock)'
+    description: "Psychological theory of why and how stories absorb viewers — the 'lost in a story' mechanism"
+
+  - id: hedonic-eudaimonic
+    name: 'Hedonic vs. Eudaimonic Entertainment (Oliver & Bartsch)'
+    description: 'Splits gratification into enjoyment/pleasure vs. appreciation/meaning — independent axes, not a continuum. Most directly relevant to predicting viewing choices.'
+
+  - id: uses-gratifications
+    name: 'Uses & Gratifications Theory (Katz, Blumler, Ruggiero)'
+    description: 'What need does this media satisfy — escapism, social connection, information, identity, mood management. Empirical backbone under taste segmentation.'
+
+  - id: mood-management
+    name: 'Mood Management Theory (Zillmann)'
+    description: 'People select content to regulate their current affective state. Directly relevant to group recommendations where two people in different moods need a joint pick.'
+
+  - id: self-determination-media
+    name: 'Self-Determination Theory applied to media (Tamborini, Ryan, Rigby)'
+    description: 'Intrinsic enjoyment via need satisfaction — autonomy, competence, relatedness. Dominant alternative to U&G for explaining why something is satisfying.'
+
+  # Academic / structural — story form
+  - id: propp-morphology
+    name: "Propp's Morphology of Folktales"
+    description: 'Structural narrative functions — the grandfather of plot taxonomy. 31 narrative functions and 8 character types.'
+
+  - id: booker-seven-plots
+    name: "Christopher Booker's 7 Basic Plots"
+    description: 'Archetypal story structures beneath all narrative — Overcoming the Monster, Rags to Riches, Quest, Voyage and Return, Comedy, Tragedy, Rebirth.'
+
+  - id: tobias-twenty-plots
+    name: "Ronald Tobias's 20 Master Plots"
+    description: 'More granular plot-based taxonomy — Quest, Adventure, Pursuit, Rescue, Escape, Revenge, The Riddle, Rivalry, Underdog, Temptation, Metamorphosis, Transformation, Maturation, Love, Forbidden Love, Sacrifice, Discovery, Wretched Excess, Ascension, Descension.'
+
+  - id: campbell-heros-journey
+    name: "Joseph Campbell's Hero's Journey / Monomyth"
+    description: 'Mythological/experiential arc structure — departure, initiation, return. The most widely applied single narrative framework.'
+
+  - id: reagan-emotional-arcs
+    name: 'Reagan et al. Six Basic Emotional Arcs (Computational Story Lab)'
+    description: 'Empirically derived from 1,700+ stories via sentiment mining — Rags-to-riches, Tragedy, Man-in-a-hole, Icarus, Cinderella, Oedipus. The empirical grounding the structuralist frameworks lack.'
+
+  # Academic / cognitive & affective
+  - id: cognitive-narratology
+    name: 'Cognitive Narratology (Fludernik, Herman)'
+    description: 'How minds process and engage with story — embodied simulation, storyworld construction, gap-filling.'
+
+  - id: reception-theory
+    name: 'Reception Theory (Jauss, Iser)'
+    description: 'Meaning as transaction between work and viewer — horizon of expectations, aesthetic experience, implied reader.'
+
+  - id: affective-narratology
+    name: 'Affective Narratology'
+    description: 'Emotional dimension of story engagement — how narrative structure generates emotion, not just what emotions a story depicts.'
+
+  - id: plutchik-wheel
+    name: "Plutchik's Wheel of Emotions"
+    description: 'Dimensional emotion taxonomy — 8 basic emotions in opposing pairs, combined into complex emotions. As applied to story analysis.'
+
+  - id: russell-circumplex
+    name: "Russell's Valence-Arousal Circumplex"
+    description: '2D emotional space — valence (positive/negative) × arousal (calm/excited). The dominant computational model for mood-based recommendation.'
+
+  # Academic / values & morality
+  - id: schwartz-values
+    name: 'Schwartz Theory of Basic Human Values'
+    description: '10 cross-culturally validated values on two bipolar axes (Self-Enhancement↔Self-Transcendence, Openness↔Conservation). LLMs can place text on the Schwartz continuum from a single sentence — directly operationalisable.'
+
+  - id: moral-foundations
+    name: 'Moral Foundations Theory (Haidt)'
+    description: 'Care/fairness/loyalty/authority/sanctity/liberty — maps the moral texture of a narrative. Explains cross-cultural and political variation in appeal that emotion taxonomies miss.'
+
+  # Academic / personality & preference
+  - id: big-five-media-preference
+    name: 'Big Five ↔ Media Preference Research'
+    description: 'Empirical links between personality traits and content preferences. Openness→complex narrative, Extraversion→arousing/social. Relevant because preference is a person×content interaction.'
+
+  - id: big-five-character-profiling
+    name: 'Big Five Profiling of Fictional Characters'
+    description: "Mapping character personality to Big Five dimensions — lets character 'feel' become a taxonomy axis for matching viewers who gravitate to similar character types."
+
+  # Academic / measurement instruments
+  - id: narrative-engagement-scales
+    name: 'Narrative Engagement Scale / Transportation Scale / Imaginative Engagement Scale (IES)'
+    description: 'Validated instruments with subscales — Coauthoring, Gap-Filling, Theory of Mind, Reflection. Ground-truth targets to validate LLM-extracted dimensions against reported engagement.'
+
+  - id: heart-taxonomy
+    name: 'HEART Taxonomy (Empathy/Narrative Style, LLM-extractable)'
+    description: 'Theory-driven taxonomy of narrative-style elements that evoke empathy, with demonstrated GPT-4 extraction. Bridges experiential feel and operationalisability.'
+
+  # Industry systems
+  - id: netflix-taste-communities
+    name: 'Netflix Taste Communities + Altgenres + Story DNA'
+    description: '76,897 microgenres + 200-point human-tagged story DNA (romance level, goriness, plot conclusiveness, moral status of characters). The closest existing artifact to what HelpME2C is building.'
+
+  - id: pandora-music-genome
+    name: "Pandora's Music Genome Project"
+    description: 'Feature-based taxonomy in an analogous domain — 450 musical attributes per track, human-tagged. The most mature content-based recommendation taxonomy in existence.'
+
+  - id: spotify-mood-taxonomy
+    name: "Spotify's Mood/Audio Feature Taxonomy"
+    description: "How Spotify solved 'vibe' for music — valence, energy, danceability, acousticness. The most successful emotional feel taxonomy at scale."
+
+  - id: allmusic-mood-taxonomy
+    name: 'AllMusic Mood & Theme Taxonomy'
+    description: 'Editorial music taxonomy with explicit mood and theme dimensions — the human-curation model for music, directly analogous to our controlled vocabulary approach.'
+
+  - id: tvtropes-taxonomy
+    name: 'TVTropes Taxonomy'
+    description: 'Crowdsourced narrative element categorisation at scale — 30,000+ tropes. The largest existing narrative taxonomy, bottom-up from fan observation.'
+
+  - id: imdb-letterboxd-folksonomy
+    name: 'IMDB/Letterboxd Folksonomy'
+    description: 'Emergent user tagging as signal — what words people actually reach for when describing how a film made them feel. Bottom-up vocabulary from viewer language.'
+
+  # Adjacent domains
+  - id: game-feel-taxonomy
+    name: 'Video Game Feel Taxonomy'
+    description: "Games research on player experience and 'game feel' — the experiential dimension of interactive narrative. Has solved some of the feel-vs-content problem independently."
+
+  - id: transmedia-storytelling
+    name: 'Transmedia Storytelling Theory (Jenkins)'
+    description: "Cross-medium narrative identity — what makes a story 'the same story' across TV, film, book, game. Directly relevant to cross-medium theme matching."
+
+  # Computational / applied
+  - id: lllm-story-expectations
+    name: 'LLM-Extracted Story Features / Story-Expectation Modelling'
+    description: 'Recent work extracting drivers of engagement (anticipated emotional trajectory, character development beliefs) directly via LLMs and linking to consumer engagement. Direct template for our extraction pipeline.'
+
+  - id: narrative-driven-recommenders
+    name: 'Narrative-Driven Recommenders (LLM)'
+    description: 'Emerging subfield matching free-text narrative descriptions to items — directly the cross-medium use case. LLMs as Narrative-Driven Recommenders (2024).'
+
+  - id: collaborative-vs-content
+    name: 'Collaborative Filtering vs Content-Based Recommenders'
+    description: "Recommender systems literature on what actually predicts satisfaction — the empirical debate between 'people like you liked X' vs 'X has properties you like.'"
+
+execution:
+  batch_size: 5
+  items_per_agent: 1
+  output_dir: ./results

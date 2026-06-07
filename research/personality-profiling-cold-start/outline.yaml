@@ -1,0 +1,128 @@
+topic: >
+  Personality profiling for cold-start recommendation — how to infer viewer
+  taste from personality traits, best quiz/instrument designs for onboarding,
+  group compatibility profiling, indirect vs direct elicitation,
+  existing industry approaches
+
+items:
+  # Personality frameworks
+  - id: big-five-neo-pi
+    name: 'Big Five / NEO-PI-R (Costa & McCrae)'
+    description: 'The dominant personality taxonomy — Openness, Conscientiousness, Extraversion, Agreeableness, Neuroticism. Most validated cross-cultural personality model; direct empirical links to media preference.'
+
+  - id: big-five-short-forms
+    name: 'Big Five Short-Form Instruments (BFI-2, TIPI, BFI-S)'
+    description: 'Validated brief Big Five instruments: BFI-2-XS (12 items), TIPI (10 items), BFI-S (15 items). Tradeoffs between accuracy and onboarding friction.'
+
+  - id: hexaco
+    name: 'HEXACO Model (Ashton & Lee)'
+    description: 'Six-factor extension of Big Five adding Honesty-Humility. Better predictor of moral narrative preference and corruption-themed content. Cross-culturally derived from multiple languages.'
+
+  - id: dark-triad
+    name: 'Dark Triad (Machiavellianism, Narcissism, Psychopathy)'
+    description: 'Predicts preference for morally dark narratives, anti-hero protagonists, villains-as-protagonists. Relevant for the moral complexity dimension of the theme vocabulary.'
+
+  - id: need-for-cognition
+    name: 'Need for Cognition (Cacioppo & Petty)'
+    description: 'Intrinsic motivation to engage in effortful cognitive activity. Strong predictor of preference for complex narrative structure, unreliable narrators, nonlinear storytelling, and ambiguous endings.'
+
+  - id: need-for-affect
+    name: 'Need for Affect (Maio & Eron)'
+    description: 'Dispositional tendency to approach or avoid emotional situations. Predicts hedonic vs. eudaimonic content choice — high NFA seeks emotionally intense narratives; low NFA prefers comfortable, lighter content.'
+
+  - id: sensation-seeking
+    name: 'Sensation Seeking Scale (Zuckerman)'
+    description: 'Predicts preference for arousing, novel, intense content — action, horror, thriller. Independent of Big Five; captures a dimension traditional personality scales miss.'
+
+  - id: empathy-quotient
+    name: 'Empathy Quotient / Interpersonal Reactivity Index'
+    description: 'Predicts preference for character-driven narratives, relationship dramas, and psychological depth. Also predicts fictional character identification strength.'
+
+  # Taste elicitation methods
+  - id: item-based-cold-start
+    name: 'Item-Based Cold-Start Elicitation (show selection)'
+    description: 'The standard approach: show seed items, infer preferences. Limitations for cross-medium and new-user scenarios. Comparison point for personality-based alternatives.'
+
+  - id: implicit-personality-signals
+    name: 'Implicit Personality Signals from Behavior'
+    description: 'Infer personality from early behavioral signals — search terms used, time-of-day patterns, session duration, scroll speed. Avoids explicit quiz friction.'
+
+  - id: preference-for-specific-features
+    name: 'Direct Feature Preference Elicitation'
+    description: "Ask about content features rather than titles — 'do you prefer shows with happy endings?', 'how much does gore bother you?'. More scalable than title-based cold-start but has acquiescence bias."
+
+  - id: projective-character-selection
+    name: 'Projective Character Selection'
+    description: "Show archetypal character images/descriptions, ask user to pick who they'd most want to follow. Indirect personality proxy that feels like entertainment rather than a survey."
+
+  - id: narrative-scenario-quiz
+    name: 'Narrative Scenario / Situational Quiz'
+    description: "Brief vignettes ('a character faces X choice — what do you think they should do?'). Simultaneously elicits moral foundation profile and narrative preference. High engagement, low survey-feel."
+
+  - id: music-taste-proxy
+    name: 'Music Taste as Personality Proxy'
+    description: 'Music preference predicts Big Five with r~0.4. Spotify/Apple Music listening data could serve as cold-start signal. Cross-domain taste inference without direct quiz.'
+
+  - id: social-media-personality-inference
+    name: 'Social Media Personality Inference'
+    description: 'Big Five inference from social media language (Kosinski et al., myPersonality). Accuracy vs. privacy tradeoffs; GDPR constraints on what can be inferred without explicit consent.'
+
+  # Group profiling
+  - id: group-personality-compatibility
+    name: 'Group Personality Compatibility for Joint Choice'
+    description: 'How to combine two personality profiles into a joint recommendation target. Averaged profiles vs. intersection vs. dominance models. Specific to the HelpME2C two-person use case.'
+
+  - id: preference-conflict-resolution
+    name: 'Preference Conflict Resolution in Groups'
+    description: "When two people's preferences conflict, how do recommendation systems resolve? Least-misery, maximum-average, most-pleasure models and their empirical performance."
+
+  - id: personality-congruence-attraction
+    name: 'Personality Congruence and Interpersonal Attraction'
+    description: 'Similarity vs. complementarity in pair compatibility. Do similar personalities want to watch the same things? Evidence is mixed — shared values matter more than shared Big Five traits.'
+
+  # Industry approaches
+  - id: netflix-taste-communities
+    name: 'Netflix Taste Communities'
+    description: '76,897 microgenres derived from viewing patterns. Implicit personality clustering without explicit quiz. How Netflix solved cold-start through contextual and behavioral signals.'
+
+  - id: spotify-music-personality
+    name: 'Spotify Wrapped / Personality Inferences'
+    description: "Spotify's cross-domain personality inference from music listening — what they publish and what's known about the internal models. The closest analog to cross-medium taste transfer."
+
+  - id: cambridge-analytica-psychographics
+    name: 'Cambridge Analytica OCEAN Model (cautionary case)'
+    description: 'Most famous (and controversial) applied psychographics. What actually worked, what was inflated, and what it means for privacy-respecting personality inference in recommenders.'
+
+  - id: youtube-taste-profiling
+    name: 'YouTube Persona Profiling / Rabbit Holes'
+    description: "YouTube's implicit personality model — how watch-history clusters predict next content. The rabbit-hole problem as a failure mode of pure behavioral personality inference."
+
+  # Academic measurement
+  - id: quiz-design-psychometrics
+    name: 'Quiz Design Psychometrics — Reliability and Validity'
+    description: 'How to design a 5–10 item onboarding quiz that produces reliable personality estimates. Item Response Theory, adaptive testing, and minimum item count for useful signal.'
+
+  - id: gamified-personality-assessment
+    name: 'Gamified Personality Assessment'
+    description: 'Interactive, game-like personality elicitation (Knack, Pymetrics, similar). Higher completion rates, lower acquiescence bias than traditional surveys. Relevant to quiz UX design.'
+
+  - id: ipsative-vs-normative
+    name: 'Ipsative vs. Normative Personality Measurement'
+    description: 'Forced-choice (ipsative) vs. Likert (normative) instruments. Forced-choice reduces acquiescence bias and faking; more appropriate for recommender inputs than self-report Likert.'
+
+  - id: cross-cultural-personality-validity
+    name: 'Cross-Cultural Personality Measure Validity'
+    description: "Do Big Five instruments translate meaningfully across cultures? Evidence for and against. Implications for HelpME2C's multilingual catalog and diverse user base."
+
+  - id: media-use-motivation-scales
+    name: 'Media Use Motivation Scales (MUMS, SNS-motivation)'
+    description: 'Validated scales for measuring why people consume media — escapism, mood regulation, social connection, information. More specific than general personality for predicting viewing behavior.'
+
+  - id: value-based-preference-elicitation
+    name: 'Value-Based Preference Elicitation (Schwartz PVQ)'
+    description: 'Portrait Values Questionnaire — 40-item Schwartz values instrument. Predicts moral narrative preference, political drama appeal, and cross-cultural viewing patterns. The values complement to personality.'
+
+execution:
+  batch_size: 5
+  items_per_agent: 1
+  output_dir: ./results
