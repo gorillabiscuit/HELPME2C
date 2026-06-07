@@ -14,13 +14,10 @@ const INNER_STEP_BATCH = 30;
 // (60 / INNER_STEP_BATCH).
 const FAN_OUT_BATCH_SIZE = 60;
 
-// Hard cap on the fan-out — protects against an unbounded events flood.
-// Catalog is ~88k titles as of 2026-06; ceil(88000 / 60) = 1467 batches
-// needed for a full pass. Set to 2000 to give headroom for catalog growth.
-// Note: with concurrency: 1 a full pass takes ~8h. If that's too slow,
-// raise the concurrency limit in extractThemesBatch (check Anthropic TPM
-// first — Tier 1 cap is 50K input tokens/min).
-const MAX_BATCHES_PER_FAN_OUT = 2000;
+// Inngest caps step.sendEvent at 512 events per call on the free tier,
+// 5000 on paid. We chunk the fan-out into sends of this size so the
+// function works at any catalog size without a hardcoded title ceiling.
+const SEND_EVENT_CHUNK_SIZE = 500;
 
 interface CandidateRow {
   id: string;
@@ -124,10 +121,10 @@ export const extractThemesAll = inngest.createFunction(
     const force = event.data.force === true;
     const mediaType = event.data.mediaType ?? null;
     const requestedLimit = event.data.limit;
+    // No hardcoded ceiling — process the entire untagged set. An explicit
+    // limit can be passed via the event payload for smoke-test runs.
     const limit =
-      typeof requestedLimit === 'number' && requestedLimit > 0
-        ? requestedLimit
-        : MAX_BATCHES_PER_FAN_OUT * FAN_OUT_BATCH_SIZE;
+      typeof requestedLimit === 'number' && requestedLimit > 0 ? requestedLimit : 1_000_000;
 
     const candidates = await step.run('load-candidate-ids', async () => {
       const sql = neon(process.env.DATABASE_URL!);
@@ -174,21 +171,25 @@ export const extractThemesAll = inngest.createFunction(
       return { fanned: 0, totalCandidates: 0, force, mediaType };
     }
 
-    // Chunk + emit. Capping at MAX_BATCHES_PER_FAN_OUT protects against
-    // an unbounded fan-out if someone removes the LIMIT carelessly.
+    // Chunk candidates into title batches, then send in chunks of
+    // SEND_EVENT_CHUNK_SIZE to stay under Inngest's per-call event limit.
     const batches: string[][] = [];
     for (let i = 0; i < candidates.length; i += FAN_OUT_BATCH_SIZE) {
       batches.push(candidates.slice(i, i + FAN_OUT_BATCH_SIZE));
-      if (batches.length >= MAX_BATCHES_PER_FAN_OUT) break;
     }
 
-    await step.sendEvent(
-      'fan-out-batches',
-      batches.map((titleIds) => extractThemesBatchEvent.create({ titleIds })),
-    );
+    let sendCount = 0;
+    for (let i = 0; i < batches.length; i += SEND_EVENT_CHUNK_SIZE) {
+      const chunk = batches.slice(i, i + SEND_EVENT_CHUNK_SIZE);
+      await step.sendEvent(
+        `fan-out-batches-${i}`,
+        chunk.map((titleIds) => extractThemesBatchEvent.create({ titleIds })),
+      );
+      sendCount += chunk.length;
+    }
 
     return {
-      fanned: batches.length,
+      fanned: sendCount,
       totalCandidates: candidates.length,
       titlesQueued: batches.reduce((acc, b) => acc + b.length, 0),
       force,
