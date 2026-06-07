@@ -22,15 +22,19 @@ export async function requireAgeVerified() {
     redirect('/age-check');
   }
 
-  // Secondary check: DB row must exist and be verified.
-  // Catches the case where the DB was wiped but Clerk metadata wasn't reset.
+  // Secondary check: if a DB row exists, it must also be verified.
+  // This catches the case where the DB was wiped but Clerk metadata wasn't
+  // reset (DB row present but age_verified=false). If no DB row exists yet
+  // (e.g. existing Clerk user returning after a DB wipe, before me.ensure
+  // has run), we trust Clerk metadata alone — the row will be created on
+  // the next me.ensure call.
   const [dbUser] = await db
     .select({ ageVerified: users.ageVerified })
     .from(users)
     .where(eq(users.clerkId, user.id))
     .limit(1);
 
-  if (!dbUser || !dbUser.ageVerified) {
+  if (dbUser && !dbUser.ageVerified) {
     redirect('/age-check');
   }
 
