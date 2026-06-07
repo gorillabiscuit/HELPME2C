@@ -253,12 +253,14 @@ export const titlesRouter = router({
         ? and(textMatch, eq(titles.mediaType, input.mediaType))
         : textMatch;
 
-      // Overfetch 3× so franchise dedup has room to find representatives
-      // without leaving the grid short. Then collapse seasons/cours/parts
-      // of the same franchise into the canonical entry so a user searching
-      // "attack on titan" sees one card, not three. Specific-season
-      // searches ("attack on titan season 3") naturally still match
-      // only one row, so dedup is a no-op there.
+      // Popularity scores are not cross-comparable between media types:
+      // AniList scores (anime) can be in the millions; TMDB scores (TV/film)
+      // are typically 0–500. Sorting by raw score across all types buries
+      // TV and film results under anime even when the text match is equal.
+      //
+      // Fix: normalise each row's score by the per-type max across the
+      // matching result set, then sort descending. This preserves the
+      // "most popular match" intent while removing the scale bias.
       const rows = await ctx.db
         .select({
           id: titles.id,
@@ -273,9 +275,24 @@ export const titlesRouter = router({
         })
         .from(titles)
         .where(where)
-        .orderBy(sql`${titles.popularityScore} DESC NULLS LAST, ${titles.title} ASC`)
+        .orderBy(sql`${titles.title} ASC`) // stable base order; re-sorted below
         .limit(input.limit * 3);
-      return dedupeByFranchise(rows).slice(0, input.limit);
+
+      // Compute per-type max for normalisation.
+      const maxByType: Record<string, number> = { tv: 1, film: 1, anime: 1 };
+      for (const row of rows) {
+        const score = row.popularityScore ?? 0;
+        const mt = row.mediaType;
+        if (score > (maxByType[mt] ?? 1)) maxByType[mt] = score;
+      }
+      const sorted = [...rows].sort((a, b) => {
+        const aNorm = (a.popularityScore ?? 0) / (maxByType[a.mediaType] ?? 1);
+        const bNorm = (b.popularityScore ?? 0) / (maxByType[b.mediaType] ?? 1);
+        if (bNorm !== aNorm) return bNorm - aNorm;
+        return a.title.localeCompare(b.title);
+      });
+
+      return dedupeByFranchise(sorted).slice(0, input.limit);
     }),
 
   // Top-N titles sorted by vote count — used by the onboarding dislike
