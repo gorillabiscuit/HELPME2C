@@ -307,11 +307,14 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
     }, {}),
   );
 
-  // LLM-extracted facet slugs for candidates — used to score candidates
-  // against the user's facet taste vector.
-  const candidateIdsForFacets = candidates.map((c) => c.titleId);
+  // LLM-extracted facet slugs for candidates. The candidate set can be
+  // 10k+ titles — passing all IDs via inArray hits Postgres's parameter
+  // limit. Instead mirror the candidate filter: exclude titles in the
+  // user's library (small list) rather than including all candidates
+  // (huge list). Result is equivalent: title_themes rows for every
+  // title the user hasn't watched.
   const candidateFacetRows =
-    candidateIdsForFacets.length > 0
+    userTitleIds.length > 0
       ? await db
           .select({
             titleId: titleThemes.titleId,
@@ -319,8 +322,14 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
             confidence: titleThemes.confidence,
           })
           .from(titleThemes)
-          .where(inArray(titleThemes.titleId, candidateIdsForFacets))
-      : [];
+          .where(notInArray(titleThemes.titleId, userTitleIds))
+      : await db
+          .select({
+            titleId: titleThemes.titleId,
+            slug: titleThemes.themeSlug,
+            confidence: titleThemes.confidence,
+          })
+          .from(titleThemes);
   const candidateFacets: TitleFacetSet[] = Object.values(
     candidateFacetRows.reduce<Record<string, TitleFacetSet>>((acc, row) => {
       if (!acc[row.titleId]) acc[row.titleId] = { titleId: row.titleId, facets: [] };

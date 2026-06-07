@@ -209,10 +209,11 @@ export async function recomputeGroupRecommendations(
     .from(tagThemes);
   const themeMembership: TagThemeMembership[] = themeRows;
 
-  // Facet slugs for candidates — used to score against each member's facet vector.
-  const candidateTitleIds = candidates.map((c) => c.titleId);
+  // Facet slugs for candidates — mirror the candidate filter (exclude
+  // member library titles) rather than including all candidate IDs,
+  // which can be 10k+ and hits Postgres's parameter limit.
   const candidateFacetRows =
-    candidateTitleIds.length > 0
+    allMemberTitleIds.length > 0
       ? await db
           .select({
             titleId: titleThemes.titleId,
@@ -220,8 +221,14 @@ export async function recomputeGroupRecommendations(
             confidence: titleThemes.confidence,
           })
           .from(titleThemes)
-          .where(inArray(titleThemes.titleId, candidateTitleIds))
-      : [];
+          .where(notInArray(titleThemes.titleId, allMemberTitleIds))
+      : await db
+          .select({
+            titleId: titleThemes.titleId,
+            slug: titleThemes.themeSlug,
+            confidence: titleThemes.confidence,
+          })
+          .from(titleThemes);
   const candidateFacets: TitleFacetSet[] = Object.values(
     candidateFacetRows.reduce<Record<string, TitleFacetSet>>((acc, row) => {
       if (!acc[row.titleId]) acc[row.titleId] = { titleId: row.titleId, facets: [] };
