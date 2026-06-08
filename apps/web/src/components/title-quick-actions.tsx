@@ -2,10 +2,31 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bookmark, Check, HelpCircle, X } from 'lucide-react';
+import { Bookmark, Check, Heart, HelpCircle, ThumbsDown, ThumbsUp, X } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
-import { RatingFace } from '@/components/rating-face';
 import { cn } from '@/lib/utils';
+
+// 3-point rating scale (replaces 1–10 grid).
+// Research basis: Netflix's stars-to-thumbs switch doubled rating volume because
+// graded scales require analytical introspection that degrades signal quality
+// (Wilson & Schooler 1991). Three points captures the meaningful gradient
+// (strong negative / positive / strong positive) without forced precision.
+// Values chosen to stay compatible with existing recommendation thresholds:
+//   rating >= 7  = liked (unchanged in recommendation engine)
+//   rating < 7   = disliked (unchanged)
+const RATING_OPTIONS = [
+  { label: "Didn't like it", value: 3, Icon: ThumbsDown },
+  { label: 'Liked it', value: 7, Icon: ThumbsUp },
+  { label: 'Loved it', value: 10, Icon: Heart },
+] as const;
+
+type RatingValue = (typeof RATING_OPTIONS)[number]['value'];
+
+function labelForRating(rating: number): string {
+  if (rating >= 10) return 'Loved it';
+  if (rating >= 7) return 'Liked it';
+  return "Didn't like it";
+}
 
 type WatchStatus = 'watching' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_watch';
 
@@ -136,15 +157,15 @@ export function TitleQuickActions({
           aria-pressed={isWatched}
           title={
             isWatched && existingRating !== null
-              ? `Watched · rated ${existingRating}/10. Click to change.`
-              : 'Mark as watched — pick a rating to shape future recs.'
+              ? `${labelForRating(existingRating)} — click to change.`
+              : 'Mark as watched — tell us how you felt about it.'
           }
           className={cn(buttonBase, isWatched || ratingOpen ? onState : offState)}
         >
           <Check className={iconSize} aria-hidden="true" />
           <span>
             {isWatched && existingRating !== null
-              ? `Watched · ${existingRating}/10`
+              ? `Watched · ${labelForRating(existingRating)}`
               : isWatched
                 ? 'Watched'
                 : 'Watched it'}
@@ -193,36 +214,37 @@ export function TitleQuickActions({
 
       {ratingOpen ? (
         <div className="rounded-md border border-border bg-muted/40 p-2">
-          <p className="mb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
-            {existingRating !== null
-              ? `Currently ${existingRating}/10 — change it?`
-              : 'How would you rate it? 1 = hated · 10 = loved'}
+          <p className="mb-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+            {existingRating !== null ? 'Change your rating' : 'How did you find it?'}
           </p>
-          <div className="flex flex-wrap items-center gap-1">
-            {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
-              <button
-                key={n}
-                type="button"
-                onClick={() => onWatchedWithRating(n)}
-                disabled={isPending}
-                className={cn(
-                  'flex h-12 w-9 flex-col items-center justify-center gap-0.5 rounded-md border text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-50',
-                  n === existingRating
-                    ? 'border-foreground bg-foreground text-primary-foreground'
-                    : 'border-border bg-white text-foreground hover:bg-foreground hover:text-primary-foreground',
-                )}
-              >
-                <span>{n}</span>
-                <RatingFace rating={n} size="sm" inheritColor={n === existingRating} />
-              </button>
-            ))}
+          <div className="flex items-center gap-1.5">
+            {RATING_OPTIONS.map(({ label, value, Icon }) => {
+              const isActive = existingRating === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => onWatchedWithRating(value as RatingValue)}
+                  disabled={isPending}
+                  className={cn(
+                    'flex flex-1 flex-col items-center gap-1 rounded-md border px-2 py-2.5 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-50',
+                    isActive
+                      ? 'border-foreground bg-foreground text-primary-foreground'
+                      : 'border-border bg-white text-foreground hover:bg-foreground hover:text-primary-foreground',
+                  )}
+                >
+                  <Icon className="h-4 w-4" aria-hidden="true" />
+                  <span>{label}</span>
+                </button>
+              );
+            })}
             <button
               type="button"
               onClick={() => onWatchedWithRating(null)}
               disabled={isPending}
-              className="ml-1 self-stretch rounded-md border border-border bg-white px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
+              className="self-stretch rounded-md border border-border bg-white px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
             >
-              Skip rating
+              Skip
             </button>
           </div>
         </div>
