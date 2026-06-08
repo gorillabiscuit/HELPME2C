@@ -257,7 +257,7 @@ export async function processAnilistMedia(media: AniListMedia): Promise<string |
       trailerVideoId,
     })
     .onConflictDoUpdate({
-      target: [titles.externalId, titles.source],
+      target: [titles.externalId, titles.source, titles.mediaType],
       set: {
         title: titleText,
         synopsis,
