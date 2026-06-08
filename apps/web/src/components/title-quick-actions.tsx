@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Bookmark, Check, Heart, HelpCircle, ThumbsDown, ThumbsUp, X } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { cn } from '@/lib/utils';
+import { BUCKET_LABEL, bucketForRating } from '@/components/rating-face';
 
 // 3-point rating scale (replaces 1–10 grid).
 // Research basis: Netflix's stars-to-thumbs switch doubled rating volume because
@@ -22,10 +23,10 @@ const RATING_OPTIONS = [
 
 type RatingValue = (typeof RATING_OPTIONS)[number]['value'];
 
+// labelForRating: use BUCKET_LABEL[bucketForRating(r)] from rating-face.tsx
+// — single source of truth for display labels.
 function labelForRating(rating: number): string {
-  if (rating >= 10) return 'Loved it';
-  if (rating >= 7) return 'Liked it';
-  return "Didn't like it";
+  return BUCKET_LABEL[bucketForRating(rating)];
 }
 
 type WatchStatus = 'watching' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_watch';

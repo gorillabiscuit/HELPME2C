@@ -16,7 +16,7 @@ export function bucketForRating(rating: number): RatingBucket {
   return 'disliked';
 }
 
-const BUCKET_LABEL: Record<RatingBucket, string> = {
+export const BUCKET_LABEL: Record<RatingBucket, string> = {
   disliked: "Didn't like it",
   liked: 'Liked it',
   loved: 'Loved it',
