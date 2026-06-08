@@ -216,7 +216,7 @@ export async function processTmdbTvShow(showId: number): Promise<string | null> 
       trailerVideoId: trailer?.videoId ?? null,
     })
     .onConflictDoUpdate({
-      target: [titles.externalId, titles.source],
+      target: [titles.externalId, titles.source, titles.mediaType],
       set: {
         title: detail.name,
         synopsis: detail.overview || null,
@@ -312,7 +312,7 @@ export async function processTmdbMovie(movieId: number): Promise<string | null> 
       trailerVideoId: trailer?.videoId ?? null,
     })
     .onConflictDoUpdate({
-      target: [titles.externalId, titles.source],
+      target: [titles.externalId, titles.source, titles.mediaType],
       set: {
         title: detail.title,
         synopsis: detail.overview || null,
