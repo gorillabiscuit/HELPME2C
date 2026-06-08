@@ -174,7 +174,9 @@ export function OnboardingFlow({
   const handleDislike = (titleId: string) => {
     setDislikedLocalIds((s) => new Set(s).add(titleId));
     handleActionComplete(titleId);
-    dislikeMutation.mutate({ titleId, kind: 'tracking', rating: 1 });
+    // 3 = "Didn't like it" on the 3-point scale — same value used in
+    // TitleQuickActions so the rating signal is consistent across surfaces.
+    dislikeMutation.mutate({ titleId, kind: 'tracking', rating: 3 });
   };
 
   // Screen 3 — feature preference state. Each axis is null (not answered),
@@ -554,7 +556,9 @@ export function OnboardingFlow({
               onClick={() => {
                 const dislikedArr = [...dislikedLocalIds];
                 // Same 5-show cap as the like insight — see comment there.
-                const dislikeInsightIds = dislikedArr.slice(-5);
+                // dislikedArr is built from the ordered dislike grid so the
+                // first 5 are the user's top picks.
+                const dislikeInsightIds = dislikedArr.slice(0, 5);
                 if (dislikeInsightIds.length >= 3) {
                   setSelectedOptionIndices(new Set());
                   setPhase('dislike-insight');
@@ -818,9 +822,9 @@ export function OnboardingFlow({
               // Generate insight if ≥3 picks — skip straight to dislikes if fewer.
               // Cap at 5: research (arXiv 2510.27342) shows query fatigue sets in
               // fast; 3–5 well-chosen questions outperform exhaustive elicitation.
-              // Take the last 5 so we ask about the most recent picks (freshest
-              // in memory, most deliberate).
-              const insightIds = liked.slice(-5);
+              // Take the first 5 (most recently updated — initialEntries is
+              // DESC-sorted by updatedAt) so we ask about the freshest picks.
+              const insightIds = liked.slice(0, 5);
               if (insightIds.length >= 3) {
                 setPhase('insight');
                 generateInsightMutation.mutate(
