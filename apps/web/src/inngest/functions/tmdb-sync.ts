@@ -404,8 +404,10 @@ export async function searchTmdbAndIngest(query: string, limit: number = 5): Pro
         const titleId =
           mediaType === 'tv' ? await processTmdbTvShow(id) : await processTmdbMovie(id);
         if (titleId) upserted.push(titleId);
-      } catch {
+      } catch (e) {
         // Best-effort: a single TMDB failure doesn't abort the rest.
+        // eslint-disable-next-line no-console -- no logger abstraction yet; tracked in HM2C backlog
+        console.warn('[searchTmdbAndIngest] failed to ingest title', { id, mediaType }, e);
       }
     }),
   );

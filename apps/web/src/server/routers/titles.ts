@@ -337,13 +337,20 @@ export const titlesRouter = router({
               .from(titles)
               .where(and(inArray(titles.id, ingestedIds), where))
               .limit(input.limit);
-            // Sort freshly ingested results by TMDB popularity (best proxy
-            // for relevance when the local DB was empty).
-            return fresh.sort((a, b) => (b.popularityScore ?? 0) - (a.popularityScore ?? 0));
+            // Merge pre-existing local matches (deduped) with newly-ingested
+            // results, dedup by id, sort by popularity, and re-apply the
+            // original limit so we never drop a show that was already in DB.
+            const freshIds = new Set(fresh.map((f) => f.id));
+            const merged = [...deduped.filter((d) => !freshIds.has(d.id)), ...fresh].sort(
+              (a, b) => (b.popularityScore ?? 0) - (a.popularityScore ?? 0),
+            );
+            return merged.slice(0, input.limit);
           }
-        } catch {
+        } catch (e) {
           // Best-effort: TMDB being down should not break local search.
           // Return [] (empty) rather than surfacing a 500.
+          // eslint-disable-next-line no-console -- no logger abstraction yet; tracked in HM2C backlog
+          console.warn('[titles.search] on-demand ingest failed', { query: input.q }, e);
         }
       }
 
