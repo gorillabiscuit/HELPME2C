@@ -312,10 +312,11 @@ export const titlesRouter = router({
       // directly from TMDB. This means the latency hit is only paid on the
       // first search; subsequent searches for the same title hit the DB.
       //
-      // Guard: only fire if ≥3 chars AND zero local results. Short queries
-      // (<3 chars) are already rejected above; this check is for the case
-      // where trimmed ≥ 2 but still empty in the catalog.
-      if (deduped.length === 0 && trimmed.length >= 3) {
+      // Guard: fire if ≥5 chars AND fewer than 3 local results. "Fewer than 3"
+      // rather than "zero" because an unrelated partial match (e.g. "Modern
+      // Farmer" for the query "modern f") can suppress ingest of the intended
+      // title. The 5-char minimum keeps noisy short queries from hammering TMDB.
+      if (deduped.length < 3 && trimmed.length >= 5) {
         try {
           const ingestedIds = await searchTmdbAndIngest(trimmed, 5);
           if (ingestedIds.length > 0) {
