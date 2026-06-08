@@ -223,7 +223,6 @@ Return ONLY a JSON array, one entry per show, in the same order. No markdown, no
       z.object({
         slugs: z.array(z.string()),
         mode: z.enum(['like', 'dislike']),
-        freeText: z.string().max(500).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
