@@ -8,6 +8,7 @@ import { Loader2 } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { franchiseDisplayName } from '@/server/lib/franchise';
 import { cn } from '@/lib/utils';
 
@@ -27,6 +28,7 @@ interface TitleSummary {
 
 interface InitialEntry {
   titleId: string;
+  titleName: string;
   status: WatchStatus | null;
   rating: number | null;
 }
@@ -806,10 +808,35 @@ export function OnboardingFlow({
       <div className="fixed inset-x-0 bottom-0 border-t border-border bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
           <div className="flex items-center gap-4">
-            <p className="text-sm text-text-body">
-              <span className="font-semibold text-foreground">{ratedCount}</span>{' '}
-              {ratedCount === 1 ? 'picked' : 'picked'}
-            </p>
+            {/* Tooltip lists picked titles on hover. Only shown when there
+                is at least one pick so there's something meaningful to show. */}
+            {ratedCount > 0 ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <p className="cursor-default text-sm text-text-body">
+                    <span className="font-semibold text-foreground">{ratedCount}</span> picked
+                  </p>
+                </TooltipTrigger>
+                <TooltipContent side="top" align="start">
+                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Your picks
+                  </p>
+                  <ul className="space-y-0.5">
+                    {initialEntries
+                      .filter((e) => e.rating !== null)
+                      .map((e) => (
+                        <li key={e.titleId} className="text-sm">
+                          {e.titleName}
+                        </li>
+                      ))}
+                  </ul>
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              <p className="text-sm text-text-body">
+                <span className="font-semibold text-foreground">0</span> picked
+              </p>
+            )}
             {!showingSearchResults && (
               <button
                 type="button"

@@ -63,6 +63,7 @@ export default async function OnboardingPage({ searchParams }: OnboardingPagePro
   // cold-start user who's revisiting the picker mid-flow.
   const initialEntries = watchEntries.map(({ entry, title }) => ({
     titleId: title.id,
+    titleName: title.title,
     status: entry.status,
     rating: entry.rating,
   }));
