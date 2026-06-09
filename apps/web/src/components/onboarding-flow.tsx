@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
+import { Loader2 } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -702,14 +703,26 @@ export function OnboardingFlow({
         </p>
       </header>
 
-      <div className="mb-8 max-w-md">
+      {/* Spinner visible from first keystroke (query !== debouncedQuery)
+          through to results landing (searchQuery.isFetching). Covers the
+          debounce gap so the user never sees a "hanging" input. */}
+      <div className="relative mb-8 max-w-md">
         <Input
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search any title…"
           autoFocus
+          className={cn(
+            searchEnabled && (query !== debouncedQuery || searchQuery.isFetching) && 'pr-9',
+          )}
         />
+        {searchEnabled && (query !== debouncedQuery || searchQuery.isFetching) ? (
+          <Loader2
+            className="pointer-events-none absolute top-1/2 right-2.5 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground"
+            aria-hidden="true"
+          />
+        ) : null}
       </div>
 
       <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
