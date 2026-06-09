@@ -338,12 +338,26 @@ export const titlesRouter = router({
               .where(and(inArray(titles.id, ingestedIds), where))
               .limit(input.limit);
             // Merge pre-existing local matches (deduped) with newly-ingested
-            // results, dedup by id, sort by popularity, and re-apply the
-            // original limit so we never drop a show that was already in DB.
+            // results, dedup by id, sort by normalised popularity (same
+            // per-type normalisation used above), and re-apply the original
+            // limit so we never drop a show that was already in DB.
+            // Raw popularity scores must NOT be used here — AniList scores
+            // are orders of magnitude larger than TMDB scores and would
+            // always win.
             const freshIds = new Set(fresh.map((f) => f.id));
-            const merged = [...deduped.filter((d) => !freshIds.has(d.id)), ...fresh].sort(
-              (a, b) => (b.popularityScore ?? 0) - (a.popularityScore ?? 0),
-            );
+            const all = [...deduped.filter((d) => !freshIds.has(d.id)), ...fresh];
+            const mergedMaxByType: Record<string, number> = { tv: 1, film: 1, anime: 1 };
+            for (const row of all) {
+              const score = row.popularityScore ?? 0;
+              if (score > (mergedMaxByType[row.mediaType] ?? 1))
+                mergedMaxByType[row.mediaType] = score;
+            }
+            const merged = [...all].sort((a, b) => {
+              const aNorm = (a.popularityScore ?? 0) / (mergedMaxByType[a.mediaType] ?? 1);
+              const bNorm = (b.popularityScore ?? 0) / (mergedMaxByType[b.mediaType] ?? 1);
+              if (bNorm !== aNorm) return bNorm - aNorm;
+              return a.title.localeCompare(b.title);
+            });
             return merged.slice(0, input.limit);
           }
         } catch (e) {
