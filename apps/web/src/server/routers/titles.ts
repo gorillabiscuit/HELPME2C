@@ -1,9 +1,51 @@
 import { and, eq, ilike, inArray, notInArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { mediaTypeEnum, recFeedback, titles, users, watchEntries } from '../schema';
+import {
+  mediaTypeEnum,
+  recFeedback,
+  titles,
+  userPreferences,
+  users,
+  watchEntries,
+} from '../schema';
 import { dedupeByFranchise } from '../lib/franchise';
 import { protectedProcedure, router } from '../trpc';
 import { searchTmdbAndIngest } from '@/inngest/functions/tmdb-sync';
+
+/**
+ * Blend a sorted list of titles by novelty preference.
+ *
+ * novelty=0  → pure popularity order (all popular, no curated bump)
+ * novelty=1  → curated titles first, then popular remainder
+ * in between → proportional mix
+ *
+ * The input list is already deduped and sorted popularity-DESC.
+ * We split into curated / non-curated sub-lists, take the proportional
+ * share from each, then interleave curated-first so they're visible at
+ * the top of the grid when novelty > 0.
+ */
+function blendByNovelty<T extends { isCurated: boolean }>(
+  rows: T[],
+  novelty: number,
+  limit: number,
+): T[] {
+  if (novelty <= 0) return rows.slice(0, limit);
+  const curated = rows.filter((r) => r.isCurated);
+  const popular = rows.filter((r) => !r.isCurated);
+  const curatedSlots = Math.round(limit * novelty);
+  const popularSlots = limit - curatedSlots;
+  const blended: T[] = [];
+  // Interleave: for every popular item add a curated item after it until
+  // we hit the curated slot cap, then flush the remaining popular items.
+  const cQ = [...curated.slice(0, curatedSlots)];
+  const pQ = [...popular.slice(0, popularSlots)];
+  while (blended.length < limit) {
+    if (pQ.length) blended.push(pQ.shift()!);
+    if (blended.length < limit && cQ.length) blended.push(cQ.shift()!);
+    if (!pQ.length && !cQ.length) break;
+  }
+  return blended;
+}
 
 // Auto-synced with the Drizzle pgEnum values, same single-source-of-truth
 // pattern as watch.ts.
@@ -61,6 +103,10 @@ export const titlesRouter = router({
            * "Show me different ones" refresh to avoid re-showing titles
            * already seen in a previous batch. */
           excludeTitleIds: z.array(z.string().uuid()).optional().default([]),
+          /** Novelty preference 0–1. 0 = pure popularity (familiar), 1 = weight
+           *  toward curated critical canon (adventurous). When omitted the
+           *  endpoint reads the user's saved preference (default 0.3). */
+          novelty: z.number().min(0).max(1).optional(),
         })
         .optional(),
     )
@@ -81,6 +127,20 @@ export const titlesRouter = router({
       //      stratify: pull per-type top-N, dedup each, round-robin
       //      interleave to fill the grid with all three.
 
+      // Resolve novelty: explicit override > saved preference > default 0.3.
+      // 0 = pure popularity (familiar), 1 = weight toward curated canon.
+      let novelty = input?.novelty;
+      if (novelty === undefined) {
+        const prefRow = await ctx.db
+          .select({ preferences: userPreferences.preferences })
+          .from(userPreferences)
+          .innerJoin(users, eq(userPreferences.userId, users.id))
+          .where(eq(users.clerkId, ctx.userId))
+          .limit(1)
+          .then((rows) => rows[0] ?? null);
+        novelty = prefRow?.preferences?.novelty ?? 0.3;
+      }
+
       const projection = {
         id: titles.id,
         title: titles.title,
@@ -91,6 +151,7 @@ export const titlesRouter = router({
         popularityScore: titles.popularityScore,
         trailerProvider: titles.trailerProvider,
         trailerVideoId: titles.trailerVideoId,
+        isCurated: titles.isCurated,
       } as const;
 
       // Build the exclusion list of title IDs the user has already
@@ -133,7 +194,7 @@ export const titlesRouter = router({
           .where(whereClause)
           .orderBy(sql`${titles.popularityScore} DESC NULLS LAST, ${titles.title} ASC`)
           .limit(limit * 3 + userTouchedIds.length);
-        return dedupeByFranchise(rows).slice(0, limit);
+        return blendByNovelty(dedupeByFranchise(rows), novelty, limit);
       }
 
       // Look up user's country to set a culturally appropriate media-type
@@ -204,9 +265,9 @@ export const titlesRouter = router({
         (typeof buckets)[0],
       ];
       const dedupedBuckets = {
-        tv: dedupeByFranchise(tvBucket).slice(0, slotsByType.tv),
-        film: dedupeByFranchise(filmBucket).slice(0, slotsByType.film),
-        anime: dedupeByFranchise(animeBucket).slice(0, slotsByType.anime),
+        tv: blendByNovelty(dedupeByFranchise(tvBucket), novelty, slotsByType.tv),
+        film: blendByNovelty(dedupeByFranchise(filmBucket), novelty, slotsByType.film),
+        anime: blendByNovelty(dedupeByFranchise(animeBucket), novelty, slotsByType.anime),
       };
 
       // Interleave by ratio rather than strict round-robin so the grid

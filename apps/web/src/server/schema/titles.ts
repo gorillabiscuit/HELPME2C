@@ -53,6 +53,11 @@ export const titles = pgTable(
     // both fields before rendering the preview overlay.
     trailerProvider: text('trailer_provider'),
     trailerVideoId: text('trailer_video_id'),
+    // True for titles from curated critical canons (Criterion Collection,
+    // Palme d'Or / Golden Bear winners, Sight & Sound Top 250, BFI Top 100
+    // TV). Used by the novelty slider to weight critically-acclaimed-but-niche
+    // titles into recommendations. Null / false for popularity-synced titles.
+    isCurated: boolean('is_curated').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

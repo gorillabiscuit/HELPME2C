@@ -1,0 +1,1 @@
+ALTER TABLE "titles" ADD COLUMN "is_curated" boolean DEFAULT false NOT NULL;

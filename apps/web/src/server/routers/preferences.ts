@@ -256,6 +256,39 @@ Return ONLY a JSON array, one entry per show, in the same order. No markdown, no
       return { ok: true };
     }),
 
+  // Save the user's novelty preference (0 = familiar, 1 = adventurous).
+  // Patches only the novelty field — does not touch other preference axes.
+  saveNovelty: protectedProcedure
+    .input(z.object({ novelty: z.number().min(0).max(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const [userRow] = await ctx.db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.clerkId, ctx.userId))
+        .limit(1);
+      if (!userRow) return { ok: false };
+
+      const [existing] = await ctx.db
+        .select({ preferences: userPreferences.preferences })
+        .from(userPreferences)
+        .where(eq(userPreferences.userId, userRow.id))
+        .limit(1);
+
+      const updated: UserPreferencesData = {
+        ...(existing?.preferences ?? {}),
+        novelty: input.novelty,
+      };
+      await ctx.db
+        .insert(userPreferences)
+        .values({ userId: userRow.id, preferences: updated })
+        .onConflictDoUpdate({
+          target: userPreferences.userId,
+          set: { preferences: updated, updatedAt: new Date() },
+        });
+
+      return { ok: true };
+    }),
+
   // Read the user's current preference vector. Returns null if not set.
   get: protectedProcedure.query(async ({ ctx }) => {
     const [userRow] = await ctx.db

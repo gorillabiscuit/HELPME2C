@@ -41,6 +41,11 @@ export interface UserPreferencesData {
   // so the mapping can be updated without re-running onboarding.
   insightSlugs?: string[] | null;
   insightAvoidSlugs?: string[] | null;
+  // 0 = familiar (weight by popularity), 1 = novel (weight toward curated
+  // critical darlings and lower-popularity titles). Set in onboarding and
+  // adjustable on the recommendations page. Null = not yet set (treated as
+  // 0.3 — slightly familiar-leaning — by the recommendations layer).
+  novelty?: number | null;
 }
 
 export const userPreferences = pgTable('user_preferences', {

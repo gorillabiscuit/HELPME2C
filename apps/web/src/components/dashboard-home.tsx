@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { Star, Users } from 'lucide-react';
 import { FirstVisitCallout } from '@/components/first-visit-callout';
 import { PreviewOverlay } from '@/components/preview-overlay';
+import { NoveltySlider } from '@/components/novelty-slider';
 import { RecCardActions } from '@/components/rec-card-actions';
 
 type MediaType = 'tv' | 'film' | 'anime';
@@ -40,9 +41,10 @@ interface DashboardHomeProps {
   firstName: string | null | undefined;
   recs: ReadonlyArray<RecItem>;
   filter: FilterContext;
+  novelty?: number | null;
 }
 
-export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
+export function DashboardHome({ firstName, recs, filter, novelty }: DashboardHomeProps) {
   const greetingSuffix = firstName ? `, ${firstName}` : '';
 
   if (recs.length === 0) {
@@ -86,6 +88,10 @@ export function DashboardHome({ firstName, recs, filter }: DashboardHomeProps) {
           you&apos;ve rated and watched. Every action — <em>Watched it</em>, <em>Want to watch</em>,{' '}
           <em>Not interested</em> — refines what we suggest.
         </p>
+
+        <div className="mt-4 max-w-sm">
+          <NoveltySlider initialValue={novelty} compact />
+        </div>
 
         {filter.active ? (
           <div className="mt-4 flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted px-3 py-2 text-xs text-text-body">

@@ -59,8 +59,15 @@ export default async function HomePage() {
     redirect('/onboarding');
   }
 
+  const novelty = userId ? await caller.preferences.get().then((p) => p?.novelty ?? null) : null;
+
   return userId ? (
-    <DashboardHome firstName={user?.firstName} recs={recs.items} filter={recs.filter} />
+    <DashboardHome
+      firstName={user?.firstName}
+      recs={recs.items}
+      filter={recs.filter}
+      novelty={novelty}
+    />
   ) : (
     <MarketingHero />
   );
