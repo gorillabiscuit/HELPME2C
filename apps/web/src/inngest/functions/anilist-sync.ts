@@ -6,14 +6,16 @@ import { tags, titles, titleTags } from '@/server/schema';
 const ANILIST_API = 'https://graphql.anilist.co';
 // AniList rate limit: 90 req/min. Per-page is one GraphQL call (the page +
 // all its media + tags in one shot — much more efficient than TMDB's
-// per-show fetches), so 50 pages × 1 = 50 calls per cron run, well under
+// per-show fetches), so 100 pages × 1 = 100 calls per cron run, well under
 // the limit. perPage of 50 matches AniList's own pagination default.
 const ANILIST_PER_PAGE = 50;
-// Cap at 50 pages (~2500 anime). AniList has ~30k anime in their database;
+// Cap at 100 pages (~5000 anime). AniList has ~30k anime in their database;
 // the long tail is unfilmed manga adaptations and obscure shorts that
-// don't add useful taste signal. Top-2500 by popularity covers the
-// recognisable canon plus the current season's airing shows.
-const ANILIST_MAX_PAGES = 50;
+// don't add useful taste signal. Top-5000 by popularity covers the
+// recognisable canon, classic OVAs (e.g. Rurouni Kenshin: Trust & Betrayal),
+// and the current season's airing shows. Raised from 50 after testing
+// showed well-regarded classic OVAs fell just outside the top-2500.
+const ANILIST_MAX_PAGES = 100;
 
 interface AniListPageInfo {
   hasNextPage: boolean;
