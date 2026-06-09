@@ -476,7 +476,7 @@ export const tmdbSyncTvPage = inngest.createFunction(
   },
 );
 
-// Fans out one tmdb/sync.tv.page event per page, up to 100 pages (2000 shows).
+// Fans out one tmdb/sync.tv.page event per page, up to 200 pages (4000 shows).
 // Triggered manually or on a nightly cron at 03:00 UTC.
 export const tmdbSyncTvAll = inngest.createFunction(
   {
@@ -490,7 +490,7 @@ export const tmdbSyncTvAll = inngest.createFunction(
       tmdbGet<TmdbDiscoverPage>('/discover/tv?sort_by=popularity.desc&page=1&language=en-US'),
     );
 
-    const totalPages = Math.min(firstPage.total_pages, 100);
+    const totalPages = Math.min(firstPage.total_pages, 200);
 
     await step.sendEvent(
       'fan-out-pages',
