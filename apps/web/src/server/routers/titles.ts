@@ -316,7 +316,28 @@ export const titlesRouter = router({
       const escaped = trimmed.replace(/[%_\\]/g, (c) => '\\' + c);
       const pattern = `%${escaped}%`;
 
-      const textMatch = or(ilike(titles.title, pattern), ilike(titles.originalTitle, pattern));
+      // Hybrid match: exact substring (fast, precise) OR trigram similarity
+      // (handles typos and alternate spellings, e.g. "Kenshim" → "Kenshin",
+      // "Trust and Betrayal" → "Trust & Betrayal").
+      //
+      // word_similarity() rather than similarity() so the query term is
+      // matched against words *within* a longer title — "Kenshin" scores
+      // high against "Rurouni Kenshin: Trust & Betrayal" even though the
+      // full title is much longer.
+      //
+      // Threshold 0.4 catches single-char typos and common alternate
+      // spellings without surfacing noise on short 2-char queries (the
+      // <2-char early-return above already gates those).
+      //
+      // Requires the pg_trgm extension + GIN indexes on title/original_title
+      // (migration 0022_trgm_search.sql).
+      const TRGM_THRESHOLD = 0.4;
+      const textMatch = or(
+        ilike(titles.title, pattern),
+        ilike(titles.originalTitle, pattern),
+        sql`word_similarity(${trimmed}, ${titles.title}) > ${TRGM_THRESHOLD}`,
+        sql`word_similarity(${trimmed}, ${titles.originalTitle}) > ${TRGM_THRESHOLD}`,
+      );
       const where = input.mediaType
         ? and(textMatch, eq(titles.mediaType, input.mediaType))
         : textMatch;
@@ -346,6 +367,18 @@ export const titlesRouter = router({
         .orderBy(sql`${titles.title} ASC`) // stable base order; re-sorted below
         .limit(input.limit * 3);
 
+      // Scoring: exact substring matches rank above fuzzy trigram matches,
+      // and within each tier we sort by normalised popularity.
+      //
+      // exactScore: 1 if the title/originalTitle contains the query as a
+      // substring (case-insensitive), 0 otherwise. This ensures "Breaking
+      // Bad" always beats "Braking Bad" even if the latter has higher
+      // popularity somehow.
+      const lowerQ = trimmed.toLowerCase();
+      const isExact = (row: { title: string; originalTitle: string | null }) =>
+        row.title.toLowerCase().includes(lowerQ) ||
+        (row.originalTitle?.toLowerCase().includes(lowerQ) ?? false);
+
       // Compute per-type max for normalisation.
       const maxByType: Record<string, number> = { tv: 1, film: 1, anime: 1 };
       for (const row of rows) {
@@ -354,6 +387,11 @@ export const titlesRouter = router({
         if (score > (maxByType[mt] ?? 1)) maxByType[mt] = score;
       }
       const sorted = [...rows].sort((a, b) => {
+        // Tier 1: exact substring match wins over fuzzy match.
+        const aExact = isExact(a) ? 1 : 0;
+        const bExact = isExact(b) ? 1 : 0;
+        if (bExact !== aExact) return bExact - aExact;
+        // Tier 2: within the same tier, sort by normalised popularity.
         const aNorm = (a.popularityScore ?? 0) / (maxByType[a.mediaType] ?? 1);
         const bNorm = (b.popularityScore ?? 0) / (maxByType[b.mediaType] ?? 1);
         if (bNorm !== aNorm) return bNorm - aNorm;
