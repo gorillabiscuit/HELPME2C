@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { franchiseDisplayName } from '@/server/lib/franchise';
 import { NoveltySlider } from '@/components/novelty-slider';
+import { AboutYouStep } from '@/components/about-you-step';
 import { cn } from '@/lib/utils';
 
 type WatchStatus = 'watching' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_watch';
@@ -54,7 +55,8 @@ interface OnboardingFlowProps {
     | 'dislikes'
     | 'dislike-insight'
     | 'preferences'
-    | 'novelty';
+    | 'novelty'
+    | 'about-you';
 }
 
 const MEDIA_TYPE_LABEL: Record<string, string> = {
@@ -81,7 +83,14 @@ export function OnboardingFlow({
   // thing a new signed-up user sees after age-check; entries from
   // "Pick favourites" pass initialPhase='picker' to skip it.
   const [phase, setPhase] = useState<
-    'intro' | 'picker' | 'insight' | 'dislikes' | 'dislike-insight' | 'preferences' | 'novelty'
+    | 'intro'
+    | 'picker'
+    | 'insight'
+    | 'dislikes'
+    | 'dislike-insight'
+    | 'preferences'
+    | 'novelty'
+    | 'about-you'
   >(initialPhase);
 
   // Insight screen state — populated by the generateInsight mutation.
@@ -709,9 +718,17 @@ export function OnboardingFlow({
         <NoveltySlider />
         <div className="fixed inset-x-0 bottom-0 border-t border-border bg-white/95 backdrop-blur">
           <div className="mx-auto flex max-w-2xl items-center justify-end px-6 py-3">
-            <Button onClick={() => router.push('/')}>Show me my recs</Button>
+            <Button onClick={() => setPhase('about-you')}>Next</Button>
           </div>
         </div>
+      </main>
+    );
+  }
+
+  if (phase === 'about-you') {
+    return (
+      <main className="mx-auto max-w-2xl px-6 pt-12 pb-32">
+        <AboutYouStep onComplete={() => router.push('/')} />
       </main>
     );
   }

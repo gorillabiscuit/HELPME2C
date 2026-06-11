@@ -134,6 +134,42 @@ export const meRouter = router({
       }
       return row;
     }),
+
+  // Save birth year, gender, and streaming-filter opt-in collected during
+  // onboarding. All fields are optional — partial updates are safe because
+  // we only set whichever fields are provided.
+  updateProfile: protectedProcedure
+    .input(
+      z.object({
+        birthYear: z.number().int().min(1900).max(new Date().getFullYear()).optional(),
+        gender: z.enum(['male', 'female', 'non-binary', 'prefer_not_to_say']).optional(),
+        filterProviders: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const patch: Record<string, unknown> = { updatedAt: new Date() };
+      if (input.birthYear !== undefined) patch.birthYear = input.birthYear;
+      if (input.gender !== undefined) patch.gender = input.gender;
+      if (input.filterProviders !== undefined) patch.filterProviders = input.filterProviders;
+
+      const [row] = await ctx.db
+        .update(users)
+        .set(patch)
+        .where(eq(users.clerkId, ctx.userId))
+        .returning({
+          birthYear: users.birthYear,
+          gender: users.gender,
+          filterProviders: users.filterProviders,
+        });
+
+      if (!row) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'User row not found — was me.ensure called for this session?',
+        });
+      }
+      return row;
+    }),
 });
 
 export { privacySchema };

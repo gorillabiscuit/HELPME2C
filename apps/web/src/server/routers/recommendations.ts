@@ -6,6 +6,7 @@ import {
   titles,
   userRecommendations,
   userStreamingProviders,
+  users,
   watchEntries,
 } from '../schema';
 import { franchiseKey, franchiseSpecificity } from '../lib/franchise';
@@ -85,18 +86,26 @@ export const recommendationsRouter = router({
       }
 
       // Connected-providers filter per ADR-0021: post-ranking, country-strict,
-      // never a ranking signal. If the user has 0 providers selected,
-      // skip the filter entirely (their selection is "I don't care, show
-      // everything"). With 1+ selected, restrict to titles that have a
-      // streaming_availability row in the request country with one of those
-      // provider_ids — counts both type='streaming' and type='free' as
-      // available; rent/buy don't qualify since the user pays per title.
-      const connectedRows = await ctx.db
-        .select({ providerId: userStreamingProviders.providerId })
-        .from(userStreamingProviders)
-        .where(eq(userStreamingProviders.userId, internalUserId));
+      // never a ranking signal. Gated by users.filter_providers (opt-in,
+      // default false) — when false, full catalog discovery is preserved
+      // regardless of how many providers the user has saved. When true,
+      // restrict to titles that have a streaming_availability row in the
+      // request country with one of those provider_ids.
+      const [userRow] = await ctx.db
+        .select({ filterProviders: users.filterProviders })
+        .from(users)
+        .where(eq(users.clerkId, ctx.userId))
+        .limit(1);
+      const filterOptIn = userRow?.filterProviders ?? false;
+
+      const connectedRows = filterOptIn
+        ? await ctx.db
+            .select({ providerId: userStreamingProviders.providerId })
+            .from(userStreamingProviders)
+            .where(eq(userStreamingProviders.userId, internalUserId))
+        : [];
       const connectedProviderIds = connectedRows.map((r) => r.providerId);
-      const filterActive = connectedProviderIds.length > 0;
+      const filterActive = filterOptIn && connectedProviderIds.length > 0;
 
       // Filter the FULL 200-item payload before slicing — otherwise top-20
       // could exclude all available titles and the user would see fewer
