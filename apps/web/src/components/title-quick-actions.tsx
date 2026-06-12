@@ -93,8 +93,12 @@ export function TitleQuickActions({
       onActionComplete?.();
     },
   });
+  const [dismissReasonOpen, setDismissReasonOpen] = useState(false);
+  const [dismissalToast, setDismissalToast] = useState<string | null>(null);
+
   const recFeedbackUpsert = trpc.recFeedback.upsert.useMutation({
     onSuccess: () => {
+      setDismissReasonOpen(false);
       router.refresh();
       onActionComplete?.();
     },
@@ -117,7 +121,44 @@ export function TitleQuickActions({
   };
 
   const onNotInterested = () => {
-    recFeedbackUpsert.mutate({ titleId, dismissed: true });
+    setDismissReasonOpen(true);
+  };
+
+  const DISMISSAL_REASON_LABELS: {
+    value: 'too_dark' | 'too_violent' | 'not_in_mood' | 'already_seen' | 'not_my_thing';
+    label: string;
+    toast: string;
+  }[] = [
+    { value: 'too_dark', label: 'Too dark', toast: "Got it — we'll show you fewer dark shows" },
+    {
+      value: 'too_violent',
+      label: 'Too violent',
+      toast: "Got it — we'll show you less violent content",
+    },
+    {
+      value: 'not_in_mood',
+      label: 'Not in the mood',
+      toast: "We'll bring this back in a few days",
+    },
+    {
+      value: 'already_seen',
+      label: 'Already seen it',
+      toast: "Noted — we'll keep it out of your queue",
+    },
+    { value: 'not_my_thing', label: 'Not my thing', toast: 'Got it — thanks for the feedback' },
+  ];
+
+  const confirmDismissal = (
+    reason?: 'too_dark' | 'too_violent' | 'not_in_mood' | 'already_seen' | 'not_my_thing',
+  ) => {
+    const toast = reason
+      ? (DISMISSAL_REASON_LABELS.find((r) => r.value === reason)?.toast ?? null)
+      : null;
+    if (toast) {
+      setDismissalToast(toast);
+      setTimeout(() => setDismissalToast(null), 3000);
+    }
+    recFeedbackUpsert.mutate({ titleId, dismissed: true, dismissalReason: reason });
   };
 
   // "Don't know it" records a soft signal on rec_feedback.unfamiliar
@@ -188,7 +229,7 @@ export function TitleQuickActions({
           onClick={onNotInterested}
           disabled={isPending}
           title="We won't suggest this again."
-          className={cn(buttonBase, offState)}
+          className={cn(buttonBase, dismissReasonOpen ? onState : offState)}
         >
           <X className={iconSize} aria-hidden="true" />
           <span>Not interested</span>
@@ -212,6 +253,41 @@ export function TitleQuickActions({
           </button>
         ) : null}
       </div>
+
+      {/* Two-step dismissal: reason chips appear after "Not interested" click */}
+      {dismissReasonOpen ? (
+        <div className="rounded-md border border-border bg-muted/40 p-2">
+          <p className="mb-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+            Why not?
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {DISMISSAL_REASON_LABELS.map(({ value, label }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => confirmDismissal(value)}
+                disabled={isPending}
+                className="rounded-full border border-border bg-background px-3 py-1 text-[11px] transition-colors hover:border-foreground hover:bg-muted disabled:opacity-50"
+              >
+                {label}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => confirmDismissal()}
+              disabled={isPending}
+              className="rounded-full border border-border bg-background px-3 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
+            >
+              Skip
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Confirmed feedback toast */}
+      {dismissalToast ? (
+        <p className="text-[11px] text-muted-foreground">{dismissalToast}</p>
+      ) : null}
 
       {ratingOpen ? (
         <div className="rounded-md border border-border bg-muted/40 p-2">
