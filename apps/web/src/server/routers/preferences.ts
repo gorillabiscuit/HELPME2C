@@ -1,7 +1,14 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
-import { titles, titleThemes, users, userPreferences, type UserPreferencesData } from '../schema';
+import {
+  reasonFeedbackEvents,
+  titles,
+  titleThemes,
+  users,
+  userPreferences,
+  type UserPreferencesData,
+} from '../schema';
 import { protectedProcedure, router } from '../trpc';
 import { THEME_VOCABULARY } from '../themes/vocabulary';
 
@@ -252,6 +259,60 @@ Return ONLY a JSON array, one entry per show, in the same order. No markdown, no
           target: userPreferences.userId,
           set: { preferences: updated, updatedAt: new Date() },
         });
+
+      return { ok: true };
+    }),
+
+  // Append-only log of a single reason-answer event (ADR-0027). Called once
+  // per show as the user advances through the insight screen, alongside —
+  // not instead of — saveInsight (which owns the scoring vector). This is
+  // the raw substrate for taxonomy discovery: it preserves the question,
+  // the options shown, the "None of these fit" tap, and any optional free
+  // text, none of which survive saveInsight's overwrite-into-vector.
+  //
+  // Fire-and-forget from the client: a failed log must never block the
+  // onboarding flow, so the client does not await it. NOT a preference
+  // signal — see the table comment + ADR-0027 §Why.
+  recordReasonFeedback: protectedProcedure
+    .input(
+      z.object({
+        titleId: z.string().uuid(),
+        mode: z.enum(['like', 'dislike']),
+        questionShown: z.string().min(1).max(500),
+        // Cap list + label sizes defensively — this is logged verbatim and
+        // the payload originates client-side.
+        optionsShown: z
+          .array(z.object({ label: z.string().max(300), slugs: z.array(z.string().max(100)) }))
+          .max(10),
+        selectedSlugs: z.array(z.string().max(100)).max(20),
+        noneOfTheseFit: z.boolean(),
+        freeText: z.string().max(2000).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const [userRow] = await ctx.db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.clerkId, ctx.userId))
+        .limit(1);
+      if (!userRow) return { ok: false };
+
+      // Empty / whitespace-only free text is stored as NULL, not "" — the
+      // common case (user opened the box, typed nothing) should read as
+      // "no free text given" in the discovery analysis.
+      const trimmed = input.freeText?.trim();
+      const freeText = trimmed ? trimmed : null;
+
+      await ctx.db.insert(reasonFeedbackEvents).values({
+        userId: userRow.id,
+        titleId: input.titleId,
+        mode: input.mode,
+        questionShown: input.questionShown,
+        optionsShown: input.optionsShown,
+        selectedSlugs: input.selectedSlugs,
+        noneOfTheseFit: input.noneOfTheseFit,
+        freeText,
+      });
 
       return { ok: true };
     }),
