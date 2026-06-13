@@ -107,8 +107,12 @@ export function OnboardingFlow({
   const [selectedOptionIndices, setSelectedOptionIndices] = useState<Set<number>>(new Set());
   // Accumulated slugs across all shows in the session.
   const [accumulatedSlugs, setAccumulatedSlugs] = useState<string[]>([]);
+  // Optional free text, surfaced only when "None of these fit" is selected
+  // on the current insight show. Reset between shows. (ADR-0027)
+  const [feedbackText, setFeedbackText] = useState('');
   const generateInsightMutation = trpc.preferences.generateInsight.useMutation();
   const saveInsightMutation = trpc.preferences.saveInsight.useMutation();
+  const recordReasonFeedbackMutation = trpc.preferences.recordReasonFeedback.useMutation();
 
   // IDs of titles the user liked in Screen 1 — passed to the mainstream
   // query so the dislike grid doesn't show titles they've already rated.
@@ -339,6 +343,38 @@ export function OnboardingFlow({
     const currentShow = insightShows[insightIndex];
     const total = insightShows.length;
 
+    // The LLM always emits a "None of these fit" option (slugs: []) — its tap
+    // is the discovery trigger that reveals the optional free-text box.
+    const noneOfTheseFitIndex = currentShow
+      ? currentShow.options.findIndex((o) => o.label === 'None of these fit')
+      : -1;
+    const noneSelected = noneOfTheseFitIndex >= 0 && selectedOptionIndices.has(noneOfTheseFitIndex);
+
+    const selectedSlugsForCurrent = () =>
+      currentShow
+        ? [...selectedOptionIndices]
+            .flatMap((i) => currentShow.options[i]?.slugs ?? [])
+            .filter((s, i, arr) => arr.indexOf(s) === i)
+        : [];
+
+    // Append-only discovery log (ADR-0027): one event per show, fire-and-
+    // forget so a failed write never blocks onboarding. Runs alongside the
+    // scoring path (saveInsight) below — never replaces it. Free text is
+    // attached only when "None of these fit" was the selection.
+    const logCurrentShow = (selectedSlugs: string[]) => {
+      if (!currentShow) return;
+      const text = noneSelected ? feedbackText.trim() : '';
+      recordReasonFeedbackMutation.mutate({
+        titleId: currentShow.titleId,
+        mode: isDislikeInsight ? 'dislike' : 'like',
+        questionShown: currentShow.question,
+        optionsShown: currentShow.options,
+        selectedSlugs,
+        noneOfTheseFit: noneSelected,
+        freeText: text ? text : undefined,
+      });
+    };
+
     const advanceOrFinish = (newSlugs: string[]) => {
       const merged = [...new Set([...accumulatedSlugs, ...newSlugs])];
       const isLast = insightIndex >= total - 1;
@@ -353,29 +389,33 @@ export function OnboardingFlow({
           mode: isDislikeInsight ? 'dislike' : 'like',
         });
         setAccumulatedSlugs([]);
+        setFeedbackText('');
         setPhase(isDislikeInsight ? 'preferences' : 'dislikes');
       } else {
         setAccumulatedSlugs(merged);
         setInsightIndex((n) => n + 1);
         setSelectedOptionIndices(new Set());
+        setFeedbackText('');
       }
     };
 
     const handleNext = () => {
-      const selected = currentShow
-        ? [...selectedOptionIndices]
-            .flatMap((i) => currentShow.options[i]?.slugs ?? [])
-            .filter((s, i, arr) => arr.indexOf(s) === i)
-        : [];
+      const selected = selectedSlugsForCurrent();
+      logCurrentShow(selected);
       advanceOrFinish(selected);
     };
 
     const handleSkipAll = () => {
+      // Capture the current show before bailing — but only when there's signal
+      // (a selection or free text), so a pure abandon doesn't log an empty row.
+      const selected = selectedSlugsForCurrent();
+      if (selected.length > 0 || noneSelected) logCurrentShow(selected);
       saveInsightMutation.mutate({
         slugs: accumulatedSlugs,
         mode: isDislikeInsight ? 'dislike' : 'like',
       });
       setAccumulatedSlugs([]);
+      setFeedbackText('');
       setPhase(isDislikeInsight ? 'preferences' : 'dislikes');
     };
 
@@ -443,6 +483,26 @@ export function OnboardingFlow({
                 );
               })}
             </div>
+
+            {/* Optional free text — revealed only after "None of these fit".
+                Never required; empty is fine. Captured for taxonomy discovery,
+                not as a recommendation signal (ADR-0027). */}
+            {noneSelected && (
+              <div className="mt-4">
+                <textarea
+                  value={feedbackText}
+                  onChange={(e) => setFeedbackText(e.target.value)}
+                  rows={3}
+                  maxLength={2000}
+                  className="w-full resize-y rounded-xl border border-border bg-transparent px-5 py-4 text-sm leading-relaxed placeholder:text-muted-foreground focus:border-input focus:outline-none"
+                  placeholder="Optional — what was missing? Even a word or two helps."
+                />
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Optional. This won&apos;t change your recommendations — it just helps us ask
+                  better questions.
+                </p>
+              </div>
+            )}
           </>
         )}
 
