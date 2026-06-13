@@ -344,9 +344,13 @@ export function OnboardingFlow({
     const total = insightShows.length;
 
     // The LLM always emits a "None of these fit" option (slugs: []) — its tap
-    // is the discovery trigger that reveals the optional free-text box.
+    // is the discovery trigger that reveals the optional free-text box. Match
+    // on empty-slugs + "none of these" rather than the exact string so minor
+    // LLM label drift (casing/punctuation) doesn't silently hide the box; the
+    // dislike-mode mood escape-hatch ("I just wasn't in the mood for it") is
+    // also empty-slugs but carries no "none of these" text, so it's excluded.
     const noneOfTheseFitIndex = currentShow
-      ? currentShow.options.findIndex((o) => o.label === 'None of these fit')
+      ? currentShow.options.findIndex((o) => o.slugs.length === 0 && /none of these/i.test(o.label))
       : -1;
     const noneSelected = noneOfTheseFitIndex >= 0 && selectedOptionIndices.has(noneOfTheseFitIndex);
 
