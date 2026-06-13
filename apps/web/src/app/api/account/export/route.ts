@@ -5,6 +5,7 @@ import {
   groupMemberships,
   groupRecommendations,
   groups,
+  reasonFeedbackEvents,
   recFeedback,
   titles,
   userRecommendations,
@@ -23,7 +24,7 @@ import {
 // a download dialog.
 //
 // Schema versioning: the response includes
-// `schema: "helpme2c.account-export.v4"`.
+// `schema: "helpme2c.account-export.v5"`.
 // - v2 → v3: (a) group name denormalised onto memberships, (b) owned-group
 //   invite token redacted, (c) `excluded_from_export` rationale list added.
 // - v3 → v4: `user.our_database` now carries `country` (ISO-3166-1 alpha-2,
@@ -31,6 +32,9 @@ import {
 //   housemates, defaults 'solo'). Bumped because user-visible fields were
 //   added — even though no top-level keys changed, the user can see the new
 //   data in their export and the version bump makes that observable.
+// - v4 → v5: new top-level `reason_feedback_events` key — the onboarding
+//   reason-answer log (ADR-0027), including any free text the user typed
+//   after "None of these fit". Article 15/20 covers it.
 // Bump again when adding/renaming top-level keys or user-visible fields.
 //
 // Title metadata is denormalised in (every per-title row joins to
@@ -71,7 +75,7 @@ export async function GET() {
     const clerkUser = await clerk.users.getUser(userId);
     return jsonAttachment(
       {
-        schema: 'helpme2c.account-export.v4',
+        schema: 'helpme2c.account-export.v5',
         exportedAt: new Date().toISOString(),
         note: 'No HelpME2C DB row found — only Clerk identity is exported.',
         user: {
@@ -93,6 +97,7 @@ export async function GET() {
     userRecRow,
     streamingProviderRows,
     recFeedbackRows,
+    reasonFeedbackRows,
     membershipRows,
     ownedGroupsRows,
   ] = await Promise.all([
@@ -132,6 +137,21 @@ export async function GET() {
       })
       .from(recFeedback)
       .where(eq(recFeedback.userId, internalUserId)),
+    // Onboarding reason-answer log (ADR-0027). optionsShown is the system's
+    // prompt, not the user's answer, so it's omitted — we export the
+    // question they saw and what they chose/typed.
+    db
+      .select({
+        titleId: reasonFeedbackEvents.titleId,
+        mode: reasonFeedbackEvents.mode,
+        questionShown: reasonFeedbackEvents.questionShown,
+        selectedSlugs: reasonFeedbackEvents.selectedSlugs,
+        noneOfTheseFit: reasonFeedbackEvents.noneOfTheseFit,
+        freeText: reasonFeedbackEvents.freeText,
+        createdAt: reasonFeedbackEvents.createdAt,
+      })
+      .from(reasonFeedbackEvents)
+      .where(eq(reasonFeedbackEvents.userId, internalUserId)),
     // Join groups so the user sees the group NAME, not just an opaque
     // UUID. innerJoin is safe because FK CASCADE removes memberships
     // when their group is deleted (per groupMemberships schema).
@@ -151,7 +171,11 @@ export async function GET() {
   // Denormalise title names so the export is readable. Single IN-list
   // query for the union of all titleIds the user touches.
   const allTitleIds = Array.from(
-    new Set([...watchRows.map((r) => r.titleId), ...recFeedbackRows.map((r) => r.titleId)]),
+    new Set([
+      ...watchRows.map((r) => r.titleId),
+      ...recFeedbackRows.map((r) => r.titleId),
+      ...reasonFeedbackRows.map((r) => r.titleId),
+    ]),
   );
   const titleMetaRows = allTitleIds.length
     ? await db
@@ -187,7 +211,7 @@ export async function GET() {
   const clerkUser = await clerk.users.getUser(userId);
 
   const exportData = {
-    schema: 'helpme2c.account-export.v4',
+    schema: 'helpme2c.account-export.v5',
     exportedAt: new Date().toISOString(),
     // Make the deliberate omissions visible to the recipient. A
     // regulator or curious user shouldn't have to read our source to
@@ -251,6 +275,15 @@ export async function GET() {
       dismissed: r.dismissed,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
+    })),
+    reason_feedback_events: reasonFeedbackRows.map((r) => ({
+      title: denormaliseTitle(r.titleId),
+      mode: r.mode,
+      question: r.questionShown,
+      selectedSlugs: r.selectedSlugs,
+      noneOfTheseFit: r.noneOfTheseFit,
+      freeText: r.freeText,
+      createdAt: r.createdAt,
     })),
     groups: {
       memberships: membershipRows,
