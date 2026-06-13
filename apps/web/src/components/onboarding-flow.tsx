@@ -499,11 +499,10 @@ export function OnboardingFlow({
                   rows={3}
                   maxLength={2000}
                   className="w-full resize-y rounded-xl border border-border bg-transparent px-5 py-4 text-sm leading-relaxed placeholder:text-muted-foreground focus:border-input focus:outline-none"
-                  placeholder="Optional — what was missing? Even a word or two helps."
+                  placeholder="Optional — what was missing? Even a genre you'd rather avoid helps."
                 />
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Optional. This won&apos;t change your recommendations — it just helps us ask
-                  better questions.
+                  Optional — the more specific, the better.
                 </p>
               </div>
             )}
