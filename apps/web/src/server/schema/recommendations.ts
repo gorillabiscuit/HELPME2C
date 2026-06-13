@@ -149,3 +149,48 @@ export const recFeedback = pgTable(
 );
 
 export type RecFeedbackRating = (typeof recFeedbackRatingEnum.enumValues)[number];
+
+// Append-only log of onboarding reason-answer events (ADR-0027). Distinct
+// from the scoring path: `saveInsight` folds selected slugs into the user's
+// preference vector and overwrites, discarding which question was asked,
+// which options were shown, and any "None of these fit" / free-text answer.
+// This table preserves the raw event so the taxonomy can be improved later
+// (discovery of axes the chip set is missing — e.g. spectacle, format veto).
+//
+// NOT a preference signal: free text is captured for taxonomy-discovery,
+// routing, and the procedural-justice voice effect — never trusted as a
+// per-user scoring input (the Wilson & Schooler confabulation problem an
+// LLM cannot solve; see ADR-0027 §Why).
+//
+// Privacy: free_text is user-generated content that may contain PII.
+// Hard-deleted on account deletion via the user_id CASCADE (ADR-0012);
+// included in the Article 15/20 export. Anonymisation of the structured
+// fields for the discovery job is deferred (same posture as rec_feedback).
+export const reasonFeedbackEvents = pgTable('reason_feedback_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  titleId: uuid('title_id')
+    .notNull()
+    .references(() => titles.id, { onDelete: 'cascade' }),
+  // Which onboarding question this answered — like ("what made it click")
+  // or dislike ("what put you off"). Text, not enum: matches saveInsight.
+  mode: text('mode', { enum: ['like', 'dislike'] }).notNull(),
+  // The exact question + options the user saw, so a later analysis can
+  // interpret the answer without reconstructing the (LLM-generated) prompt.
+  questionShown: text('question_shown').notNull(),
+  optionsShown: jsonb('options_shown').$type<Array<{ label: string; slugs: string[] }>>().notNull(),
+  // The slugs the user's selected chips mapped to (empty when they picked
+  // only "None of these fit" or a viewer-state escape hatch).
+  selectedSlugs: text('selected_slugs').array().notNull().default([]),
+  // True when the user tapped "None of these fit" — the highest-value
+  // discovery signal (the taxonomy demonstrably failed for them here).
+  noneOfTheseFit: boolean('none_of_these_fit').notNull().default(false),
+  // Optional free text, surfaced only after "None of these fit". NULL when
+  // the user skipped it (the common case). Never required.
+  freeText: text('free_text'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type ReasonFeedbackMode = 'like' | 'dislike';
