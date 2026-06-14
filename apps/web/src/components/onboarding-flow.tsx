@@ -94,7 +94,7 @@ export function OnboardingFlow({
   >(initialPhase);
 
   // Insight screen state — populated by the generateInsight mutation.
-  type InsightOption = { label: string; slugs: string[] };
+  type InsightOption = { label: string; slugs: string[]; isNoneOfThese?: boolean };
   type PerShowInsight = {
     titleId: string;
     titleName: string;
@@ -343,14 +343,12 @@ export function OnboardingFlow({
     const currentShow = insightShows[insightIndex];
     const total = insightShows.length;
 
-    // The LLM always emits a "None of these fit" option (slugs: []) — its tap
-    // is the discovery trigger that reveals the optional free-text box. Match
-    // on empty-slugs + "none of these" rather than the exact string so minor
-    // LLM label drift (casing/punctuation) doesn't silently hide the box; the
-    // dislike-mode mood escape-hatch ("I just wasn't in the mood for it") is
-    // also empty-slugs but carries no "none of these" text, so it's excluded.
+    // "None of these fit" is appended server-side with a structural flag
+    // (ADR-0027 / generateInsight), so we detect it by flag — never by
+    // matching the LLM's label text, which could drift and silently hide the
+    // free-text discovery box.
     const noneOfTheseFitIndex = currentShow
-      ? currentShow.options.findIndex((o) => o.slugs.length === 0 && /none of these/i.test(o.label))
+      ? currentShow.options.findIndex((o) => o.isNoneOfThese === true)
       : -1;
     const noneSelected = noneOfTheseFitIndex >= 0 && selectedOptionIndices.has(noneOfTheseFitIndex);
 
@@ -467,14 +465,20 @@ export function OnboardingFlow({
                   <button
                     key={i}
                     type="button"
-                    onClick={() =>
+                    onClick={() => {
+                      // Deselecting "None of these fit" closes the textarea —
+                      // discard any typed text so it can't resurface on
+                      // re-select or be logged after the box is gone (#6).
+                      if (i === noneOfTheseFitIndex && selectedOptionIndices.has(i)) {
+                        setFeedbackText('');
+                      }
                       setSelectedOptionIndices((prev) => {
                         const next = new Set(prev);
                         if (next.has(i)) next.delete(i);
                         else next.add(i);
                         return next;
-                      })
-                    }
+                      });
+                    }}
                     className={cn(
                       'w-full rounded-xl border px-5 py-4 text-left text-sm font-medium transition',
                       isSelected
