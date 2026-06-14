@@ -1,5 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CallEntry, createDbRecorder, makeTableSentinel } from './test-helpers';
 
 /**
  * Tests for `groupsRouter`. Per CLAUDE.md §8.1 Approach B these tests are
@@ -34,14 +35,6 @@ vi.mock('node:crypto', () => ({
 // Schema-table sentinels. Column accessors are sentinel objects too so the SUT
 // can pass them to `eq(groups.id, …)` etc.
 // ---------------------------------------------------------------------------
-function makeTableSentinel(name: string, cols: string[]): Record<string, unknown> {
-  const table: Record<string, unknown> = { __table: name };
-  for (const c of cols) {
-    table[c] = { __col: `${name}.${c}` };
-  }
-  return table;
-}
-
 const groupsTable = makeTableSentinel('groups', [
   'id',
   'name',
@@ -103,57 +96,8 @@ vi.mock('@/inngest/client', () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// Drizzle chain recorder. Same shape as the list-import test recorder.
+// Drizzle chain recorder
 // ---------------------------------------------------------------------------
-interface CallEntry {
-  method: string;
-  args: unknown[];
-}
-
-interface DbRecorder {
-  calls: CallEntry[];
-  returningQueue: unknown[][];
-  reset(): void;
-  enqueueReturn(rows: unknown[]): void;
-}
-
-function createDbRecorder(): { db: unknown; recorder: DbRecorder } {
-  const calls: CallEntry[] = [];
-  const returningQueue: unknown[][] = [];
-
-  const chainHandler: ProxyHandler<object> = {
-    get(_target, prop) {
-      if (prop === 'then') {
-        return (resolve: (value: unknown) => void) => {
-          const rows = returningQueue.shift() ?? [];
-          resolve(rows);
-        };
-      }
-      if (typeof prop === 'symbol') return undefined;
-      return (...args: unknown[]) => {
-        calls.push({ method: prop, args });
-        return chainProxy;
-      };
-    },
-  };
-
-  const chainProxy: unknown = new Proxy({}, chainHandler);
-
-  const recorder: DbRecorder = {
-    calls,
-    returningQueue,
-    reset() {
-      calls.length = 0;
-      returningQueue.length = 0;
-    },
-    enqueueReturn(rows) {
-      returningQueue.push(rows);
-    },
-  };
-
-  return { db: chainProxy, recorder };
-}
-
 const { db: mockDb, recorder } = createDbRecorder();
 
 // The module-level `@/server/db` mock keeps any transitive `import { db }`

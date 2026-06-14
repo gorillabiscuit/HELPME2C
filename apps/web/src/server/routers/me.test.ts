@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createDbRecorder, makeTableSentinel } from './test-helpers';
 
 /**
  * Tests for `meRouter.setDefaultPrivacy`. Approach A per §8.1 — written
@@ -10,16 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  */
 
 // ---------------------------------------------------------------------------
-// Schema-table sentinels (mirrors the pattern in rec-feedback.test.ts).
+// Schema-table sentinels
 // ---------------------------------------------------------------------------
-function makeTableSentinel(name: string, cols: string[]): Record<string, unknown> {
-  const table: Record<string, unknown> = { __table: name };
-  for (const c of cols) {
-    table[c] = { __col: `${name}.${c}` };
-  }
-  return table;
-}
-
 const usersTable = makeTableSentinel('users', ['id', 'clerkId', 'defaultPrivacy', 'updatedAt']);
 
 // The router reads privacyLevelEnum.enumValues at module-load to build its
@@ -44,57 +37,8 @@ vi.mock('@/server/lib/ensure-user', () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// Drizzle chain recorder.
+// Drizzle chain recorder
 // ---------------------------------------------------------------------------
-interface CallEntry {
-  method: string;
-  args: unknown[];
-}
-
-interface DbRecorder {
-  calls: CallEntry[];
-  returningQueue: unknown[][];
-  reset(): void;
-  enqueueReturn(rows: unknown[]): void;
-}
-
-function createDbRecorder(): { db: unknown; recorder: DbRecorder } {
-  const calls: CallEntry[] = [];
-  const returningQueue: unknown[][] = [];
-
-  const chainHandler: ProxyHandler<object> = {
-    get(_target, prop) {
-      if (prop === 'then') {
-        return (resolve: (value: unknown) => void) => {
-          const rows = returningQueue.shift() ?? [];
-          resolve(rows);
-        };
-      }
-      if (typeof prop === 'symbol') return undefined;
-      return (...args: unknown[]) => {
-        calls.push({ method: prop, args });
-        return chainProxy;
-      };
-    },
-  };
-
-  const chainProxy: unknown = new Proxy({}, chainHandler);
-
-  const recorder: DbRecorder = {
-    calls,
-    returningQueue,
-    reset() {
-      calls.length = 0;
-      returningQueue.length = 0;
-    },
-    enqueueReturn(rows) {
-      returningQueue.push(rows);
-    },
-  };
-
-  return { db: chainProxy, recorder };
-}
-
 const { db: mockDb, recorder } = createDbRecorder();
 
 vi.mock('@/server/db', () => ({ db: mockDb }));
@@ -104,10 +48,7 @@ vi.mock('@/server/db', () => ({ db: mockDb }));
 // ---------------------------------------------------------------------------
 async function makeCaller() {
   const { meRouter } = await import('./me');
-  return meRouter.createCaller({
-    db: mockDb as never,
-    userId: 'clerk-user-1',
-  });
+  return meRouter.createCaller({ db: mockDb as never, userId: 'clerk-user-1' });
 }
 
 function findUpdateSet(): Record<string, unknown> | null {

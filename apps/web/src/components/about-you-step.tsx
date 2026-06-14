@@ -16,9 +16,75 @@ const GENDER_OPTIONS = [
 
 const CURRENT_YEAR = new Date().getFullYear();
 
+const AFFINITY_OPTIONS: { value: string; label: string }[] = [
+  { value: 'anime', label: 'Anime' },
+  { value: 'k_drama', label: 'K-Drama' },
+  { value: 'j_drama', label: 'J-Drama' },
+  { value: 'c_drama', label: 'C-Drama' },
+  { value: 'bollywood', label: 'Bollywood' },
+  { value: 'nollywood', label: 'Nollywood' },
+  { value: 'latin_american', label: 'Latin American' },
+  { value: 'french_cinema', label: 'French Cinema' },
+  { value: 'nordic_noir', label: 'Nordic Noir' },
+  { value: 'british_drama', label: 'British Drama' },
+  { value: 'turkish_drama', label: 'Turkish Drama' },
+  { value: 'middle_eastern', label: 'Middle Eastern' },
+  { value: 'southeast_asian', label: 'Southeast Asian' },
+];
+
+// ISO 3166-1 alpha-2 codes for the most common countries by user base.
+const COUNTRIES: { code: string; label: string }[] = [
+  { code: 'AU', label: 'Australia' },
+  { code: 'AT', label: 'Austria' },
+  { code: 'BE', label: 'Belgium' },
+  { code: 'BR', label: 'Brazil' },
+  { code: 'CA', label: 'Canada' },
+  { code: 'CN', label: 'China' },
+  { code: 'CZ', label: 'Czech Republic' },
+  { code: 'DK', label: 'Denmark' },
+  { code: 'FI', label: 'Finland' },
+  { code: 'FR', label: 'France' },
+  { code: 'DE', label: 'Germany' },
+  { code: 'GR', label: 'Greece' },
+  { code: 'HK', label: 'Hong Kong' },
+  { code: 'HU', label: 'Hungary' },
+  { code: 'IN', label: 'India' },
+  { code: 'ID', label: 'Indonesia' },
+  { code: 'IE', label: 'Ireland' },
+  { code: 'IL', label: 'Israel' },
+  { code: 'IT', label: 'Italy' },
+  { code: 'JP', label: 'Japan' },
+  { code: 'KR', label: 'South Korea' },
+  { code: 'MX', label: 'Mexico' },
+  { code: 'NL', label: 'Netherlands' },
+  { code: 'NZ', label: 'New Zealand' },
+  { code: 'NO', label: 'Norway' },
+  { code: 'PH', label: 'Philippines' },
+  { code: 'PL', label: 'Poland' },
+  { code: 'PT', label: 'Portugal' },
+  { code: 'RO', label: 'Romania' },
+  { code: 'RU', label: 'Russia' },
+  { code: 'SA', label: 'Saudi Arabia' },
+  { code: 'SG', label: 'Singapore' },
+  { code: 'ZA', label: 'South Africa' },
+  { code: 'ES', label: 'Spain' },
+  { code: 'SE', label: 'Sweden' },
+  { code: 'CH', label: 'Switzerland' },
+  { code: 'TW', label: 'Taiwan' },
+  { code: 'TH', label: 'Thailand' },
+  { code: 'TR', label: 'Turkey' },
+  { code: 'UA', label: 'Ukraine' },
+  { code: 'AE', label: 'United Arab Emirates' },
+  { code: 'GB', label: 'United Kingdom' },
+  { code: 'US', label: 'United States' },
+  { code: 'VN', label: 'Vietnam' },
+];
+
 export function AboutYouStep({ onComplete }: AboutYouStepProps) {
   const [gender, setGender] = useState<string | null>(null);
   const [birthYear, setBirthYear] = useState('');
+  const [country, setCountry] = useState('');
+  const [contentAffinities, setContentAffinities] = useState<string[]>([]);
   const [filterProviders, setFilterProviders] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -34,6 +100,8 @@ export function AboutYouStep({ onComplete }: AboutYouStepProps) {
         ? { gender: gender as 'male' | 'female' | 'non-binary' | 'prefer_not_to_say' }
         : {}),
       ...(birthYear && birthYearValid ? { birthYear: birthYearNum } : {}),
+      ...(country ? { country } : {}),
+      ...(contentAffinities.length > 0 ? { contentAffinities: contentAffinities as never } : {}),
       filterProviders,
     });
     setSaving(false);
@@ -89,6 +157,54 @@ export function AboutYouStep({ onComplete }: AboutYouStepProps) {
         {!birthYearValid && (
           <p className="text-xs text-destructive">Enter a year between 1900 and {CURRENT_YEAR}</p>
         )}
+      </div>
+
+      {/* Country */}
+      <div className="space-y-3">
+        <p className="text-sm font-medium">Country</p>
+        <select
+          value={country}
+          onChange={(e) => setCountry(e.target.value)}
+          className="w-full rounded-lg border border-border bg-background px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+        >
+          <option value="">Select your country</option>
+          {COUNTRIES.map((c) => (
+            <option key={c.code} value={c.code}>
+              {c.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Regional content affinities */}
+      <div className="space-y-3">
+        <div className="space-y-1">
+          <p className="text-sm font-medium">Any regional film or TV traditions you feel at home with?</p>
+          <p className="text-xs text-muted-foreground">Select as many as apply — helps if your tastes go beyond your current country.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {AFFINITY_OPTIONS.map((opt) => {
+            const selected = contentAffinities.includes(opt.value);
+            return (
+              <button
+                key={opt.value}
+                onClick={() =>
+                  setContentAffinities((prev) =>
+                    selected ? prev.filter((v) => v !== opt.value) : [...prev, opt.value],
+                  )
+                }
+                className={[
+                  'rounded-full border px-3 py-1.5 text-sm transition-colors',
+                  selected
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border bg-background hover:bg-muted',
+                ].join(' ')}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Streaming filter toggle */}
