@@ -1,6 +1,6 @@
 # ADR-0028 — Onboarding captures durable taste; momentary state lives as live controls
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-06-14
 **Supersedes:** —
 **Related:** ADR-0027 (reason feedback), ADR-0026 (faceted vocabulary), ADR-0020 (group rec strategy)
