@@ -47,6 +47,11 @@ export const users = pgTable('users', {
   // user's connected streaming providers. Defaults to false so full catalog
   // discovery is preserved by default — the user explicitly opts in.
   filterProviders: boolean('filter_providers').notNull().default(false),
+  // Regional content affinities — opt-in array of tradition slugs (e.g.
+  // ['anime', 'k_drama', 'nollywood']). Captures diaspora signal that
+  // country alone misses. Stored as text[] so new traditions don't require
+  // a migration; validated against a known list in the router.
+  contentAffinities: text('content_affinities').array(),
   ageVerified: boolean('age_verified').notNull().default(false),
   // We store the fact of verification, not the birth date (ADR-0012 §5).
   ageVerifiedAt: timestamp('age_verified_at', { withTimezone: true }),
