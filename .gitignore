@@ -64,3 +64,7 @@ android/.gradle/
 *.tsbuildinfo
 .eslintcache
 .vercel
+
+# graphify skill output — local tool artifact (AST cache + generated graph),
+# regenerable, hundreds of files / tens of MB. Never belongs in git.
+graphify-out/
