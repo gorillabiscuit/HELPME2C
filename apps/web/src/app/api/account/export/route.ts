@@ -248,6 +248,11 @@ export async function GET() {
         reason:
           'Stored client-side in your browser localStorage; never reaches our server, so we have nothing to export here.',
       },
+      {
+        item: 'Reason-feedback options shown',
+        reason:
+          'The candidate answer chips presented on each onboarding question are system-generated copy, not your data. Your question, selection, and any free text ARE exported under reason_feedback_events.',
+      },
     ],
     user: {
       our_database: dbRow,
