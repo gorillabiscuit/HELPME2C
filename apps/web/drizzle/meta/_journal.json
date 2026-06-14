@@ -190,6 +190,13 @@
       "when": 1781372059425,
       "tag": "0026_lean_chamber",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1781424799572,
+      "tag": "0027_happy_mathemanic",
+      "breakpoints": true
     }
   ]
 }
