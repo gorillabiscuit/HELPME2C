@@ -1,0 +1,24 @@
+{
+  "item": "Mood Management Theory & viewer state effects (Zillmann, Reinecke)",
+  "elicitation_method": "Implies a dedicated viewer-state elicitation branch separate from content rating: a structured categorical 'not in the mood / wrong moment' option attached to a rejection, rather than letting the rejection fall through to the content-preference model. A one-tap state tag at decline time.",
+  "abstraction_level": "viewer-state — the dislike is about the user's transient mood/context (in need of mood repair, wrong time, low energy), not a stable content property. Explicitly the third level in the field taxonomy.",
+  "signal_quality_for_recommender": "Deliberately LOW as a content signal and that is the point: a mood-mismatch rejection should NOT map to filterable content properties or down-weight the title. Its value is as a routing flag that quarantines the rejection from the content-preference profile, plus a possible momentary-mood input for re-ranking the current session.",
+  "reason_attributability": "Attributable to viewer state rather than content — the whole contribution is to make this distinction explicit. Without the branch, the signal is mis-attributed to the content (false negative).",
+  "cold_start_applicability": "yes — applies from the first session; current mood is independent of watch history and can be captured immediately.",
+  "cognitive_load": "low — a single 'not in the mood right now' tap; the user already knows their own state, no reflection about content needed.",
+  "introspection_harm_risk": "Low — reporting current mood/state is direct and accessible; little risk of the articulate-your-reasons degradation since no rationalisation of taste is required.",
+  "folk_theory_dependence": "Moderate — the option only helps if the user understands that selecting 'not in the mood' will NOT permanently down-weight the title (otherwise they may avoid it). The UI must make the system's behaviour legible to avoid the 'not interested' folk-theory failure.",
+  "negative_positive_symmetry": "symmetric in intent — it is explicitly a negative-signal channel, but a specialised one that captures a NON-content negative so it is not conflated with a content dislike.",
+  "confounded_with_friction_flag": "This field IS the core concern: a mood/state mismatch is exactly the kind of rejection that must be isolable so it does not corrupt the content-preference signal. Mood-management theory provides the theoretical basis for treating state-content mismatch as a distinct, non-taste rejection class.",
+  "key_finding": "Media selection is heavily driven by current mood: people in negative moods select positively-valenced/distracting content for mood repair; selection reflects anticipated affective payoff (Zillmann 1988; Reinecke et al. 2012 reframe it as intrinsic-need satisfaction). Design implication: some dislikes are state-content mismatches ('right show, wrong moment') that must not permanently down-weight the content.",
+  "gap_from_real_practice": "Almost no consumer recommender offers a viewer-state branch at rejection time; Netflix/YouTube/Spotify funnel a skip or thumbs-down straight into the content model with no way to say 'good show, wrong mood'. The research says state and content must be separated; practice conflates them. This is flagged as HelpME2C's clearest differentiation opening.",
+  "proposed_taxonomy_contribution": "Adds a top-level VIEWER-STATE rejection class, orthogonal to content-property reasons, that quarantines the rejection from the taste profile. Concrete labels: \"not in the mood right now\", \"wrong time / too heavy for tonight\", \"want something lighter/easier\", \"save for later\". Maps to: no permanent content down-weight; optional session-level mood re-rank input only.",
+  "sources": [
+    "https://en.wikipedia.org/wiki/Mood_management_theory",
+    "https://www.communicationtheory.org/mood-management-theory/",
+    "https://www.researchgate.net/publication/319265020_Mood_Management_Theory",
+    "https://www.semanticscholar.org/paper/Mood-Management-in-the-Context-of-Selective-Theory-Zillmann/d09300820648ed171449386ed05cb8e66e40a522",
+    "https://pmc.ncbi.nlm.nih.gov/articles/PMC10731070/"
+  ],
+  "uncertain": []
+}

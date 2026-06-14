@@ -1,0 +1,115 @@
+fields:
+  - name: elicitation_method
+    description: How the question/signal is collected from the user
+    detail_level: moderate
+    values_examples:
+      - binary thumbs / star rating
+      - structured categorical (pick a reason from a list)
+      - free-text open-ended
+      - pairwise comparison
+      - implicit behavioural (skip, replay, abandon)
+      - conversational multi-turn critique
+
+  - name: abstraction_level
+    description: >
+      At what conceptual level the reason is captured — feature-level (specific
+      content property like violence or pacing), concept-level (narrative/moral,
+      e.g. "too dark"), or viewer-state (not in the mood, wrong context).
+    detail_level: detailed
+    values_examples:
+      - feature-level: violence, pacing, humour style, tone, episode length
+      - concept-level: moral complexity, redemption arc, protagonist likability
+      - viewer-state: mood mismatch, wrong time, watching-partner mismatch
+
+  - name: signal_quality_for_recommender
+    description: >
+      How well the captured reason maps to filterable content metadata or features
+      the system can actually act on. Does the stated reason have a clear content
+      counterpart, or is it too vague / context-dependent to filter on?
+    detail_level: detailed
+
+  - name: reason_attributability
+    description: >
+      Can the captured reason be attributed to a stable, system-usable cause
+      (content property, viewer state, social context, friction/fatigue)? Distinct
+      from signal quality — attributability asks whether it's a content fact at all.
+      Mozilla/YouTube data shows much negative signal is unattributable.
+    detail_level: detailed
+
+  - name: cold_start_applicability
+    description: >
+      Does the method work before the system has watch history? Some elicitation
+      approaches require prior interactions to make sense.
+    detail_level: brief
+    values_examples:
+      - yes — works on first session
+      - partial — needs a few prior ratings
+      - no — requires watch history
+
+  - name: cognitive_load
+    description: >
+      Effort required for the user to answer honestly and accurately. High cognitive
+      load increases drop-off and increases the Wilson & Schooler introspection-harm
+      risk (articulating reasons degrades preference quality).
+    detail_level: moderate
+    values_examples:
+      - low (one tap, no reflection required)
+      - medium (pick from a short list)
+      - high (articulate a reason in text or navigate multi-step)
+
+  - name: introspection_harm_risk
+    description: >
+      Does this elicitation method risk degrading the underlying preference signal
+      by asking the user to consciously articulate reasons? (Wilson & Schooler 1991:
+      thinking too much can make stated preferences worse-predicting of later
+      satisfaction.) Flagging where "tell us why" backfires.
+    detail_level: moderate
+
+  - name: folk_theory_dependence
+    description: >
+      Does the method require the user to correctly model what the system will do
+      with their answer? E.g. "not interested" only works if the user's mental model
+      of the system matches its actual behaviour — a documented failure point.
+    detail_level: moderate
+
+  - name: negative_positive_symmetry
+    description: >
+      Does the method capture dislike as a first-class signal, or only as absence /
+      weak-negative? Most systems treat implicit signals as positive-only; dislike
+      needs its own channel ("Reasons Against").
+    detail_level: brief
+    values_examples:
+      - symmetric (explicit dislike channel)
+      - asymmetric (dislike inferred from non-action)
+
+  - name: confounded_with_friction_flag
+    description: >
+      Whether the captured rejection could actually be decision fatigue, search
+      friction, or psychological reactance rather than a taste signal at all.
+      Must be isolable to avoid corrupting the content-preference profile.
+    detail_level: brief
+
+  - name: key_finding
+    description: >
+      The primary empirical finding or design recommendation from this source/concept
+      that a system designer should act on.
+    detail_level: detailed
+
+  - name: gap_from_real_practice
+    description: >
+      Difference between what the research recommends and what major industry systems
+      (Netflix, Spotify, YouTube, TikTok) currently do. The gap is the design
+      opportunity for HelpME2C.
+    detail_level: detailed
+
+  - name: proposed_taxonomy_contribution
+    description: >
+      What specific dislike/like reason category or axis does this item suggest
+      for a cold-start onboarding taxonomy? Concrete labels a user would recognise
+      immediately, plus the content signal each label maps to.
+    detail_level: detailed
+
+uncertain:
+  # Fields where evidence is weak or contested — to be flagged during deep research
+  - spotify_weighting_details # not publicly documented in peer-reviewed form
+  - introspection_harm_magnitude # Wilson & Schooler effect size unclear in media context

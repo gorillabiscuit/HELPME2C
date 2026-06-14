@@ -1,0 +1,104 @@
+topic: >
+  Preference elicitation questions for content recommenders — dislike signals,
+  cold-start, and the gap between folk explanations of taste and system-usable features
+
+items:
+  - id: folk_psychology_taste
+    name: Folk psychology of taste (Nisbett & Wilson lineage)
+    description: >
+      How laypeople explain their own preferences vs. what actually drives them.
+      Includes Wilson & Schooler (1991) "Thinking Too Much" — articulating reasons
+      can actively worsen preference quality. Foundation for understanding
+      confabulation risk in any "tell us why" UI.
+
+  - id: folk_theories_algorithms
+    name: Folk theories of algorithms (DeVito; "Beyond Explicit and Implicit" 2025)
+    description: >
+      How users build mental models of what the recommender will do with their
+      input — distinct from explaining their own taste. Users choose feedback
+      actions (ignore, swipe, "not interested") strategically based on uncertain
+      theories of system behaviour. Most implicit negative signal is silently
+      misread by systems as positive.
+
+  - id: critique_based_recommenders
+    name: Critique-based recommender systems (FindMe, Entree; survey Springer/UMUAI)
+    description: >
+      Systems that ask "why not?" after a rejection. Structured critiques
+      (unit vs. compound; feature-mapped) yield high signal quality at higher
+      cognitive cost. Best-supported middle path is structured aspect-anchored
+      reasons — not free text, not bare binary.
+
+  - id: netflix_ui
+    name: Netflix taste preference UI & signal design
+    description: >
+      Stars→thumbs switch (2017) doubled rating volume — stars "force you to
+      think too much." Onboarding asks liked titles first. Thumbs-down is coarse
+      and unattributed. Large fraction of apparent rejections are friction /
+      choice-overload (Springer 2024), not content properties.
+
+  - id: spotify_signal
+    name: Spotify implicit negative signal (skips, replays, explicit dislikes)
+    description: >
+      Skip is the dominant implicit-negative; ambiguous between dislike and
+      context. Exact weighting not publicly documented. Useful contrast case
+      for music vs. video signal differences.
+
+  - id: youtube_tiktok_not_interested
+    name: YouTube / TikTok "Not interested" signal quality (Mozilla 2022)
+    description: >
+      Mozilla audit: "Not interested" stops only ~11% of unwanted recs.
+      Dislike/not-interested are the weakest controls. YouTube users conflate
+      "Dislike" and "Not interested." TikTok denoises implicit negatives at scale.
+      Proves undifferentiated negative buttons → noisy, low-signal data.
+
+  - id: cold_start_elicitation
+    name: Cold-start preference elicitation research
+    description: >
+      Decision-tree / pairwise attribute-aware elicitation works well for cold-start.
+      Covers survey (MDPI 2021) + pairwise arXiv 2510.27342 (2025). What formats
+      work before any watch history exists.
+
+  - id: appraisal_disposition_theory
+    name: Appraisal & Affective Disposition Theory (Zillmann, Raney, Oliver)
+    description: >
+      Why people respond emotionally to content. Disposition theory explains
+      dislike rooted in moral/character alignment with protagonists — concept-level
+      taste axis ("I didn't like being asked to root for a bad person") that maps
+      to filterable narrative properties.
+
+  - id: mood_management_viewer_state
+    name: Mood Management Theory & viewer state effects (Zillmann, Reinecke)
+    description: >
+      Some dislikes are state-content mismatches (right show, wrong moment) that
+      should NOT down-weight the content permanently. Design rule: offer a
+      viewer-state option ("not in the mood") as a separate elicitation branch.
+      Almost no consumer system does this — clearest differentiation opening.
+
+  - id: reasons_for_reasons_against
+    name: Reasons For and Reasons Against framing (arXiv 2009.01953)
+    description: >
+      Responsible RecSys framing that treats dislike elicitation as first-class
+      "reasons against" rather than mere absence of positive signal. Directly
+      motivates asking "why not?" as a structured field.
+
+  - id: reasoner_dataset
+    name: REASONER dataset (arXiv 2303.00168) & aspect-based preference modeling
+    description: >
+      Explainable-recommendation dataset with multi-aspect real user-labeled
+      ground-truth reasons for like/dislike. Bridges free-text "why" to
+      filterable aspect-level signal (User Aspect Preference, Item Aspect Quality).
+      Closest empirical ground truth for validating a dislike taxonomy.
+
+  - id: choice_overload_reactance
+    name: Choice overload, friction, and psychological reactance as rejection causes
+    description: >
+      Large fraction of "rejections" are decision fatigue and search friction,
+      not content properties (Netflix qualitative study, Springer 2024).
+      Psychological reactance (personalization threatens perceived choice freedom)
+      is a meta-level dislike orthogonal to content. Must be isolable in taxonomy
+      so it doesn't corrupt the content-preference signal.
+
+execution:
+  batch_size: 2
+  items_per_agent: 6
+  output_dir: ./results
