@@ -1,0 +1,1 @@
+CREATE INDEX "reason_feedback_events_user_id_idx" ON "reason_feedback_events" USING btree ("user_id");

@@ -30,8 +30,9 @@ import { anonymousWatchSignals, users, watchEntries } from '@/server/schema';
 //        pointing at users.id removes the user-attributable rows
 //        automatically: watch_entries (now anonymised above),
 //        user_recommendations, user_streaming_providers, rec_feedback,
-//        group_memberships, owned groups (which cascade to their
-//        memberships + group_recommendations).
+//        reason_feedback_events (ADR-0027 — free text is hard-deleted,
+//        not anonymised), group_memberships, owned groups (which cascade
+//        to their memberships + group_recommendations).
 //     2. The Clerk user. Removes auth identity and invalidates all
 //        sessions synchronously — the user's next request gets an
 //        UNAUTHORIZED from Clerk middleware and is redirected to sign-in.

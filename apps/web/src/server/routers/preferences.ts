@@ -1,9 +1,17 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
-import { titles, titleThemes, users, userPreferences, type UserPreferencesData } from '../schema';
+import {
+  reasonFeedbackEvents,
+  titles,
+  titleThemes,
+  users,
+  userPreferences,
+  type UserPreferencesData,
+} from '../schema';
 import { protectedProcedure, router } from '../trpc';
 import { THEME_VOCABULARY } from '../themes/vocabulary';
+import { resolveInternalUserId } from '@/server/lib/resolve-user';
 
 // Coarse preference axis: -1 to +1, or null (not set).
 const axisSchema = z.number().min(-1).max(1).nullable().optional();
@@ -139,9 +147,13 @@ export const preferencesRouter = router({
       // 5. QUESTION FRAMING: short, warm, name the show. Avoid "What did you
       //    love about…" (too analytical). Prefer "What made [Show] click for
       //    you?" / "What put you off [Show]?" — casual, low-stakes.
+      // The LLM returns ONLY content options. The skip option ("None of
+      // these fit") and the dislike-mode mood escape-hatch are appended
+      // server-side below with a structural flag (ADR-0027), so the client
+      // never has to match label text to find them.
       const modeInstruction =
         input.mode === 'like'
-          ? `The user LIKED each show. Generate a question + 4 options asking what made it click for them.
+          ? `The user LIKED each show. Generate a question + exactly 4 options asking what made it click for them.
 
 QUESTION style: casual and warm. Name the show. E.g. "What made [Show] click for you?" or "What did you get out of [Show]?"
 
@@ -149,16 +161,15 @@ OPTIONS rules:
 - Describe what it FELT LIKE to watch: "made me laugh", "felt warm and cosy", "I couldn't stop watching", "left me thinking for days", "loved watching the characters grow", "felt exciting and tense".
 - Do NOT use narrative-analysis language ("morally complex", "subverted expectations", "explores identity through…").
 - Each option maps to 1–2 slugs from the theme vocabulary that best match the feeling.
-- 4 content options + 1 skip: { "label": "None of these fit", "slugs": [] }`
-          : `The user DISLIKED each show. Generate a question + 4 options asking what put them off.
+- Return EXACTLY 4 content options. Do NOT add a "None of these fit" or any skip option — the system appends that itself.`
+          : `The user DISLIKED each show. Generate a question + exactly 3 options asking what put them off.
 
 QUESTION style: non-judgmental, brief. Name the show. E.g. "What put you off [Show]?" or "What wasn't working for you with [Show]?"
 
 OPTIONS rules:
-- Describe what it FELT LIKE in negative terms: "felt slow and hard to get into", "the tone was too dark for me", "didn't connect with any of the characters", "felt too intense / stressful to watch", "wasn't in the mood for this kind of show".
-- The LAST option must ALWAYS be: { "label": "I just wasn't in the mood for it", "slugs": [] } — this is a viewer-state escape hatch, NOT a content reason; it must have no slugs so it never down-weights content.
-- The other 3 content options each map to 1–2 slugs.
-- 3 content options + mood escape hatch + 1 skip: { "label": "None of these fit", "slugs": [] }`;
+- Describe what it FELT LIKE in negative terms: "felt slow and hard to get into", "the tone was too dark for me", "didn't connect with any of the characters", "felt too intense / stressful to watch".
+- Each option maps to 1–2 slugs.
+- Return EXACTLY 3 content options. Do NOT add a "not in the mood", "None of these fit", or any skip/escape option — the system appends those itself.`;
 
       const prompt = `You are helping personalise a TV/film recommendation engine.
 
@@ -174,8 +185,7 @@ Return ONLY a JSON array, one entry per show, in the same order. No markdown, no
     "titleId": "...",
     "question": "...",
     "options": [
-      { "label": "...", "slugs": ["slug1"] },
-      { "label": "None of these fit", "slugs": [] }
+      { "label": "...", "slugs": ["slug1"] }
     ]
   }
 ]`;
@@ -204,14 +214,32 @@ Return ONLY a JSON array, one entry per show, in the same order. No markdown, no
           options: Array<{ label: string; slugs: string[] }>;
         }>;
         if (!Array.isArray(parsed)) return null;
-        // Attach poster URL for display.
         return parsed
           .filter((p) => p.titleId && p.question && Array.isArray(p.options))
-          .map((p) => ({
-            ...p,
-            titleName: titleMap.get(p.titleId)?.title ?? '',
-            posterUrl: titleMap.get(p.titleId)?.posterUrl ?? null,
-          }));
+          .map((p) => {
+            // Keep only content options; drop any empty-slug option the model
+            // added despite being told not to, so the appended skip options
+            // below are the single source of truth.
+            const content = p.options.filter((o) => Array.isArray(o.slugs) && o.slugs.length > 0);
+            // Append skip options SERVER-SIDE with a structural flag, so the
+            // client detects "None of these fit" by flag, never by label text
+            // (which the LLM could drift on, silently hiding the free-text
+            // discovery box). Dislike mode also gets the mood escape-hatch.
+            const skip =
+              input.mode === 'dislike'
+                ? [
+                    { label: "I just wasn't in the mood for it", slugs: [] as string[] },
+                    { label: 'None of these fit', slugs: [] as string[], isNoneOfThese: true },
+                  ]
+                : [{ label: 'None of these fit', slugs: [] as string[], isNoneOfThese: true }];
+            return {
+              titleId: p.titleId,
+              question: p.question,
+              options: [...content, ...skip],
+              titleName: titleMap.get(p.titleId)?.title ?? '',
+              posterUrl: titleMap.get(p.titleId)?.posterUrl ?? null,
+            };
+          });
       } catch {
         return null;
       }
@@ -252,6 +280,72 @@ Return ONLY a JSON array, one entry per show, in the same order. No markdown, no
           target: userPreferences.userId,
           set: { preferences: updated, updatedAt: new Date() },
         });
+
+      return { ok: true };
+    }),
+
+  // Append-only log of a single reason-answer event (ADR-0027). Called once
+  // per show as the user advances through the insight screen, alongside —
+  // not instead of — saveInsight (which owns the scoring vector). This is
+  // the raw substrate for taxonomy discovery: it preserves the question,
+  // the options shown, the "None of these fit" tap, and any optional free
+  // text, none of which survive saveInsight's overwrite-into-vector.
+  //
+  // Fire-and-forget from the client: a failed log must never block the
+  // onboarding flow, so the client does not await it. NOT a preference
+  // signal — see the table comment + ADR-0027 §Why.
+  recordReasonFeedback: protectedProcedure
+    .input(
+      z.object({
+        titleId: z.string().uuid(),
+        mode: z.enum(['like', 'dislike']),
+        questionShown: z.string().min(1).max(500),
+        // Cap list + label sizes defensively — this is logged verbatim and
+        // the payload originates client-side.
+        optionsShown: z
+          .array(
+            z.object({
+              label: z.string().max(300),
+              slugs: z.array(z.string().max(100)),
+              // Structural flag set server-side on the skip option (see
+              // generateInsight) — logged so the discovery analysis knows
+              // which option was the "None of these fit" tap.
+              isNoneOfThese: z.boolean().optional(),
+            }),
+          )
+          .max(10),
+        selectedSlugs: z.array(z.string().max(100)).max(20),
+        noneOfTheseFit: z.boolean(),
+        // Free text is accepted independently of noneOfTheseFit. The client
+        // only sends it when "None of these fit" is chosen, but the contract
+        // deliberately does NOT couple them — this is a log, not a gated
+        // signal, and a future surface may attach free text to other answers.
+        freeText: z.string().max(2000).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      // Reuse the shared resolver rather than re-inlining the clerkId → uuid
+      // lookup (the rest of preferences.ts still inlines it — left for a
+      // separate cleanup so this change stays scoped).
+      const userId = await resolveInternalUserId(ctx.db, ctx.userId);
+      if (!userId) return { ok: false };
+
+      // Empty / whitespace-only free text is stored as NULL, not "" — the
+      // common case (user opened the box, typed nothing) should read as
+      // "no free text given" in the discovery analysis.
+      const trimmed = input.freeText?.trim();
+      const freeText = trimmed ? trimmed : null;
+
+      await ctx.db.insert(reasonFeedbackEvents).values({
+        userId,
+        titleId: input.titleId,
+        mode: input.mode,
+        questionShown: input.questionShown,
+        optionsShown: input.optionsShown,
+        selectedSlugs: input.selectedSlugs,
+        noneOfTheseFit: input.noneOfTheseFit,
+        freeText,
+      });
 
       return { ok: true };
     }),
