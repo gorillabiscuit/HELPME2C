@@ -216,7 +216,7 @@ export async function processTmdbTvShow(showId: number): Promise<string | null> 
       trailerVideoId: trailer?.videoId ?? null,
     })
     .onConflictDoUpdate({
-      target: [titles.externalId, titles.source],
+      target: [titles.externalId, titles.source, titles.mediaType],
       set: {
         title: detail.name,
         synopsis: detail.overview || null,
@@ -312,7 +312,7 @@ export async function processTmdbMovie(movieId: number): Promise<string | null> 
       trailerVideoId: trailer?.videoId ?? null,
     })
     .onConflictDoUpdate({
-      target: [titles.externalId, titles.source],
+      target: [titles.externalId, titles.source, titles.mediaType],
       set: {
         title: detail.title,
         synopsis: detail.overview || null,
@@ -347,6 +347,74 @@ export async function processTmdbMovie(movieId: number): Promise<string | null> 
 }
 
 // Show-batch size inside a single step.run. Per docs/runbooks/inngest.md
+// Search TMDB for a query string and ingest the top results into our catalog.
+// Used for on-demand ingest: when a user searches for a show that isn't in
+// our DB yet, we fetch it from TMDB in real-time so it appears immediately.
+//
+// Strategy: run both /search/tv and /search/movie concurrently, take the
+// top `limit` results by TMDB popularity from the combined set, then
+// processTmdbTvShow / processTmdbMovie for each. Returns the internal DB IDs
+// of titles that were successfully upserted (new AND existing).
+//
+// Caller note: this hits TMDB with 2 search requests + up to `limit * 2`
+// detail requests. Keep limit ≤ 5 for search; burst is acceptable because
+// on-demand ingest fires only on cache misses (zero local results).
+export async function searchTmdbAndIngest(query: string, limit: number = 5): Promise<string[]> {
+  interface TmdbSearchResult {
+    id: number;
+    popularity: number;
+    media_type?: string;
+  }
+  interface TmdbSearchPage {
+    results: TmdbSearchResult[];
+  }
+
+  const encoded = encodeURIComponent(query);
+  const [tvPage, moviePage] = await Promise.allSettled([
+    tmdbGet<TmdbSearchPage>(`/search/tv?query=${encoded}&language=en-US&page=1`),
+    tmdbGet<TmdbSearchPage>(`/search/movie?query=${encoded}&language=en-US&page=1`),
+  ]);
+
+  const tvResults: Array<{ id: number; popularity: number; mediaType: 'tv' | 'movie' }> =
+    tvPage.status === 'fulfilled'
+      ? tvPage.value.results.map((r) => ({
+          id: r.id,
+          popularity: r.popularity,
+          mediaType: 'tv' as const,
+        }))
+      : [];
+  const movieResults: Array<{ id: number; popularity: number; mediaType: 'tv' | 'movie' }> =
+    moviePage.status === 'fulfilled'
+      ? moviePage.value.results.map((r) => ({
+          id: r.id,
+          popularity: r.popularity,
+          mediaType: 'movie' as const,
+        }))
+      : [];
+
+  // Merge, sort by TMDB popularity, take top `limit`.
+  const merged = [...tvResults, ...movieResults]
+    .sort((a, b) => b.popularity - a.popularity)
+    .slice(0, limit);
+
+  const upserted: string[] = [];
+  await Promise.allSettled(
+    merged.map(async ({ id, mediaType }) => {
+      try {
+        const titleId =
+          mediaType === 'tv' ? await processTmdbTvShow(id) : await processTmdbMovie(id);
+        if (titleId) upserted.push(titleId);
+      } catch (e) {
+        // Best-effort: a single TMDB failure doesn't abort the rest.
+        // eslint-disable-next-line no-console -- no logger abstraction yet; tracked in HM2C backlog
+        console.warn('[searchTmdbAndIngest] failed to ingest title', { id, mediaType }, e);
+      }
+    }),
+  );
+
+  return upserted;
+}
+
 // the Inngest free tier caps step runs at ~1k/day; 1-step-per-show would
 // burn 2000 step runs per nightly cron and silently truncate. Batching
 // 10 shows per step.run drops the budget to ~300 step runs/cron — well
@@ -408,7 +476,7 @@ export const tmdbSyncTvPage = inngest.createFunction(
   },
 );
 
-// Fans out one tmdb/sync.tv.page event per page, up to 100 pages (2000 shows).
+// Fans out one tmdb/sync.tv.page event per page, up to 200 pages (4000 shows).
 // Triggered manually or on a nightly cron at 03:00 UTC.
 export const tmdbSyncTvAll = inngest.createFunction(
   {
@@ -422,7 +490,7 @@ export const tmdbSyncTvAll = inngest.createFunction(
       tmdbGet<TmdbDiscoverPage>('/discover/tv?sort_by=popularity.desc&page=1&language=en-US'),
     );
 
-    const totalPages = Math.min(firstPage.total_pages, 100);
+    const totalPages = Math.min(firstPage.total_pages, 200);
 
     await step.sendEvent(
       'fan-out-pages',

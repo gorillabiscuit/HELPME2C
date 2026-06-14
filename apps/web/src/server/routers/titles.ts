@@ -1,8 +1,51 @@
-import { and, eq, ilike, notInArray, or, sql } from 'drizzle-orm';
+import { and, eq, ilike, inArray, notInArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { mediaTypeEnum, recFeedback, titles, users, watchEntries } from '../schema';
+import {
+  mediaTypeEnum,
+  recFeedback,
+  titles,
+  userPreferences,
+  users,
+  watchEntries,
+} from '../schema';
 import { dedupeByFranchise } from '../lib/franchise';
 import { protectedProcedure, router } from '../trpc';
+import { searchTmdbAndIngest } from '@/inngest/functions/tmdb-sync';
+
+/**
+ * Blend a sorted list of titles by novelty preference.
+ *
+ * novelty=0  → pure popularity order (all popular, no curated bump)
+ * novelty=1  → curated titles first, then popular remainder
+ * in between → proportional mix
+ *
+ * The input list is already deduped and sorted popularity-DESC.
+ * We split into curated / non-curated sub-lists, take the proportional
+ * share from each, then interleave curated-first so they're visible at
+ * the top of the grid when novelty > 0.
+ */
+function blendByNovelty<T extends { isCurated: boolean }>(
+  rows: T[],
+  novelty: number,
+  limit: number,
+): T[] {
+  if (novelty <= 0) return rows.slice(0, limit);
+  const curated = rows.filter((r) => r.isCurated);
+  const popular = rows.filter((r) => !r.isCurated);
+  const curatedSlots = Math.round(limit * novelty);
+  const popularSlots = limit - curatedSlots;
+  const blended: T[] = [];
+  // Interleave: for every popular item add a curated item after it until
+  // we hit the curated slot cap, then flush the remaining popular items.
+  const cQ = [...curated.slice(0, curatedSlots)];
+  const pQ = [...popular.slice(0, popularSlots)];
+  while (blended.length < limit) {
+    if (pQ.length) blended.push(pQ.shift()!);
+    if (blended.length < limit && cQ.length) blended.push(cQ.shift()!);
+    if (!pQ.length && !cQ.length) break;
+  }
+  return blended;
+}
 
 // Auto-synced with the Drizzle pgEnum values, same single-source-of-truth
 // pattern as watch.ts.
@@ -60,6 +103,10 @@ export const titlesRouter = router({
            * "Show me different ones" refresh to avoid re-showing titles
            * already seen in a previous batch. */
           excludeTitleIds: z.array(z.string().uuid()).optional().default([]),
+          /** Novelty preference 0–1. 0 = pure popularity (familiar), 1 = weight
+           *  toward curated critical canon (adventurous). When omitted the
+           *  endpoint reads the user's saved preference (default 0.3). */
+          novelty: z.number().min(0).max(1).optional(),
         })
         .optional(),
     )
@@ -80,6 +127,20 @@ export const titlesRouter = router({
       //      stratify: pull per-type top-N, dedup each, round-robin
       //      interleave to fill the grid with all three.
 
+      // Resolve novelty: explicit override > saved preference > default 0.3.
+      // 0 = pure popularity (familiar), 1 = weight toward curated canon.
+      let novelty = input?.novelty;
+      if (novelty === undefined) {
+        const prefRow = await ctx.db
+          .select({ preferences: userPreferences.preferences })
+          .from(userPreferences)
+          .innerJoin(users, eq(userPreferences.userId, users.id))
+          .where(eq(users.clerkId, ctx.userId))
+          .limit(1)
+          .then((rows) => rows[0] ?? null);
+        novelty = prefRow?.preferences?.novelty ?? 0.3;
+      }
+
       const projection = {
         id: titles.id,
         title: titles.title,
@@ -90,6 +151,7 @@ export const titlesRouter = router({
         popularityScore: titles.popularityScore,
         trailerProvider: titles.trailerProvider,
         trailerVideoId: titles.trailerVideoId,
+        isCurated: titles.isCurated,
       } as const;
 
       // Build the exclusion list of title IDs the user has already
@@ -132,7 +194,7 @@ export const titlesRouter = router({
           .where(whereClause)
           .orderBy(sql`${titles.popularityScore} DESC NULLS LAST, ${titles.title} ASC`)
           .limit(limit * 3 + userTouchedIds.length);
-        return dedupeByFranchise(rows).slice(0, limit);
+        return blendByNovelty(dedupeByFranchise(rows), novelty, limit);
       }
 
       // Look up user's country to set a culturally appropriate media-type
@@ -203,9 +265,9 @@ export const titlesRouter = router({
         (typeof buckets)[0],
       ];
       const dedupedBuckets = {
-        tv: dedupeByFranchise(tvBucket).slice(0, slotsByType.tv),
-        film: dedupeByFranchise(filmBucket).slice(0, slotsByType.film),
-        anime: dedupeByFranchise(animeBucket).slice(0, slotsByType.anime),
+        tv: blendByNovelty(dedupeByFranchise(tvBucket), novelty, slotsByType.tv),
+        film: blendByNovelty(dedupeByFranchise(filmBucket), novelty, slotsByType.film),
+        anime: blendByNovelty(dedupeByFranchise(animeBucket), novelty, slotsByType.anime),
       };
 
       // Interleave by ratio rather than strict round-robin so the grid
@@ -254,7 +316,28 @@ export const titlesRouter = router({
       const escaped = trimmed.replace(/[%_\\]/g, (c) => '\\' + c);
       const pattern = `%${escaped}%`;
 
-      const textMatch = or(ilike(titles.title, pattern), ilike(titles.originalTitle, pattern));
+      // Hybrid match: exact substring (fast, precise) OR trigram similarity
+      // (handles typos and alternate spellings, e.g. "Kenshim" → "Kenshin",
+      // "Trust and Betrayal" → "Trust & Betrayal").
+      //
+      // word_similarity() rather than similarity() so the query term is
+      // matched against words *within* a longer title — "Kenshin" scores
+      // high against "Rurouni Kenshin: Trust & Betrayal" even though the
+      // full title is much longer.
+      //
+      // Threshold 0.4 catches single-char typos and common alternate
+      // spellings without surfacing noise on short 2-char queries (the
+      // <2-char early-return above already gates those).
+      //
+      // Requires the pg_trgm extension + GIN indexes on title/original_title
+      // (migration 0022_trgm_search.sql).
+      const TRGM_THRESHOLD = 0.4;
+      const textMatch = or(
+        ilike(titles.title, pattern),
+        ilike(titles.originalTitle, pattern),
+        sql`word_similarity(${trimmed}, ${titles.title}) > ${TRGM_THRESHOLD}`,
+        sql`word_similarity(${trimmed}, ${titles.originalTitle}) > ${TRGM_THRESHOLD}`,
+      );
       const where = input.mediaType
         ? and(textMatch, eq(titles.mediaType, input.mediaType))
         : textMatch;
@@ -284,6 +367,18 @@ export const titlesRouter = router({
         .orderBy(sql`${titles.title} ASC`) // stable base order; re-sorted below
         .limit(input.limit * 3);
 
+      // Scoring: exact substring matches rank above fuzzy trigram matches,
+      // and within each tier we sort by normalised popularity.
+      //
+      // exactScore: 1 if the title/originalTitle contains the query as a
+      // substring (case-insensitive), 0 otherwise. This ensures "Breaking
+      // Bad" always beats "Braking Bad" even if the latter has higher
+      // popularity somehow.
+      const lowerQ = trimmed.toLowerCase();
+      const isExact = (row: { title: string; originalTitle: string | null }) =>
+        row.title.toLowerCase().includes(lowerQ) ||
+        (row.originalTitle?.toLowerCase().includes(lowerQ) ?? false);
+
       // Compute per-type max for normalisation.
       const maxByType: Record<string, number> = { tv: 1, film: 1, anime: 1 };
       for (const row of rows) {
@@ -292,13 +387,87 @@ export const titlesRouter = router({
         if (score > (maxByType[mt] ?? 1)) maxByType[mt] = score;
       }
       const sorted = [...rows].sort((a, b) => {
+        // Tier 1: exact substring match wins over fuzzy match.
+        const aExact = isExact(a) ? 1 : 0;
+        const bExact = isExact(b) ? 1 : 0;
+        if (bExact !== aExact) return bExact - aExact;
+        // Tier 2: within the same tier, sort by normalised popularity.
         const aNorm = (a.popularityScore ?? 0) / (maxByType[a.mediaType] ?? 1);
         const bNorm = (b.popularityScore ?? 0) / (maxByType[b.mediaType] ?? 1);
         if (bNorm !== aNorm) return bNorm - aNorm;
         return a.title.localeCompare(b.title);
       });
 
-      return dedupeByFranchise(sorted).slice(0, input.limit);
+      const deduped = dedupeByFranchise(sorted).slice(0, input.limit);
+
+      // On-demand ingest: if our catalog has no matches for a query of ≥3
+      // characters, fetch from TMDB in real-time and upsert. This handles
+      // the "catalog gap" — culturally significant titles that haven't been
+      // picked up by the batch broaden run yet (e.g. a show that ended
+      // before we launched, or an obscure title below our vote_count floor).
+      //
+      // We ingest at most 5 titles, then re-query our DB so the response
+      // still comes from the single source of truth (our catalog), not
+      // directly from TMDB. This means the latency hit is only paid on the
+      // first search; subsequent searches for the same title hit the DB.
+      //
+      // Guard: fire if ≥5 chars AND fewer than 3 local results. "Fewer than 3"
+      // rather than "zero" because an unrelated partial match (e.g. "Modern
+      // Farmer" for the query "modern f") can suppress ingest of the intended
+      // title. The 5-char minimum keeps noisy short queries from hammering TMDB.
+      if (deduped.length < 3 && trimmed.length >= 5) {
+        try {
+          const ingestedIds = await searchTmdbAndIngest(trimmed, 5);
+          if (ingestedIds.length > 0) {
+            // Re-query the DB for the freshly ingested titles so callers
+            // get our canonical shape (not raw TMDB data).
+            const fresh = await ctx.db
+              .select({
+                id: titles.id,
+                title: titles.title,
+                originalTitle: titles.originalTitle,
+                mediaType: titles.mediaType,
+                releaseYear: titles.releaseYear,
+                posterUrl: titles.posterUrl,
+                popularityScore: titles.popularityScore,
+                trailerProvider: titles.trailerProvider,
+                trailerVideoId: titles.trailerVideoId,
+              })
+              .from(titles)
+              .where(and(inArray(titles.id, ingestedIds), where))
+              .limit(input.limit);
+            // Merge pre-existing local matches (deduped) with newly-ingested
+            // results, dedup by id, sort by normalised popularity (same
+            // per-type normalisation used above), and re-apply the original
+            // limit so we never drop a show that was already in DB.
+            // Raw popularity scores must NOT be used here — AniList scores
+            // are orders of magnitude larger than TMDB scores and would
+            // always win.
+            const freshIds = new Set(fresh.map((f) => f.id));
+            const all = [...deduped.filter((d) => !freshIds.has(d.id)), ...fresh];
+            const mergedMaxByType: Record<string, number> = { tv: 1, film: 1, anime: 1 };
+            for (const row of all) {
+              const score = row.popularityScore ?? 0;
+              if (score > (mergedMaxByType[row.mediaType] ?? 1))
+                mergedMaxByType[row.mediaType] = score;
+            }
+            const merged = [...all].sort((a, b) => {
+              const aNorm = (a.popularityScore ?? 0) / (mergedMaxByType[a.mediaType] ?? 1);
+              const bNorm = (b.popularityScore ?? 0) / (mergedMaxByType[b.mediaType] ?? 1);
+              if (bNorm !== aNorm) return bNorm - aNorm;
+              return a.title.localeCompare(b.title);
+            });
+            return merged.slice(0, input.limit);
+          }
+        } catch (e) {
+          // Best-effort: TMDB being down should not break local search.
+          // Return [] (empty) rather than surfacing a 500.
+          // eslint-disable-next-line no-console -- no logger abstraction yet; tracked in HM2C backlog
+          console.warn('[titles.search] on-demand ingest failed', { query: input.q }, e);
+        }
+      }
+
+      return deduped;
     }),
 
   // Top-N titles sorted by vote count — used by the onboarding dislike

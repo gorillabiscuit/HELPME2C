@@ -4,10 +4,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
+import { Loader2 } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { franchiseDisplayName } from '@/server/lib/franchise';
+import { NoveltySlider } from '@/components/novelty-slider';
+import { AboutYouStep } from '@/components/about-you-step';
 import { cn } from '@/lib/utils';
 
 type WatchStatus = 'watching' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_watch';
@@ -26,6 +30,7 @@ interface TitleSummary {
 
 interface InitialEntry {
   titleId: string;
+  titleName: string;
   status: WatchStatus | null;
   rating: number | null;
 }
@@ -43,7 +48,15 @@ interface OnboardingFlowProps {
    * the intro for users arriving via a deliberate "start picking" CTA
    * elsewhere in the app (e.g. the empty-dashboard "Pick favourites"
    * button — they've already opted in by clicking). Default `'intro'`. */
-  initialPhase?: 'intro' | 'picker' | 'insight' | 'dislikes' | 'dislike-insight' | 'preferences';
+  initialPhase?:
+    | 'intro'
+    | 'picker'
+    | 'insight'
+    | 'dislikes'
+    | 'dislike-insight'
+    | 'preferences'
+    | 'novelty'
+    | 'about-you';
 }
 
 const MEDIA_TYPE_LABEL: Record<string, string> = {
@@ -70,7 +83,14 @@ export function OnboardingFlow({
   // thing a new signed-up user sees after age-check; entries from
   // "Pick favourites" pass initialPhase='picker' to skip it.
   const [phase, setPhase] = useState<
-    'intro' | 'picker' | 'insight' | 'dislikes' | 'dislike-insight' | 'preferences'
+    | 'intro'
+    | 'picker'
+    | 'insight'
+    | 'dislikes'
+    | 'dislike-insight'
+    | 'preferences'
+    | 'novelty'
+    | 'about-you'
   >(initialPhase);
 
   // Insight screen state — populated by the generateInsight mutation.
@@ -85,7 +105,6 @@ export function OnboardingFlow({
   const [insightShows, setInsightShows] = useState<PerShowInsight[]>([]);
   const [insightIndex, setInsightIndex] = useState(0);
   const [selectedOptionIndices, setSelectedOptionIndices] = useState<Set<number>>(new Set());
-  const [insightFreeText, setInsightFreeText] = useState('');
   // Accumulated slugs across all shows in the session.
   const [accumulatedSlugs, setAccumulatedSlugs] = useState<string[]>([]);
   const generateInsightMutation = trpc.preferences.generateInsight.useMutation();
@@ -175,7 +194,9 @@ export function OnboardingFlow({
   const handleDislike = (titleId: string) => {
     setDislikedLocalIds((s) => new Set(s).add(titleId));
     handleActionComplete(titleId);
-    dislikeMutation.mutate({ titleId, kind: 'tracking', rating: 1 });
+    // 3 = "Didn't like it" on the 3-point scale — same value used in
+    // TitleQuickActions so the rating signal is consistent across surfaces.
+    dislikeMutation.mutate({ titleId, kind: 'tracking', rating: 3 });
   };
 
   // Screen 3 — feature preference state. Each axis is null (not answered),
@@ -316,29 +337,27 @@ export function OnboardingFlow({
     const isDislikeInsight = phase === 'dislike-insight';
     const isLoading = generateInsightMutation.isPending || insightShows.length === 0;
     const currentShow = insightShows[insightIndex];
-    const hasSomethingElse =
-      currentShow && selectedOptionIndices.has(currentShow.options.length - 1);
     const total = insightShows.length;
 
     const advanceOrFinish = (newSlugs: string[]) => {
       const merged = [...new Set([...accumulatedSlugs, ...newSlugs])];
       const isLast = insightIndex >= total - 1;
       if (isLast) {
-        // Save all accumulated slugs and move on.
-        if (merged.length > 0) {
-          saveInsightMutation.mutate({
-            slugs: merged,
-            mode: isDislikeInsight ? 'dislike' : 'like',
-            freeText: insightFreeText || undefined,
-          });
-        }
+        // Always save on the final show, even if merged is empty — a user who
+        // picked only viewer-state options ("not in the mood") produces no
+        // slugs intentionally, and that is valid (it means "don't down-weight
+        // anything"). Skipping the save would leave stale data from a previous
+        // onboarding run in place.
+        saveInsightMutation.mutate({
+          slugs: merged,
+          mode: isDislikeInsight ? 'dislike' : 'like',
+        });
         setAccumulatedSlugs([]);
         setPhase(isDislikeInsight ? 'preferences' : 'dislikes');
       } else {
         setAccumulatedSlugs(merged);
         setInsightIndex((n) => n + 1);
         setSelectedOptionIndices(new Set());
-        setInsightFreeText('');
       }
     };
 
@@ -424,17 +443,6 @@ export function OnboardingFlow({
                 );
               })}
             </div>
-
-            {hasSomethingElse && (
-              <textarea
-                className="mt-4 w-full rounded-xl border border-border px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring/50"
-                rows={3}
-                placeholder="Tell us in your own words…"
-                value={insightFreeText}
-                onChange={(e) => setInsightFreeText(e.target.value)}
-                maxLength={500}
-              />
-            )}
           </>
         )}
 
@@ -567,12 +575,15 @@ export function OnboardingFlow({
             <Button
               onClick={() => {
                 const dislikedArr = [...dislikedLocalIds];
-                if (dislikedArr.length >= 3) {
+                // Same 5-show cap as the like insight — see comment there.
+                // dislikedArr is built from the ordered dislike grid so the
+                // first 5 are the user's top picks.
+                const dislikeInsightIds = dislikedArr.slice(0, 5);
+                if (dislikeInsightIds.length >= 3) {
                   setSelectedOptionIndices(new Set());
-                  setInsightFreeText('');
                   setPhase('dislike-insight');
                   generateInsightMutation.mutate(
-                    { titleIds: dislikedArr, mode: 'dislike' },
+                    { titleIds: dislikeInsightIds, mode: 'dislike' },
                     {
                       onSuccess: (data) => {
                         setInsightShows(data ?? []);
@@ -690,13 +701,34 @@ export function OnboardingFlow({
                 if (answeredCount > 0) {
                   prefsMutation.mutate(prefs);
                 }
-                router.push('/');
+                setPhase('novelty');
               }}
             >
-              {answeredCount === 0 ? 'Skip for now' : 'Show me my recs'}
+              {answeredCount === 0 ? 'Skip' : 'Next'}
             </Button>
           </div>
         </div>
+      </main>
+    );
+  }
+
+  if (phase === 'novelty') {
+    return (
+      <main className="mx-auto max-w-2xl px-6 pt-12 pb-32">
+        <NoveltySlider />
+        <div className="fixed inset-x-0 bottom-0 border-t border-border bg-white/95 backdrop-blur">
+          <div className="mx-auto flex max-w-2xl items-center justify-end px-6 py-3">
+            <Button onClick={() => setPhase('about-you')}>Next</Button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (phase === 'about-you') {
+    return (
+      <main className="mx-auto max-w-2xl px-6 pt-12 pb-32">
+        <AboutYouStep onComplete={() => router.push('/')} />
       </main>
     );
   }
@@ -711,14 +743,26 @@ export function OnboardingFlow({
         </p>
       </header>
 
-      <div className="mb-8 max-w-md">
+      {/* Spinner visible from first keystroke (query !== debouncedQuery)
+          through to results landing (searchQuery.isFetching). Covers the
+          debounce gap so the user never sees a "hanging" input. */}
+      <div className="relative mb-8 max-w-md">
         <Input
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search any title…"
           autoFocus
+          className={cn(
+            searchEnabled && (query !== debouncedQuery || searchQuery.isFetching) && 'pr-9',
+          )}
         />
+        {searchEnabled && (query !== debouncedQuery || searchQuery.isFetching) ? (
+          <Loader2
+            className="pointer-events-none absolute top-1/2 right-2.5 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground"
+            aria-hidden="true"
+          />
+        ) : null}
       </div>
 
       <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
@@ -802,10 +846,35 @@ export function OnboardingFlow({
       <div className="fixed inset-x-0 bottom-0 border-t border-border bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
           <div className="flex items-center gap-4">
-            <p className="text-sm text-text-body">
-              <span className="font-semibold text-foreground">{ratedCount}</span>{' '}
-              {ratedCount === 1 ? 'picked' : 'picked'}
-            </p>
+            {/* Tooltip lists picked titles on hover. Only shown when there
+                is at least one pick so there's something meaningful to show. */}
+            {ratedCount > 0 ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <p className="cursor-default text-sm text-text-body">
+                    <span className="font-semibold text-foreground">{ratedCount}</span> picked
+                  </p>
+                </TooltipTrigger>
+                <TooltipContent side="top" align="start">
+                  <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Your picks
+                  </p>
+                  <ul className="space-y-0.5">
+                    {initialEntries
+                      .filter((e) => e.rating !== null)
+                      .map((e) => (
+                        <li key={e.titleId} className="text-sm">
+                          {e.titleName}
+                        </li>
+                      ))}
+                  </ul>
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              <p className="text-sm text-text-body">
+                <span className="font-semibold text-foreground">0</span> picked
+              </p>
+            )}
             {!showingSearchResults && (
               <button
                 type="button"
@@ -828,12 +897,16 @@ export function OnboardingFlow({
                 .map((e) => e.titleId);
               setLikedTitleIds(liked);
               setSelectedOptionIndices(new Set());
-              setInsightFreeText('');
               // Generate insight if ≥3 picks — skip straight to dislikes if fewer.
-              if (liked.length >= 3) {
+              // Cap at 5: research (arXiv 2510.27342) shows query fatigue sets in
+              // fast; 3–5 well-chosen questions outperform exhaustive elicitation.
+              // Take the first 5 (most recently updated — initialEntries is
+              // DESC-sorted by updatedAt) so we ask about the freshest picks.
+              const insightIds = liked.slice(0, 5);
+              if (insightIds.length >= 3) {
                 setPhase('insight');
                 generateInsightMutation.mutate(
-                  { titleIds: liked, mode: 'like' },
+                  { titleIds: insightIds, mode: 'like' },
                   {
                     onSuccess: (data) => {
                       setInsightShows(data ?? []);
@@ -850,8 +923,10 @@ export function OnboardingFlow({
             {ratedCount === 0
               ? 'Skip for now'
               : ratedCount < 3
-                ? `${ratedCount} picked — keep going`
-                : 'Next'}
+                ? `${ratedCount} of 5 — keep going`
+                : ratedCount < 5
+                  ? `${ratedCount} of 5 — or continue`
+                  : 'Next'}
           </Button>
         </div>
       </div>

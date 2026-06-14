@@ -1,33 +1,30 @@
-import { Frown, Smile } from 'lucide-react';
+import { Heart, ThumbsDown, ThumbsUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// Per ADR-0024: ratings 1-10 carry bipolar semantics. Iconography on
-// the picker shows ONLY the two extremes — a frown on 1, a smile on
-// 10. Everything in between (2-9) gets no icon. Earlier versions
-// labelled three buckets (disliked / mixed / liked) which the user
-// found visually noisy; just bookending the scale is enough.
-//
-//   1     → Frown (destructive-toned)
-//   2-9   → (no icon)
-//   10    → Smile (foreground)
+// Maps a numeric rating to a display bucket for the 3-point scale:
+//   < 7   → didn't like (ThumbsDown)
+//   7–9   → liked (ThumbsUp)
+//   10    → loved (Heart)
+// The 1-10 scale is retained internally for recommendation scoring;
+// this component handles display only.
 
-export type RatingBucket = 'hated' | 'middle' | 'loved';
+export type RatingBucket = 'disliked' | 'liked' | 'loved';
 
 export function bucketForRating(rating: number): RatingBucket {
   if (rating >= 10) return 'loved';
-  if (rating <= 1) return 'hated';
-  return 'middle';
+  if (rating >= 7) return 'liked';
+  return 'disliked';
 }
 
-const BUCKET_LABEL: Record<RatingBucket, string> = {
-  hated: 'Hated it',
-  middle: '',
+export const BUCKET_LABEL: Record<RatingBucket, string> = {
+  disliked: "Didn't like it",
+  liked: 'Liked it',
   loved: 'Loved it',
 };
 
 const BUCKET_ICON_CLASS: Record<RatingBucket, string> = {
-  hated: 'text-destructive',
-  middle: 'text-muted-foreground',
+  disliked: 'text-destructive',
+  liked: 'text-foreground',
   loved: 'text-foreground',
 };
 
@@ -52,9 +49,7 @@ export function RatingFace({
   className,
 }: RatingFaceProps) {
   const bucket = bucketForRating(rating);
-  // Only render at the two extremes; middle (2-9) gets no icon.
-  if (bucket === 'middle') return null;
-  const Icon = bucket === 'hated' ? Frown : Smile;
+  const Icon = bucket === 'disliked' ? ThumbsDown : bucket === 'liked' ? ThumbsUp : Heart;
   const iconClass = cn(
     inheritColor ? 'text-current' : BUCKET_ICON_CLASS[bucket],
     size === 'sm' ? 'h-4 w-4' : 'h-5 w-5',

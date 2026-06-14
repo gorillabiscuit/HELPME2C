@@ -5,9 +5,8 @@ import { redirect } from 'next/navigation';
 import { auth } from '@clerk/nextjs/server';
 import { appRouter } from '@/server/router';
 import { createContext } from '@/server/trpc';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { PreviewOverlay } from '@/components/preview-overlay';
+import { SearchForm } from '@/components/search-form';
 import { TitleQuickActions } from '@/components/title-quick-actions';
 import { cn } from '@/lib/utils';
 
@@ -167,27 +166,11 @@ export default async function SearchPage({ searchParams }: PageProps) {
         Find a TV show, film, or anime to add to your library — or to your taste.
       </p>
 
-      {/* Plain HTML form, method=GET. Submits the query as ?q=<input> +
-          ?type=<hidden>, which renders this same page server-side with
-          the new params. The hidden input preserves the active filter
-          across query submissions; clicking a filter pill is its own
-          link-based navigation that preserves the current q. */}
-      <form action="/search" method="get" className="mt-6 flex gap-2">
-        <label htmlFor="search-q" className="sr-only">
-          Search the catalogue
-        </label>
-        <Input
-          id="search-q"
-          name="q"
-          type="search"
-          defaultValue={rawQ ?? ''}
-          placeholder="Game of Thrones, Squid Game…"
-          autoFocus
-          className="max-w-md"
-        />
-        {mediaType ? <input type="hidden" name="type" value={mediaType} /> : null}
-        <Button type="submit">Search</Button>
-      </form>
+      {/* Client form — uses useTransition + router.push so React tracks the
+          navigation as a concurrent transition and shows a spinner until the
+          new server tree has committed. mediaType passed as a prop so the
+          active filter pill is preserved across query submissions. */}
+      <SearchForm defaultQuery={rawQ} mediaType={mediaType} />
 
       <nav aria-label="Filter by media type" className="mt-4 flex flex-wrap gap-2">
         <Link href={searchHref(q, undefined)} className={filterPillClass(!mediaType)}>

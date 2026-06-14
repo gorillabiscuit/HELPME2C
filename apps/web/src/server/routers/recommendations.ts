@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNotNull, isNull, or } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   recFeedback,
@@ -6,6 +6,7 @@ import {
   titles,
   userRecommendations,
   userStreamingProviders,
+  users,
   watchEntries,
 } from '../schema';
 import { franchiseKey, franchiseSpecificity } from '../lib/franchise';
@@ -85,18 +86,26 @@ export const recommendationsRouter = router({
       }
 
       // Connected-providers filter per ADR-0021: post-ranking, country-strict,
-      // never a ranking signal. If the user has 0 providers selected,
-      // skip the filter entirely (their selection is "I don't care, show
-      // everything"). With 1+ selected, restrict to titles that have a
-      // streaming_availability row in the request country with one of those
-      // provider_ids — counts both type='streaming' and type='free' as
-      // available; rent/buy don't qualify since the user pays per title.
-      const connectedRows = await ctx.db
-        .select({ providerId: userStreamingProviders.providerId })
-        .from(userStreamingProviders)
-        .where(eq(userStreamingProviders.userId, internalUserId));
+      // never a ranking signal. Gated by users.filter_providers (opt-in,
+      // default false) — when false, full catalog discovery is preserved
+      // regardless of how many providers the user has saved. When true,
+      // restrict to titles that have a streaming_availability row in the
+      // request country with one of those provider_ids.
+      const [userRow] = await ctx.db
+        .select({ filterProviders: users.filterProviders })
+        .from(users)
+        .where(eq(users.clerkId, ctx.userId))
+        .limit(1);
+      const filterOptIn = userRow?.filterProviders ?? false;
+
+      const connectedRows = filterOptIn
+        ? await ctx.db
+            .select({ providerId: userStreamingProviders.providerId })
+            .from(userStreamingProviders)
+            .where(eq(userStreamingProviders.userId, internalUserId))
+        : [];
       const connectedProviderIds = connectedRows.map((r) => r.providerId);
-      const filterActive = connectedProviderIds.length > 0;
+      const filterActive = filterOptIn && connectedProviderIds.length > 0;
 
       // Filter the FULL 200-item payload before slicing — otherwise top-20
       // could exclude all available titles and the user would see fewer
@@ -123,11 +132,27 @@ export const recommendationsRouter = router({
       // in the user's library since the last recompute. Both are user
       // actions that should remove the item from their dashboard
       // immediately, not wait for the nightly cron.
+      //
+      // Exclusion rules for rec_feedback:
+      //   • dismissed=true, dismissed_until IS NULL → permanently excluded
+      //   • dismissed=false, dismissed_until IS NOT NULL and in future
+      //     → "not in the mood" temporary suppression (expires on its own)
+      const now = new Date();
       const [dismissedRows, libraryRows] = await Promise.all([
         ctx.db
           .select({ titleId: recFeedback.titleId })
           .from(recFeedback)
-          .where(and(eq(recFeedback.userId, internalUserId), eq(recFeedback.dismissed, true))),
+          .where(
+            and(
+              eq(recFeedback.userId, internalUserId),
+              or(
+                // Permanent dismissal
+                and(eq(recFeedback.dismissed, true), isNull(recFeedback.dismissedUntil)),
+                // Temporary "not in the mood" suppression still active
+                and(isNotNull(recFeedback.dismissedUntil), gt(recFeedback.dismissedUntil, now)),
+              ),
+            ),
+          ),
         ctx.db
           .select({ titleId: watchEntries.titleId })
           .from(watchEntries)

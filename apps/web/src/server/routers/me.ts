@@ -2,7 +2,15 @@ import { eq } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { currentUser } from '@clerk/nextjs/server';
-import { privacyLevelEnum, users } from '../schema';
+import {
+  pairwiseComparisons,
+  privacyLevelEnum,
+  recFeedback,
+  userPreferences,
+  userRecommendations,
+  users,
+  watchEntries,
+} from '../schema';
 import { ensureUserFromClerk } from '../lib/ensure-user';
 import { router, protectedProcedure } from '../trpc';
 
@@ -65,6 +73,47 @@ export const meRouter = router({
       return row;
     }),
 
+  // Wipe the user's full taste profile and watch history. Deletes:
+  //   - All watch entries (anchor picks from onboarding + manual tracking)
+  //   - User preference vector (insight slugs, personality axes)
+  //   - All rec feedback (dismissed / unfamiliar signals)
+  //   - All computed recommendations (stale after the wipe)
+  //   - All pairwise comparisons (Elo taste-ranking data)
+  //
+  // The user's account, settings (privacy, audio prefs, country, household)
+  // and group memberships are preserved — only the taste/watch data is removed.
+  //
+  // No anonymous signal preservation is done here (unlike full account
+  // deletion in /api/account/delete). A taste reset is a deliberate
+  // "start over" gesture; the user is still present, so preserving
+  // anonymised signal from their old profile would ghost-pollute future
+  // rec training. The data is hard-deleted.
+  resetTasteData: protectedProcedure.mutation(async ({ ctx }) => {
+    const [userRow] = await ctx.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.clerkId, ctx.userId))
+      .limit(1);
+
+    if (!userRow) {
+      throw new TRPCError({
+        code: 'NOT_FOUND',
+        message: 'User row not found — was me.ensure called for this session?',
+      });
+    }
+
+    const userId = userRow.id;
+
+    // Run all deletes in parallel — each is independent.
+    await Promise.all([
+      ctx.db.delete(watchEntries).where(eq(watchEntries.userId, userId)),
+      ctx.db.delete(userPreferences).where(eq(userPreferences.userId, userId)),
+      ctx.db.delete(recFeedback).where(eq(recFeedback.userId, userId)),
+      ctx.db.delete(userRecommendations).where(eq(userRecommendations.userId, userId)),
+      ctx.db.delete(pairwiseComparisons).where(eq(pairwiseComparisons.userId, userId)),
+    ]);
+  }),
+
   // Whether trailer-preview modals start with audio on. Mirrors the
   // schema field on users.preview_audio_enabled. The modal also has a
   // per-session mute toggle that doesn't write back here.
@@ -76,6 +125,42 @@ export const meRouter = router({
         .set({ previewAudioEnabled: input.enabled, updatedAt: new Date() })
         .where(eq(users.clerkId, ctx.userId))
         .returning({ previewAudioEnabled: users.previewAudioEnabled });
+
+      if (!row) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'User row not found — was me.ensure called for this session?',
+        });
+      }
+      return row;
+    }),
+
+  // Save birth year, gender, and streaming-filter opt-in collected during
+  // onboarding. All fields are optional — partial updates are safe because
+  // we only set whichever fields are provided.
+  updateProfile: protectedProcedure
+    .input(
+      z.object({
+        birthYear: z.number().int().min(1900).max(new Date().getFullYear()).optional(),
+        gender: z.enum(['male', 'female', 'non-binary', 'prefer_not_to_say']).optional(),
+        filterProviders: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const patch: Record<string, unknown> = { updatedAt: new Date() };
+      if (input.birthYear !== undefined) patch.birthYear = input.birthYear;
+      if (input.gender !== undefined) patch.gender = input.gender;
+      if (input.filterProviders !== undefined) patch.filterProviders = input.filterProviders;
+
+      const [row] = await ctx.db
+        .update(users)
+        .set(patch)
+        .where(eq(users.clerkId, ctx.userId))
+        .returning({
+          birthYear: users.birthYear,
+          gender: users.gender,
+          filterProviders: users.filterProviders,
+        });
 
       if (!row) {
         throw new TRPCError({

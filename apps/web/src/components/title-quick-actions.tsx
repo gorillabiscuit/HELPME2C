@@ -2,10 +2,32 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bookmark, Check, HelpCircle, X } from 'lucide-react';
+import { Bookmark, Check, Heart, HelpCircle, ThumbsDown, ThumbsUp, X } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
-import { RatingFace } from '@/components/rating-face';
 import { cn } from '@/lib/utils';
+import { BUCKET_LABEL, bucketForRating } from '@/components/rating-face';
+
+// 3-point rating scale (replaces 1–10 grid).
+// Research basis: Netflix's stars-to-thumbs switch doubled rating volume because
+// graded scales require analytical introspection that degrades signal quality
+// (Wilson & Schooler 1991). Three points captures the meaningful gradient
+// (strong negative / positive / strong positive) without forced precision.
+// Values chosen to stay compatible with existing recommendation thresholds:
+//   rating >= 7  = liked (unchanged in recommendation engine)
+//   rating < 7   = disliked (unchanged)
+const RATING_OPTIONS = [
+  { label: "Didn't like it", value: 3, Icon: ThumbsDown },
+  { label: 'Liked it', value: 7, Icon: ThumbsUp },
+  { label: 'Loved it', value: 10, Icon: Heart },
+] as const;
+
+type RatingValue = (typeof RATING_OPTIONS)[number]['value'];
+
+// labelForRating: use BUCKET_LABEL[bucketForRating(r)] from rating-face.tsx
+// — single source of truth for display labels.
+function labelForRating(rating: number): string {
+  return BUCKET_LABEL[bucketForRating(rating)];
+}
 
 type WatchStatus = 'watching' | 'completed' | 'on_hold' | 'dropped' | 'plan_to_watch';
 
@@ -71,8 +93,12 @@ export function TitleQuickActions({
       onActionComplete?.();
     },
   });
+  const [dismissReasonOpen, setDismissReasonOpen] = useState(false);
+  const [dismissalToast, setDismissalToast] = useState<string | null>(null);
+
   const recFeedbackUpsert = trpc.recFeedback.upsert.useMutation({
     onSuccess: () => {
+      setDismissReasonOpen(false);
       router.refresh();
       onActionComplete?.();
     },
@@ -95,7 +121,44 @@ export function TitleQuickActions({
   };
 
   const onNotInterested = () => {
-    recFeedbackUpsert.mutate({ titleId, dismissed: true });
+    setDismissReasonOpen(true);
+  };
+
+  const DISMISSAL_REASON_LABELS: {
+    value: 'too_dark' | 'too_violent' | 'not_in_mood' | 'already_seen' | 'not_my_thing';
+    label: string;
+    toast: string;
+  }[] = [
+    { value: 'too_dark', label: 'Too dark', toast: "Got it — we'll show you fewer dark shows" },
+    {
+      value: 'too_violent',
+      label: 'Too violent',
+      toast: "Got it — we'll show you less violent content",
+    },
+    {
+      value: 'not_in_mood',
+      label: 'Not in the mood',
+      toast: "We'll bring this back in a few days",
+    },
+    {
+      value: 'already_seen',
+      label: 'Already seen it',
+      toast: "Noted — we'll keep it out of your queue",
+    },
+    { value: 'not_my_thing', label: 'Not my thing', toast: 'Got it — thanks for the feedback' },
+  ];
+
+  const confirmDismissal = (
+    reason?: 'too_dark' | 'too_violent' | 'not_in_mood' | 'already_seen' | 'not_my_thing',
+  ) => {
+    const toast = reason
+      ? (DISMISSAL_REASON_LABELS.find((r) => r.value === reason)?.toast ?? null)
+      : null;
+    if (toast) {
+      setDismissalToast(toast);
+      setTimeout(() => setDismissalToast(null), 3000);
+    }
+    recFeedbackUpsert.mutate({ titleId, dismissed: true, dismissalReason: reason });
   };
 
   // "Don't know it" records a soft signal on rec_feedback.unfamiliar
@@ -136,15 +199,15 @@ export function TitleQuickActions({
           aria-pressed={isWatched}
           title={
             isWatched && existingRating !== null
-              ? `Watched · rated ${existingRating}/10. Click to change.`
-              : 'Mark as watched — pick a rating to shape future recs.'
+              ? `${labelForRating(existingRating)} — click to change.`
+              : 'Mark as watched — tell us how you felt about it.'
           }
           className={cn(buttonBase, isWatched || ratingOpen ? onState : offState)}
         >
           <Check className={iconSize} aria-hidden="true" />
           <span>
             {isWatched && existingRating !== null
-              ? `Watched · ${existingRating}/10`
+              ? `Watched · ${labelForRating(existingRating)}`
               : isWatched
                 ? 'Watched'
                 : 'Watched it'}
@@ -166,7 +229,7 @@ export function TitleQuickActions({
           onClick={onNotInterested}
           disabled={isPending}
           title="We won't suggest this again."
-          className={cn(buttonBase, offState)}
+          className={cn(buttonBase, dismissReasonOpen ? onState : offState)}
         >
           <X className={iconSize} aria-hidden="true" />
           <span>Not interested</span>
@@ -191,38 +254,74 @@ export function TitleQuickActions({
         ) : null}
       </div>
 
-      {ratingOpen ? (
+      {/* Two-step dismissal: reason chips appear after "Not interested" click */}
+      {dismissReasonOpen ? (
         <div className="rounded-md border border-border bg-muted/40 p-2">
-          <p className="mb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
-            {existingRating !== null
-              ? `Currently ${existingRating}/10 — change it?`
-              : 'How would you rate it? 1 = hated · 10 = loved'}
+          <p className="mb-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+            Why not?
           </p>
-          <div className="flex flex-wrap items-center gap-1">
-            {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+          <div className="flex flex-wrap gap-1.5">
+            {DISMISSAL_REASON_LABELS.map(({ value, label }) => (
               <button
-                key={n}
+                key={value}
                 type="button"
-                onClick={() => onWatchedWithRating(n)}
+                onClick={() => confirmDismissal(value)}
                 disabled={isPending}
-                className={cn(
-                  'flex h-12 w-9 flex-col items-center justify-center gap-0.5 rounded-md border text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-50',
-                  n === existingRating
-                    ? 'border-foreground bg-foreground text-primary-foreground'
-                    : 'border-border bg-white text-foreground hover:bg-foreground hover:text-primary-foreground',
-                )}
+                className="rounded-full border border-border bg-background px-3 py-1 text-[11px] transition-colors hover:border-foreground hover:bg-muted disabled:opacity-50"
               >
-                <span>{n}</span>
-                <RatingFace rating={n} size="sm" inheritColor={n === existingRating} />
+                {label}
               </button>
             ))}
             <button
               type="button"
+              onClick={() => confirmDismissal()}
+              disabled={isPending}
+              className="rounded-full border border-border bg-background px-3 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
+            >
+              Skip
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Confirmed feedback toast */}
+      {dismissalToast ? (
+        <p className="text-[11px] text-muted-foreground">{dismissalToast}</p>
+      ) : null}
+
+      {ratingOpen ? (
+        <div className="rounded-md border border-border bg-muted/40 p-2">
+          <p className="mb-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+            {existingRating !== null ? 'Change your rating' : 'How did you find it?'}
+          </p>
+          <div className="flex items-center gap-1.5">
+            {RATING_OPTIONS.map(({ label, value, Icon }) => {
+              const isActive = existingRating === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => onWatchedWithRating(value as RatingValue)}
+                  disabled={isPending}
+                  className={cn(
+                    'flex flex-1 flex-col items-center gap-1 rounded-md border px-2 py-2.5 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 disabled:opacity-50',
+                    isActive
+                      ? 'border-foreground bg-foreground text-primary-foreground'
+                      : 'border-border bg-white text-foreground hover:bg-foreground hover:text-primary-foreground',
+                  )}
+                >
+                  <Icon className="h-4 w-4" aria-hidden="true" />
+                  <span>{label}</span>
+                </button>
+              );
+            })}
+            <button
+              type="button"
               onClick={() => onWatchedWithRating(null)}
               disabled={isPending}
-              className="ml-1 self-stretch rounded-md border border-border bg-white px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
+              className="self-stretch rounded-md border border-border bg-white px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
             >
-              Skip rating
+              Skip
             </button>
           </div>
         </div>

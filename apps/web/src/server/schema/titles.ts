@@ -53,14 +53,23 @@ export const titles = pgTable(
     // both fields before rendering the preview overlay.
     trailerProvider: text('trailer_provider'),
     trailerVideoId: text('trailer_video_id'),
+    // True for titles from curated critical canons (Criterion Collection,
+    // Palme d'Or / Golden Bear winners, Sight & Sound Top 250, BFI Top 100
+    // TV). Used by the novelty slider to weight critically-acclaimed-but-niche
+    // titles into recommendations. Null / false for popularity-synced titles.
+    isCurated: boolean('is_curated').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    // Composite unique: same external ID can exist in both TMDB and AniList,
-    // but not twice within the same source. Required as a UNIQUE index because
-    // the TMDB sync upsert uses ON CONFLICT (external_id, source).
-    uniqueIndex('titles_external_id_source_idx').on(t.externalId, t.source),
+    // Composite unique: (external_id, source, media_type). media_type is
+    // required because TMDB uses separate ID namespaces for TV and movies —
+    // TV ID 1421 and movie ID 1421 are different titles. Without media_type
+    // in the constraint, a film upsert overwrites a TV entry with the same
+    // numeric ID (discovered 2026-06-08: movie 1421 clobbered TV 1421 /
+    // Modern Family). AniList is anime-only so media_type is always 'anime'
+    // there — this constraint is still correct for that source.
+    uniqueIndex('titles_external_id_source_media_type_idx').on(t.externalId, t.source, t.mediaType),
     index('titles_media_type_idx').on(t.mediaType),
     index('titles_release_year_idx').on(t.releaseYear),
     // MAL-id lookup index for the M8 import path. Partial-style coverage —

@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { AccountDeleteForm } from '@/components/account-delete-form';
 import { DefaultPrivacyForm } from '@/components/default-privacy-form';
 import { PreviewAudioForm } from '@/components/preview-audio-form';
+import { ResetTasteForm } from '@/components/reset-taste-form';
 
 // /settings/account — DSAR self-serve surface per ADR-0012 §7.
 // Article 15 + 20 (export) and Article 17 (deletion) live here. Cookie
@@ -80,6 +81,24 @@ export default async function AccountSettingsPage() {
           >
             Download JSON
           </a>
+        </CardContent>
+      </Card>
+
+      <Card className="mt-6 border-orange-200">
+        <CardHeader>
+          <CardTitle className="text-orange-700">Reset taste data</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-text-body">
+            Clears your entire watch history, ratings, preference profile, rec feedback, and Elo
+            ranking data — everything the recommendation engine uses to understand your taste. Your
+            account, settings, and group memberships are untouched.
+          </p>
+          <p className="text-sm text-text-body">
+            Useful if your recommendations feel stale or you want a clean slate after sharing an
+            account. This cannot be undone.
+          </p>
+          <ResetTasteForm />
         </CardContent>
       </Card>
 

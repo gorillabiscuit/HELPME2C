@@ -125,6 +125,40 @@ function formatReasonHint(
 // Top-N cap matches the M4 plan agreed 2026-05-08.
 const REC_LIMIT = 200;
 
+// Small score multipliers applied post-scoring for demographic priors.
+// Applied only when the user opted in to the relevant signal (affinities)
+// or provided birth year. These are discovery nudges, not overrides —
+// taste-vector signal still dominates.
+const AFFINITY_SCORE_BOOST = 0.15;
+const ERA_SCORE_BOOST = 0.1;
+
+// Formative viewing window: the years between ages 13 and 25. Titles
+// from this era carry nostalgic familiarity that correlates with higher
+// ratings; a mild boost surfaces them over equivalent-scored alternatives.
+const ERA_START_OFFSET = 13;
+const ERA_END_OFFSET = 25;
+
+// Content affinity slug → tag name substrings to match against.
+// Substring match on lower-cased tag names is intentionally broad: both
+// TMDB keyword "korean drama" and AniList tag "Korean" should match k_drama.
+// V1 — upgrade to a proper affinity→tagId mapping table if false-positive
+// rate proves problematic.
+const AFFINITY_TAG_SUBSTRINGS: Record<string, string[]> = {
+  anime: ['anime', 'manga'],
+  k_drama: ['korean', 'south korea', 'k-drama'],
+  j_drama: ['japanese', 'japan', 'jdrama'],
+  c_drama: ['chinese', 'china', 'mandarin', 'wuxia'],
+  bollywood: ['bollywood', 'hindi', 'indian cinema'],
+  nollywood: ['nollywood', 'nigerian', 'african cinema'],
+  latin_american: ['latin american', 'telenovela', 'mexican', 'colombian', 'brazilian'],
+  french_cinema: ['french cinema', 'french film'],
+  nordic_noir: ['nordic', 'scandinavian', 'danish', 'swedish', 'norwegian', 'icelandic'],
+  british_drama: ['british', 'bbc', 'british drama'],
+  turkish_drama: ['turkish', 'ottoman'],
+  middle_eastern: ['arabic', 'israeli', 'persian cinema', 'iranian'],
+  southeast_asian: ['thai', 'filipino', 'vietnamese', 'indonesian', 'malaysian'],
+};
+
 // Fetches a user's anchor picks + rated tracking entries from watch_entries,
 // loads tag data for every title in their history, builds the taste vector
 // via packages/ml, scores all candidate titles (excluding library), and
@@ -159,17 +193,25 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
   // per franchise) instead of one-row-per-watch_entry, so a user with
   // multiple rated seasons of the same franchise contributes the same
   // signal weight as a user with one rated season — no triple-counting.
-  const userEntries = await db
-    .select({
-      titleId: watchEntries.titleId,
-      title: titles.title,
-      kind: watchEntries.kind,
-      rating: watchEntries.rating,
-      eloScore: watchEntries.eloScore,
-    })
-    .from(watchEntries)
-    .innerJoin(titles, eq(watchEntries.titleId, titles.id))
-    .where(eq(watchEntries.userId, userId));
+  const [userEntries, demographicRows] = await Promise.all([
+    db
+      .select({
+        titleId: watchEntries.titleId,
+        title: titles.title,
+        kind: watchEntries.kind,
+        rating: watchEntries.rating,
+        eloScore: watchEntries.eloScore,
+      })
+      .from(watchEntries)
+      .innerJoin(titles, eq(watchEntries.titleId, titles.id))
+      .where(eq(watchEntries.userId, userId)),
+    db
+      .select({ birthYear: users.birthYear, contentAffinities: users.contentAffinities })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1),
+  ]);
+  const demographic = demographicRows[0] ?? null;
 
   // Rated-taste model: "your taste" is the set of rated entries. Each
   // entry's effective rating is the user's 1-10 score, adjusted by Elo
@@ -257,7 +299,7 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
   const candidateTitleTexts =
     candidateTitleIds.length > 0
       ? await db
-          .select({ id: titles.id, title: titles.title })
+          .select({ id: titles.id, title: titles.title, releaseYear: titles.releaseYear })
           .from(titles)
           .where(inArray(titles.id, candidateTitleIds))
       : [];
@@ -339,6 +381,11 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
     }, {}),
   );
 
+  // Release year lookup for the era boost — keyed by titleId.
+  const releaseYearById = new Map<string, number | null>(
+    candidateTitleTexts.map((t) => [t.id, t.releaseYear ?? null]),
+  );
+
   const { tasteVector: taste, facetVector } = extractTasteVector(
     { anchors, ratings },
     userTitles,
@@ -353,14 +400,13 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
     candidateFacets,
   );
 
-  // Resolve tag + theme names for the explain pass. Both tables are
-  // small (~few hundred rows each); single SELECT per cron run is
-  // cheap. The maps stay in scope only for this user's compute.
+  // Resolve tag + theme names for the explain pass AND demographic
+  // affinity boost (which needs names across all 200 recs, not just
+  // the top-50 explain depth).
   const candidatesById = new Map(candidates.map((c) => [c.titleId, c]));
-  const explainTitleIds = recs.slice(0, EXPLAIN_DEPTH).map((r) => r.titleId);
   const referencedTagIds = new Set<string>();
-  for (const titleId of explainTitleIds) {
-    const c = candidatesById.get(titleId);
+  for (const rec of recs) {
+    const c = candidatesById.get(rec.titleId);
     if (c) for (const t of c.tags) referencedTagIds.add(t.tagId);
   }
   // Tags the user has in their taste also need names (theme-bridge
@@ -385,7 +431,54 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
   const themeRows2 = await db.select({ id: themes.id, name: themes.name }).from(themes);
   for (const t of themeRows2) themeNames.set(t.id, t.name);
 
-  const items = recs.map((r, i) => {
+  // --- Demographic post-scoring boosts ---
+  // Applied after taste-vector scoring so watch history still dominates.
+  // Only fires when the user opted in (affinities set) or provided birth year.
+  const activeAffinities = demographic?.contentAffinities ?? [];
+  const birthYear = demographic?.birthYear ?? null;
+  const eraStart = birthYear !== null ? birthYear + ERA_START_OFFSET : null;
+  const eraEnd = birthYear !== null ? birthYear + ERA_END_OFFSET : null;
+
+  // Build a set of titleIds that match at least one active affinity via tag
+  // name substring. Uses the tagInfo map we just loaded (covers all 200 recs).
+  const affinityTitleIds = new Set<string>();
+  if (activeAffinities.length > 0) {
+    for (const rec of recs) {
+      const candidate = candidatesById.get(rec.titleId);
+      if (!candidate) continue;
+      outer: for (const tag of candidate.tags) {
+        const info = tagInfo.get(tag.tagId);
+        if (!info) continue;
+        const lowerName = info.name.toLowerCase();
+        for (const affinity of activeAffinities) {
+          const keywords = AFFINITY_TAG_SUBSTRINGS[affinity] ?? [];
+          if (keywords.some((kw) => lowerName.includes(kw))) {
+            affinityTitleIds.add(rec.titleId);
+            break outer;
+          }
+        }
+      }
+    }
+  }
+
+  // Apply boosts and re-sort. Scores are re-ranked so the explain step
+  // below uses the post-boost ordering.
+  const boostedRecs =
+    activeAffinities.length > 0 || eraStart !== null
+      ? recs
+          .map((r) => {
+            let score = r.score;
+            if (affinityTitleIds.has(r.titleId)) score *= 1 + AFFINITY_SCORE_BOOST;
+            if (eraStart !== null) {
+              const ry = releaseYearById.get(r.titleId) ?? null;
+              if (ry !== null && ry >= eraStart && ry <= eraEnd!) score *= 1 + ERA_SCORE_BOOST;
+            }
+            return score === r.score ? r : { ...r, score };
+          })
+          .sort((a, b) => b.score - a.score)
+      : recs;
+
+  const items = boostedRecs.map((r, i) => {
     if (i >= EXPLAIN_DEPTH) {
       return { titleId: r.titleId, score: r.score, reasonHint: null };
     }
@@ -406,7 +499,7 @@ export async function recomputeUserRecommendations(userId: string): Promise<{ re
       set: { payload, computedAt: new Date() },
     });
 
-  return { recCount: recs.length };
+  return { recCount: boostedRecs.length };
 }
 
 // Per-user recompute — triggered by the all-users fan-out below or by the

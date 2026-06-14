@@ -1,4 +1,4 @@
-import { boolean, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { boolean, pgEnum, pgTable, smallint, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
 // Per-entry visibility. Default private — safer if the user never chooses.
 // Lives on users.ts (not watch.ts) because users.default_privacy references
@@ -36,6 +36,17 @@ export const users = pgTable('users', {
   })
     .notNull()
     .default('solo'),
+  // Birth year (4-digit). Used for age-cohort taste modelling. Nullable —
+  // collected in onboarding but not required. We store the year, not the
+  // full date, per GDPR data minimisation (Art.5(1)(c)).
+  birthYear: smallint('birth_year'),
+  // Gender: 'male' | 'female' | 'non-binary' | 'prefer_not_to_say' or any
+  // future value. Stored as text so new options don't require a migration.
+  gender: text('gender'),
+  // When true, recommendations are post-filtered to titles available on the
+  // user's connected streaming providers. Defaults to false so full catalog
+  // discovery is preserved by default — the user explicitly opts in.
+  filterProviders: boolean('filter_providers').notNull().default(false),
   ageVerified: boolean('age_verified').notNull().default(false),
   // We store the fact of verification, not the birth date (ADR-0012 §5).
   ageVerifiedAt: timestamp('age_verified_at', { withTimezone: true }),

@@ -218,3 +218,42 @@ infrastructure isn't wired — code-side debugging won't help.
 The runbook at `docs/runbooks/inngest.md` already documented the
 required env vars and key-rotation procedure, but didn't flag "if these
 are unset the symptom is silent" — addressed by this LEARNED entry.
+
+---
+
+## TMDB TV/film ID namespace collisions leave zombie titles in the catalog
+
+**What happened:** TMDB uses separate integer ID namespaces for TV shows and
+films. TV ID 1421 = Modern Family; film ID 1421 = a 1977 French film.
+TV ID 241259 = Baby Reindeer; film ID 241259 = Alice Through the Looking Glass.
+
+Before 2026-06-08, the `titles` unique index was only `(external_id, source)`.
+When a catalog sync ran `processTmdbMovie(241259)` after `processTmdbTvShow(241259)`
+had already inserted Baby Reindeer, the `ON CONFLICT DO UPDATE` matched on the
+2-column key and overwrote the *title* with "Alice Through the Looking Glass" —
+but left `media_type = 'tv'`. Baby Reindeer vanished. Same pattern hit Modern Family.
+
+**The fix (applied):** Unique index is now `(external_id, source, media_type)`.
+Both `processTmdbTvShow` and `processTmdbMovie` use the 3-column conflict target.
+New syncs create separate rows for TV and film with the same numeric ID. Migration
+`0020_cynical_rick_jones.sql` records the index change.
+
+**Symptom to recognise:** A user reports a well-known show is missing or showing
+the wrong title. Query `SELECT title, external_id, source, media_type FROM titles
+WHERE title ILIKE '%suspect title%'` — if the row has the right ID but wrong name
+(or the right name but wrong `media_type`), it's a zombie from the old 2-column era.
+
+**How to fix a zombie:**
+```sql
+-- 1. Delete the corrupted row (cascade removes watch_entries, tags, etc.)
+DELETE FROM titles WHERE external_id = '<id>' AND source = 'tmdb' AND media_type = '<wrong_type>';
+
+-- 2. Re-insert via direct SQL (or trigger on-demand ingest by searching the title in the app).
+--    The 3-column index now ensures the correct row is created cleanly.
+```
+After deletion, searching the title in the app will trigger on-demand ingest
+(≥5 chars, <3 local results) and re-fetch from TMDB correctly.
+
+**Known zombies cleaned up:**
+- TV ID 1421 (Modern Family) — film ID 1421 (L'Homme qui aimait les femmes) had overwritten it. Fixed 2026-06-08.
+- TV ID 241259 (Baby Reindeer) — film ID 241259 (Alice Through the Looking Glass) had overwritten it. Fixed 2026-06-09.

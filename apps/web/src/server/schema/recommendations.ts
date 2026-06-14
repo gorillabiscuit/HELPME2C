@@ -1,4 +1,13 @@
-import { boolean, jsonb, pgEnum, pgTable, primaryKey, timestamp, uuid } from 'drizzle-orm/pg-core';
+import {
+  boolean,
+  jsonb,
+  pgEnum,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uuid,
+} from 'drizzle-orm/pg-core';
 import { titles } from './titles';
 import { users } from './users';
 
@@ -122,6 +131,17 @@ export const recFeedback = pgTable(
     // engine does NOT exclude on this. Distinct semantic from
     // dismissed (which is real negative signal). Added 2026-05-15.
     unfamiliar: boolean('unfamiliar').notNull().default(false),
+    // Structured reason for dismissal — one of the five reason chips
+    // the user can pick after clicking "Not interested". NULL when the
+    // user skipped reason selection. Stored as text (not pg enum) so
+    // new reasons don't require migrations.
+    dismissalReason: text('dismissal_reason'),
+    // Non-null when the dismissal is mood-based ("not in the mood").
+    // The exclusion filter in recommendations.list treats rows with a
+    // future dismissed_until as suppressed even if dismissed=false,
+    // so the title can resurface after the window expires without a
+    // separate DB write.
+    dismissedUntil: timestamp('dismissed_until', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

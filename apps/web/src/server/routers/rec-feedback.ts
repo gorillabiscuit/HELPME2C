@@ -7,17 +7,28 @@ import { protectedProcedure, router } from '../trpc';
 // Per-rec feedback writes. Three independent flags on (user, title):
 //   - rating: future algorithm-tuning enum (terrible…terrific)
 //   - dismissed: "Not interested" — engine excludes from future recs
-//   - unfamiliar: "Don't know it" — soft signal, NOT used for exclusion;
-//     just recorded for analytics + future learning. Distinct from
-//     dismissed: a dismissed title is "I know it and don't want it"
-//     (real negative signal); an unfamiliar title is "I have no
-//     opinion because I don't recognise it" (no signal).
+//   - unfamiliar: "Don't know it" — soft signal, NOT used for exclusion
+//   - dismissalReason: structured reason chip picked after "Not interested"
+//
+// Special case for dismissalReason === 'not_in_mood': sets dismissed=false
+// and dismissedUntil=7 days from now. The title re-surfaces after the
+// window without any further DB write. All other reasons set dismissed=true.
 //
 // Each field independent — pass any subset. Omitted fields are left
 // untouched on the existing row (partial update). At least one of the
-// three must be set.
+// three primary signals must be set.
 
 const ratingValues = recFeedbackRatingEnum.enumValues;
+
+const DISMISSAL_REASONS = [
+  'too_dark',
+  'too_violent',
+  'not_in_mood',
+  'already_seen',
+  'not_my_thing',
+] as const;
+
+const NOT_IN_MOOD_SUPPRESSION_DAYS = 7;
 
 export const recFeedbackRouter = router({
   upsert: protectedProcedure
@@ -28,6 +39,7 @@ export const recFeedbackRouter = router({
           rating: z.enum(ratingValues).nullable().optional(),
           dismissed: z.boolean().optional(),
           unfamiliar: z.boolean().optional(),
+          dismissalReason: z.enum(DISMISSAL_REASONS).optional(),
         })
         .refine(
           (data) =>
@@ -41,19 +53,36 @@ export const recFeedbackRouter = router({
       const internalUserId = await resolveInternalUserId(ctx.db, ctx.userId);
       if (!internalUserId) throw new Error('user row missing');
 
+      // Compute derived dismissal fields.
+      // not_in_mood: title is suppressed temporarily (dismissed_until), not
+      // permanently excluded (dismissed stays false). All other reasons set
+      // dismissed=true with no expiry.
+      let resolvedDismissed = input.dismissed;
+      let dismissedUntil: Date | null = null;
+      if (input.dismissed && input.dismissalReason === 'not_in_mood') {
+        resolvedDismissed = false;
+        dismissedUntil = new Date(Date.now() + NOT_IN_MOOD_SUPPRESSION_DAYS * 24 * 60 * 60 * 1000);
+      }
+
       // Build the partial update set — keep existing values for fields the
       // caller didn't provide. Same pattern as watch.upsert.
       const updateSet: {
         rating?: typeof input.rating;
         dismissed?: boolean;
         unfamiliar?: boolean;
+        dismissalReason?: (typeof DISMISSAL_REASONS)[number] | null;
+        dismissedUntil?: Date | null;
         updatedAt: Date;
       } = {
         updatedAt: new Date(),
       };
       if (input.rating !== undefined) updateSet.rating = input.rating;
-      if (input.dismissed !== undefined) updateSet.dismissed = input.dismissed;
+      if (resolvedDismissed !== undefined) updateSet.dismissed = resolvedDismissed;
       if (input.unfamiliar !== undefined) updateSet.unfamiliar = input.unfamiliar;
+      if (input.dismissalReason !== undefined) {
+        updateSet.dismissalReason = input.dismissalReason;
+        updateSet.dismissedUntil = dismissedUntil;
+      }
 
       await ctx.db
         .insert(recFeedback)
@@ -61,8 +90,10 @@ export const recFeedbackRouter = router({
           userId: internalUserId,
           titleId: input.titleId,
           rating: input.rating ?? null,
-          dismissed: input.dismissed ?? false,
+          dismissed: resolvedDismissed ?? false,
           unfamiliar: input.unfamiliar ?? false,
+          dismissalReason: input.dismissalReason ?? null,
+          dismissedUntil,
         })
         .onConflictDoUpdate({
           target: [recFeedback.userId, recFeedback.titleId],
