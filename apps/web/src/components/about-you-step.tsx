@@ -14,13 +14,39 @@ const GENDER_OPTIONS = [
   { value: 'prefer_not_to_say', label: 'Prefer not to say' },
 ] as const;
 
+// Regional content affinities — diaspora/taste signal that country alone
+// misses. Values MUST match the contentAffinities enum in me.updateProfile.
+const AFFINITY_OPTIONS = [
+  { value: 'anime', label: 'Anime' },
+  { value: 'k_drama', label: 'K-Drama' },
+  { value: 'j_drama', label: 'J-Drama' },
+  { value: 'c_drama', label: 'C-Drama' },
+  { value: 'bollywood', label: 'Bollywood' },
+  { value: 'nollywood', label: 'Nollywood' },
+  { value: 'latin_american', label: 'Latin American' },
+  { value: 'french_cinema', label: 'French Cinema' },
+  { value: 'nordic_noir', label: 'Nordic Noir' },
+  { value: 'british_drama', label: 'British Drama' },
+  { value: 'turkish_drama', label: 'Turkish Drama' },
+  { value: 'middle_eastern', label: 'Middle Eastern' },
+  { value: 'southeast_asian', label: 'Southeast Asian' },
+] as const;
+
+type AffinitySlug = (typeof AFFINITY_OPTIONS)[number]['value'];
+
 const CURRENT_YEAR = new Date().getFullYear();
 
 export function AboutYouStep({ onComplete }: AboutYouStepProps) {
   const [gender, setGender] = useState<string | null>(null);
   const [birthYear, setBirthYear] = useState('');
+  const [affinities, setAffinities] = useState<AffinitySlug[]>([]);
   const [filterProviders, setFilterProviders] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const toggleAffinity = (value: AffinitySlug) =>
+    setAffinities((prev) =>
+      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value],
+    );
 
   const updateProfile = trpc.me.updateProfile.useMutation();
 
@@ -34,6 +60,7 @@ export function AboutYouStep({ onComplete }: AboutYouStepProps) {
         ? { gender: gender as 'male' | 'female' | 'non-binary' | 'prefer_not_to_say' }
         : {}),
       ...(birthYear && birthYearValid ? { birthYear: birthYearNum } : {}),
+      ...(affinities.length > 0 ? { contentAffinities: affinities } : {}),
       filterProviders,
     });
     setSaving(false);
@@ -89,6 +116,36 @@ export function AboutYouStep({ onComplete }: AboutYouStepProps) {
         {!birthYearValid && (
           <p className="text-xs text-destructive">Enter a year between 1900 and {CURRENT_YEAR}</p>
         )}
+      </div>
+
+      {/* Content affinities */}
+      <div className="space-y-3">
+        <div className="space-y-1">
+          <p className="text-sm font-medium">Anything you especially gravitate to?</p>
+          <p className="text-sm text-muted-foreground">
+            Pick any that fit — helps us catch tastes that country alone misses.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {AFFINITY_OPTIONS.map((opt) => {
+            const selected = affinities.includes(opt.value);
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => toggleAffinity(opt.value)}
+                className={[
+                  'rounded-full border px-3.5 py-1.5 text-sm transition-colors',
+                  selected
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border bg-background hover:bg-muted',
+                ].join(' ')}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Streaming filter toggle */}
