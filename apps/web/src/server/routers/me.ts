@@ -144,6 +144,29 @@ export const meRouter = router({
         birthYear: z.number().int().min(1900).max(new Date().getFullYear()).optional(),
         gender: z.enum(['male', 'female', 'non-binary', 'prefer_not_to_say']).optional(),
         filterProviders: z.boolean().optional(),
+        // Regional content affinities — opt-in tradition slugs (diaspora
+        // signal that country alone misses). Validated against the known
+        // list here (users.content_affinities is a free text[]). Keep in
+        // sync with AFFINITY_OPTIONS in about-you-step.tsx.
+        contentAffinities: z
+          .array(
+            z.enum([
+              'anime',
+              'k_drama',
+              'j_drama',
+              'c_drama',
+              'bollywood',
+              'nollywood',
+              'latin_american',
+              'french_cinema',
+              'nordic_noir',
+              'british_drama',
+              'turkish_drama',
+              'middle_eastern',
+              'southeast_asian',
+            ]),
+          )
+          .optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -151,6 +174,7 @@ export const meRouter = router({
       if (input.birthYear !== undefined) patch.birthYear = input.birthYear;
       if (input.gender !== undefined) patch.gender = input.gender;
       if (input.filterProviders !== undefined) patch.filterProviders = input.filterProviders;
+      if (input.contentAffinities !== undefined) patch.contentAffinities = input.contentAffinities;
 
       const [row] = await ctx.db
         .update(users)
@@ -160,6 +184,7 @@ export const meRouter = router({
           birthYear: users.birthYear,
           gender: users.gender,
           filterProviders: users.filterProviders,
+          contentAffinities: users.contentAffinities,
         });
 
       if (!row) {

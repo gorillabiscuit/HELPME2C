@@ -20,7 +20,16 @@ function makeTableSentinel(name: string, cols: string[]): Record<string, unknown
   return table;
 }
 
-const usersTable = makeTableSentinel('users', ['id', 'clerkId', 'defaultPrivacy', 'updatedAt']);
+const usersTable = makeTableSentinel('users', [
+  'id',
+  'clerkId',
+  'defaultPrivacy',
+  'updatedAt',
+  'birthYear',
+  'gender',
+  'filterProviders',
+  'contentAffinities',
+]);
 
 // The router reads privacyLevelEnum.enumValues at module-load to build its
 // (re-exported) full-enum zod schema. The setDefaultPrivacy procedure
@@ -181,5 +190,37 @@ describe('meRouter.setDefaultPrivacy', () => {
     await expect(caller.setDefaultPrivacy({ defaultPrivacy: 'public' })).rejects.toThrow(
       /User row not found/,
     );
+  });
+});
+
+describe('meRouter.updateProfile — content affinities', () => {
+  it('writes a validated contentAffinities array to the user row', async () => {
+    recorder.enqueueReturn([{ contentAffinities: ['anime', 'k_drama'] }]);
+    const caller = await makeCaller();
+
+    const result = await caller.updateProfile({ contentAffinities: ['anime', 'k_drama'] });
+
+    expect(result).toEqual({ contentAffinities: ['anime', 'k_drama'] });
+    const set = findUpdateSet();
+    expect(set?.contentAffinities).toEqual(['anime', 'k_drama']);
+    expect(set?.updatedAt).toBeInstanceOf(Date);
+  });
+
+  it('omits contentAffinities from the patch when not provided (partial update)', async () => {
+    recorder.enqueueReturn([{ contentAffinities: null }]);
+    const caller = await makeCaller();
+
+    await caller.updateProfile({ gender: 'female' });
+
+    const set = findUpdateSet();
+    expect(set).not.toHaveProperty('contentAffinities');
+    expect(set?.gender).toBe('female');
+  });
+
+  it('rejects an unknown affinity slug at the input layer', async () => {
+    const caller = await makeCaller();
+    // @ts-expect-error — deliberately invalid slug to assert runtime rejection.
+    await expect(caller.updateProfile({ contentAffinities: ['klingon_opera'] })).rejects.toThrow();
+    expect(recorder.calls.find((c) => c.method === 'update')).toBeUndefined();
   });
 });
