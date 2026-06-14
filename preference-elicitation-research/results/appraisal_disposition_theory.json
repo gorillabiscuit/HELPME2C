@@ -1,0 +1,24 @@
+{
+  "item": "Appraisal & Affective Disposition Theory (Zillmann, Raney, Oliver)",
+  "elicitation_method": "Theory, not a method — explains the underlying cause of emotional like/dislike. Implies a structured categorical elicitation: let users name a character/moral reason for dislike (e.g. \"I was asked to root for a bad person\") as a selectable reason rather than a free-text or rating.",
+  "abstraction_level": "concept-level — moral/character alignment, protagonist likability, antihero discomfort, the viewer's role as a 'moral monitor'. These are narrative-property concepts, above feature-level (gore, pacing) and distinct from viewer-state.",
+  "signal_quality_for_recommender": "Moderate-to-high IF mapped to narrative metadata. Disposition reasons map to filterable narrative properties such as protagonist morality (hero vs antihero vs villain-protagonist), moral ambiguity, sympathetic-character presence, and just-vs-unjust outcomes. The map exists but requires a narrative taxonomy the system maintains; raw moral judgement is not in standard genre metadata.",
+  "reason_attributability": "Strong — disposition theory says the dislike is rooted in a stable, identifiable cause (moral evaluation of characters), making it attributable to a content fact (character moral framing) rather than noise or mood.",
+  "cold_start_applicability": "yes — a user can state \"I dislike rooting for unlikable/immoral protagonists\" with no watch history; it is a stable disposition, not a history-derived signal.",
+  "cognitive_load": "medium — recognising and selecting \"I didn't like being asked to root for a bad person\" from a list is low; articulating it unprompted in free text is high. Offering it as a pre-named category keeps load low.",
+  "introspection_harm_risk": "Moderate — moral-character reactions are relatively accessible to introspection (people readily report disliking a protagonist), so the Wilson & Schooler degradation risk is lower than for diffuse aesthetic preferences, but forcing rationalisation of a gut moral reaction could still distort it. Prefer recognition (pick a label) over generation (write a reason).",
+  "folk_theory_dependence": "Low — the user reasons about the story (a character was unlikable), not about the recommender's machinery, so no correct mental model of the system is required.",
+  "negative_positive_symmetry": "symmetric — disposition theory is inherently two-sided (liking sympathetic characters with good outcomes; disliking immoral characters and unjust outcomes), so it naturally supplies a first-class dislike axis as well as a like axis.",
+  "confounded_with_friction_flag": "Low — a moral/character objection is a genuine content-property reaction, clearly distinguishable from decision fatigue or search friction.",
+  "key_finding": "Enjoyment is governed by moral judgement of characters: viewers act as 'untiring moral monitors', favouring characters whose actions are morally justified and enjoying narratives where liked characters succeed and disliked ones fail (Zillmann & Cantor 1977; Raney; antihero work by Krakowiak/Oliver). Dislike is frequently rooted in being positioned to sympathise with a morally objectionable protagonist — a concept-level, filterable taste axis.",
+  "gap_from_real_practice": "No mainstream consumer recommender exposes a 'protagonist morality / who am I asked to root for' axis. Industry collapses this into coarse genre tags; the research says character-moral alignment is a primary driver of enjoyment that deserves its own elicitable dimension.",
+  "proposed_taxonomy_contribution": "Adds a 'character/moral alignment' dislike-and-like axis. Concrete labels users recognise: \"I didn't want to root for a bad person\" / \"unlikable main character\" / \"no one to root for\" (dislike) and \"morally complex/antihero is fine\" / \"clear hero to root for\" (like/preference). Maps to narrative metadata: protagonist-morality (hero/antihero/villain-protagonist), moral-ambiguity level, sympathetic-character presence, just-world outcome.",
+  "sources": [
+    "https://en.wikipedia.org/wiki/Affective_disposition_theory",
+    "https://onlinelibrary.wiley.com/doi/10.1002/9781118783764.wbieme0081",
+    "https://communication.iresearchnet.com/exposure-to-communication-content/affective-disposition-theories/",
+    "https://www.researchgate.net/publication/274710596_Testing_Affective_Disposition_Theory_A_comparison_of_the_enjoyment_of_hero_and_antihero_narratives",
+    "https://www.semanticscholar.org/paper/Affective-Disposition-Theory-Raney/c8b58182fbbe63a30192992a25379e89caaa7687"
+  ],
+  "uncertain": []
+}

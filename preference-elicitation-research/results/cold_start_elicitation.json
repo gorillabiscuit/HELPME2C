@@ -1,0 +1,23 @@
+{
+  "item": "Cold-start preference elicitation research",
+  "elicitation_method": "Structured active elicitation: decision-tree rating elicitation (item ratings at tree nodes) extended with (a) attribute-level preference queries (e.g. genre likes/dislikes) and (b) pairwise comparison at each node instead of single-item ratings. Survey (MDPI 2021) catalogues elicitation routes for acquiring auxiliary information when no history exists (explicit interviews, attribute/demographic capture, cross-domain transfer).",
+  "abstraction_level": "feature-level (attributes such as genre) combined with item-level pairwise judgements. The attribute-aware branch deliberately lifts elicitation above individual items toward filterable content properties.",
+  "signal_quality_for_recommender": "High for the attribute-aware branch: genre/attribute preferences map directly to filterable content metadata and improve user clustering. Pairwise judgements give cleaner relative signal than absolute ratings but are item-bound and need translation to attributes to be filterable. Overall stronger map-to-metadata than free-text.",
+  "reason_attributability": "Good — answers are bound to a known attribute or a known item pair, so the cause is system-defined by construction (the user is answering about a content fact the system already models). Little unattributable noise compared to implicit signals.",
+  "cold_start_applicability": "yes — purpose-built for the first session before any watch history exists; the entire method targets new-user cold start.",
+  "cognitive_load": "medium — pairwise comparison (\"which of these two?\") is lower load and more reliable than absolute rating; attribute queries are a short pick-from-list. Decision-tree adaptivity keeps the number of queries low, which the 2025 paper highlights as a strength.",
+  "introspection_harm_risk": "Low-to-moderate. Pairwise choice (\"pick one\") sidesteps the Wilson & Schooler articulate-your-reasons trap because the user reveals preference through choice rather than verbal justification; attribute queries ask for a category, not a rationale.",
+  "folk_theory_dependence": "Low — the user does not need a mental model of system behaviour; the system drives an adaptive interview and interprets answers itself.",
+  "negative_positive_symmetry": "[uncertain] Partially symmetric — attribute elicitation can capture dislikes (disliked genres) as first-class, and pairwise loss carries negative information, but the surveyed/described methods are framed primarily around acquiring positive preference signal rather than an explicit dislike channel.",
+  "confounded_with_friction_flag": "Low — a deliberate onboarding interview is an explicit user action, not passive rejection, so answers are unlikely to be friction/fatigue artefacts (though long trees risk abandonment, which is drop-off, not a taste signal).",
+  "key_finding": "Augmenting decision-tree rating elicitation with (1) attribute-level preference queries and (2) pairwise item comparisons at each node improves cold-start recommendation quality, especially under a reduced query budget (arXiv 2510.27342, 2025). The MDPI 2021 survey establishes that the under-examined step is HOW to derive and obtain the auxiliary information for cold start, not just how to model it.",
+  "gap_from_real_practice": "Industry cold-start onboarding (Netflix taste-picker, Spotify artist-picker) collects positive item/attribute picks but rarely uses adaptive pairwise comparison or attribute-level dislike capture, and almost never minimises the query budget adaptively per user. The research recommends adaptive, attribute-aware, comparison-based elicitation; practice ships static like-only pick grids.",
+  "proposed_taxonomy_contribution": "Supports an attribute-level axis in onboarding: ask users to express preference at the genre/theme/attribute level (not just pick titles), and capture it as a relative/pairwise signal (\"more like A than B\") rather than absolute ratings. Concrete labels: liked-attributes and disliked-attributes pulled from the cross-medium taxonomy, surfaced as comparative picks. This is the structural backbone onto which the disliked-reason categories from the other items attach.",
+  "sources": [
+    "https://arxiv.org/abs/2510.27342",
+    "https://arxiv.org/html/2510.27342v1",
+    "https://www.mdpi.com/2076-3417/11/20/9608",
+    "https://arxiv.org/abs/2406.00973"
+  ],
+  "uncertain": ["negative_positive_symmetry"]
+}
