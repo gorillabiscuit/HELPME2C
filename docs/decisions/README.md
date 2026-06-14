@@ -51,8 +51,9 @@ When the world changes:
 | 0020 | Group recommendation strategy | Proposed | 2026-05-07 |
 | 0021 | Streaming availability — ranking vs filter | Proposed | 2026-05-07 |
 | 0025 | Embedded video provider + cookie posture | Accepted | 2026-05-17 |
+| 0027 | Reason feedback — missing axes, optional free-text, discovery log | Accepted | 2026-06-13 |
 
-(0022–0024 exist in this directory but are not indexed here yet; index backfill is a separate housekeeping task. More to be filled in as Phase 1 progresses. See `QUEUE.md` for pending decisions.)
+(0022–0024 and 0026 exist in this directory but are not indexed here yet; index backfill is a separate housekeeping task. More to be filled in as Phase 1 progresses. See `QUEUE.md` for pending decisions.)
 
 ## Numbering
 
