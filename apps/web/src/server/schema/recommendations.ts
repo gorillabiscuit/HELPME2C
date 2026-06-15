@@ -184,7 +184,7 @@ export const reasonFeedbackEvents = pgTable(
     // interpret the answer without reconstructing the (LLM-generated) prompt.
     questionShown: text('question_shown').notNull(),
     optionsShown: jsonb('options_shown')
-      .$type<Array<{ label: string; slugs: string[] }>>()
+      .$type<Array<{ label: string; slugs: string[]; isNoneOfThese?: boolean | undefined }>>()
       .notNull(),
     // The slugs the user's selected chips mapped to (empty when they picked
     // only "None of these fit" or a viewer-state escape hatch).

@@ -339,7 +339,12 @@ export function OnboardingFlow({
   // Shared insight screen — used for both like insight and dislike insight.
   if (phase === 'insight' || phase === 'dislike-insight') {
     const isDislikeInsight = phase === 'dislike-insight';
-    const isLoading = generateInsightMutation.isPending || insightShows.length === 0;
+    // Spinner only while in flight or not yet settled — NOT whenever
+    // insightShows is empty. A failed generate returns null → insightShows
+    // stays [], and the old `|| length === 0` made the spinner run forever
+    // instead of falling through to the "couldn't analyse" state below.
+    const settled = generateInsightMutation.isSuccess || generateInsightMutation.isError;
+    const isLoading = generateInsightMutation.isPending || !settled;
     const currentShow = insightShows[insightIndex];
     const total = insightShows.length;
 
