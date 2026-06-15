@@ -46,13 +46,14 @@ When the world changes:
 | 0015 | API deployment shape (tRPC inside Next.js) | Accepted | 2026-05-04 |
 | 0016 | Component library (shadcn primary, MUI DataGrid carve-out) | Accepted | 2026-05-05 |
 | 0017 | Hosting platform (Vercel for Phase 1A with lock-in firewall) | Accepted | 2026-05-05 |
-| 0018 | Project tracker (Linear, team HM2C) | Accepted | 2026-05-05 |
+| 0018 | Project tracker (Linear, team HM2C) | Superseded by 0029 | 2026-05-05 |
 | 0019 | ORM (Drizzle) | Accepted | 2026-05-06 |
 | 0020 | Group recommendation strategy | Proposed | 2026-05-07 |
 | 0021 | Streaming availability — ranking vs filter | Proposed | 2026-05-07 |
 | 0025 | Embedded video provider + cookie posture | Accepted | 2026-05-17 |
 | 0027 | Reason feedback — missing axes, optional free-text, discovery log | Accepted | 2026-06-13 |
 | 0028 | Onboarding captures durable taste; momentary state as live controls | Proposed | 2026-06-14 |
+| 0029 | Project tracker — GitHub Issues (supersedes 0018) | Accepted | 2026-06-15 |
 
 (0022–0024 and 0026 exist in this directory but are not indexed here yet; index backfill is a separate housekeeping task. More to be filled in as Phase 1 progresses. See `QUEUE.md` for pending decisions.)
 
