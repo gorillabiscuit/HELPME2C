@@ -41,6 +41,10 @@ export const recommendationsRouter = router({
             .string()
             .regex(/^[A-Z]{2}$/i, 'expected ISO 3166-1 alpha-2')
             .optional(),
+          // When provided, the server uses this value directly and skips the
+          // preferences DB read. Callers (page.tsx) pass the URL search param
+          // so the re-render and the DB write can run in parallel.
+          noveltyOverride: z.number().min(0).max(1).optional(),
         })
         .optional(),
     )
@@ -68,13 +72,17 @@ export const recommendationsRouter = router({
 
       // Run independent single-row lookups in parallel — each only needs
       // internalUserId / ctx.userId which are already resolved above.
+      // Skip the preferences fetch when noveltyOverride is supplied — the
+      // caller already has the right value and the DB write is still in flight.
       const [prefRow, row, userRow] = await Promise.all([
-        ctx.db
-          .select({ preferences: userPreferences.preferences })
-          .from(userPreferences)
-          .where(eq(userPreferences.userId, internalUserId))
-          .limit(1)
-          .then((r) => r[0]),
+        input?.noveltyOverride !== undefined
+          ? Promise.resolve(undefined)
+          : ctx.db
+              .select({ preferences: userPreferences.preferences })
+              .from(userPreferences)
+              .where(eq(userPreferences.userId, internalUserId))
+              .limit(1)
+              .then((r) => r[0]),
         ctx.db
           .select()
           .from(userRecommendations)
@@ -89,9 +97,7 @@ export const recommendationsRouter = router({
           .then((r) => r[0]),
       ]);
 
-      // Default 0.3 matches the slider's initialValue default and the
-      // comment in UserPreferencesData: "slightly familiar-leaning".
-      const novelty: number = prefRow?.preferences?.novelty ?? 0.3;
+      const novelty: number = input?.noveltyOverride ?? prefRow?.preferences?.novelty ?? 0.3;
 
       if (!row) {
         return { items: [], computedAt: null, filtered: false, filter: emptyFilter };

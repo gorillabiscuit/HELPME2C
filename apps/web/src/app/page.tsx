@@ -6,7 +6,11 @@ import { createContext } from '@/server/trpc';
 import { DashboardHome } from '@/components/dashboard-home';
 import { MarketingHero } from '@/components/marketing-hero';
 
-export default async function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ novelty?: string }>;
+}) {
   const { userId, sessionClaims } = await auth();
   const user = userId ? await currentUser() : null;
 
@@ -34,10 +38,22 @@ export default async function HomePage() {
   // Country comes from Vercel's geo header so the streaming-availability
   // filter (M5.4 per ADR-0021) is country-strict. Falls back to US when
   // the header is absent (local dev).
+  // ?novelty=X is written by NoveltySlider on commit so the server can
+  // use the new value before the async DB write completes, cutting one
+  // sequential round trip from the critical path.
+  const params = await searchParams;
+  const parsedNovelty = params.novelty !== undefined ? parseFloat(params.novelty) : NaN;
+  const noveltyOverride =
+    !isNaN(parsedNovelty) && parsedNovelty >= 0 && parsedNovelty <= 1 ? parsedNovelty : undefined;
+
   const requestHeaders = await headers();
   const country = (requestHeaders.get('x-vercel-ip-country') ?? 'US').toUpperCase();
   const recs = userId
-    ? await caller.recommendations.list({ limit: 20, country })
+    ? await caller.recommendations.list({
+        limit: 20,
+        country,
+        ...(noveltyOverride !== undefined ? { noveltyOverride } : {}),
+      })
     : {
         items: [],
         filtered: false,
@@ -59,7 +75,11 @@ export default async function HomePage() {
     redirect('/onboarding');
   }
 
-  const novelty = userId ? await caller.preferences.get().then((p) => p?.novelty ?? null) : null;
+  // When the URL carries the override, use it directly — skips a DB round
+  // trip and keeps the slider in sync with the recs we just rendered.
+  const novelty: number | null = userId
+    ? (noveltyOverride ?? (await caller.preferences.get().then((p) => p?.novelty ?? null)) ?? null)
+    : null;
 
   return userId ? (
     <DashboardHome

@@ -39,8 +39,7 @@ export function NoveltySlider({
   onLoadingChange,
 }: NoveltySliderProps) {
   const [value, setValue] = useState<number>(initialValue ?? 0.3);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isRefreshing, startRefresh] = useTransition();
+  const [isNavigating, startNavigation] = useTransition();
   const saveNovelty = trpc.preferences.saveNovelty.useMutation();
   const router = useRouter();
 
@@ -53,16 +52,14 @@ export function NoveltySlider({
     [onChange],
   );
 
-  const handleCommit = useCallback(async () => {
-    setIsSaving(true);
-    await saveNovelty.mutateAsync({ novelty: value });
-    setIsSaving(false);
-    // Re-run the Server Component so recommendations.list re-reads with
-    // the updated novelty preference and applies the new blend order.
-    // useTransition keeps isPending=true until the refresh settles so we
-    // can show a loading state without blocking the input.
-    startRefresh(() => {
-      router.refresh();
+  const handleCommit = useCallback(() => {
+    // Fire the DB write async — don't block on it.
+    saveNovelty.mutate({ novelty: value });
+    // Immediately navigate to /?novelty=X. The server reads the search param
+    // directly (noveltyOverride), so this re-render and the DB write run in
+    // parallel — one fewer sequential round trip vs the old approach.
+    startNavigation(() => {
+      router.replace(`/?novelty=${value}`);
     });
   }, [saveNovelty, value, router]);
 
@@ -71,7 +68,7 @@ export function NoveltySlider({
 
   const current = getLabelForValue(value)!;
 
-  const isLoading = isSaving || isRefreshing;
+  const isLoading = saveNovelty.isPending || isNavigating;
 
   useEffect(() => {
     onLoadingChange?.(isLoading);
