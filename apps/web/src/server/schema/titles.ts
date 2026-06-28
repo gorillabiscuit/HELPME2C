@@ -12,6 +12,34 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 
+// Canonical genre names used across both TMDB and AniList.
+// Stored as text[] on the title row; filtered via GIN index.
+// TMDB "Science Fiction" is normalised to "Sci-Fi" at ingest.
+export const KNOWN_GENRES = [
+  'Action',
+  'Adventure',
+  'Animation',
+  'Comedy',
+  'Crime',
+  'Documentary',
+  'Drama',
+  'Ecchi',
+  'Fantasy',
+  'Horror',
+  'Mecha',
+  'Music',
+  'Mystery',
+  'Psychological',
+  'Romance',
+  'Sci-Fi',
+  'Slice of Life',
+  'Sports',
+  'Supernatural',
+  'Thriller',
+  'War',
+  'Western',
+] as const;
+
 export const mediaSourceEnum = pgEnum('media_source', ['tmdb', 'anilist']);
 export const mediaTypeEnum = pgEnum('media_type', ['tv', 'film', 'anime']);
 export const titleStatusEnum = pgEnum('title_status', [
@@ -58,6 +86,11 @@ export const titles = pgTable(
     // TV). Used by the novelty slider to weight critically-acclaimed-but-niche
     // titles into recommendations. Null / false for popularity-synced titles.
     isCurated: boolean('is_curated').notNull().default(false),
+    // Genre strings from the source API (TMDB genres array, AniList genres
+    // field). Normalised to KNOWN_GENRES at ingest (e.g. TMDB "Science
+    // Fiction" → "Sci-Fi"). Null until the title has been synced with the
+    // updated ingest code; filtered via GIN index below.
+    genres: text('genres').array(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -75,6 +108,8 @@ export const titles = pgTable(
     // MAL-id lookup index for the M8 import path. Partial-style coverage —
     // only AniList rows have idMal populated.
     index('titles_id_mal_idx').on(t.idMal),
+    // GIN index for WHERE 'Action' = ANY(genres) is added directly in the
+    // migration SQL (Drizzle 0.45 doesn't support .using('gin').on() syntax).
   ],
 );
 
