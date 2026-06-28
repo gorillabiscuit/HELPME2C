@@ -65,6 +65,22 @@ const MEDIA_TYPE_LABEL: Record<string, string> = {
   anime: 'Anime',
 };
 
+// Subset of KNOWN_GENRES shown as filter chips in the onboarding pickers.
+// Chosen for broad recognisability across both TMDB and AniList catalogs.
+const ONBOARDING_GENRES = [
+  'Action',
+  'Animation',
+  'Comedy',
+  'Crime',
+  'Drama',
+  'Fantasy',
+  'Horror',
+  'Mystery',
+  'Romance',
+  'Sci-Fi',
+  'Thriller',
+] as const;
+
 const MIN_QUERY_LENGTH = 2;
 const SEARCH_DEBOUNCE_MS = 250;
 // Fade-out duration before the picker card unmounts after the user
@@ -120,6 +136,13 @@ export function OnboardingFlow({
 
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
+
+  // Genre filter — shared across like and dislike phases.
+  // Reset to null on every phase transition so each screen starts unfiltered.
+  const [selectedGenre, setSelectedGenre] = useState<string | null>(null);
+  useEffect(() => {
+    setSelectedGenre(null);
+  }, [phase]);
 
   // Titles being faded out — held briefly so the CSS transition runs
   // before the parent re-render with new server state removes them.
@@ -191,7 +214,11 @@ export function OnboardingFlow({
   // seenDislikeIds grows on each refresh so we never show the same title twice.
   const [seenDislikeIds, setSeenDislikeIds] = useState<string[]>([]);
   const mainstreamQuery = trpc.titles.mainstream.useQuery(
-    { limit: 36, excludeTitleIds: [...likedTitleIds, ...seenDislikeIds] },
+    {
+      limit: 36,
+      excludeTitleIds: [...likedTitleIds, ...seenDislikeIds],
+      genre: selectedGenre ?? undefined,
+    },
     { enabled: phase === 'dislikes' },
   );
 
@@ -208,8 +235,14 @@ export function OnboardingFlow({
   const [seenLikeIds, setSeenLikeIds] = useState<string[]>([]);
   const [likeRefreshCount, setLikeRefreshCount] = useState(0);
   const popularRefreshQuery = trpc.titles.popular.useQuery(
-    { limit: 50, excludeTitleIds: seenLikeIds },
+    { limit: 50, excludeTitleIds: seenLikeIds, genre: selectedGenre ?? undefined },
     { enabled: likeRefreshCount > 0 },
+  );
+  // When no refresh has happened yet but a genre is selected, fetch a
+  // genre-filtered pool without touching seenLikeIds.
+  const likeGenreQuery = trpc.titles.popular.useQuery(
+    { limit: 50, genre: selectedGenre ?? undefined },
+    { enabled: selectedGenre !== null && likeRefreshCount === 0 },
   );
   const handleLikeRefresh = () => {
     const currentIds = (
@@ -218,10 +251,16 @@ export function OnboardingFlow({
     setSeenLikeIds((prev) => [...new Set([...prev, ...currentIds, ...Array.from(likedLocalIds)])]);
     setLikeRefreshCount((n) => n + 1);
   };
-  // After first refresh, use the client query result instead of the server prop.
+  // Priority: refresh > genre-only > initial server prop.
   const activeLikePool =
-    likeRefreshCount > 0 ? (popularRefreshQuery.data ?? initialPopular) : initialPopular;
-  const likePoolLoading = likeRefreshCount > 0 && popularRefreshQuery.isFetching;
+    likeRefreshCount > 0
+      ? (popularRefreshQuery.data ?? initialPopular)
+      : selectedGenre !== null
+        ? (likeGenreQuery.data ?? initialPopular)
+        : initialPopular;
+  const likePoolLoading =
+    (likeRefreshCount > 0 && popularRefreshQuery.isFetching) ||
+    (selectedGenre !== null && likeRefreshCount === 0 && likeGenreQuery.isFetching);
 
   // Local set of title IDs the user skipped ("Haven't seen it").
   // Not written to the DB — just hides the card for the session.
@@ -596,7 +635,7 @@ export function OnboardingFlow({
           </p>
         </header>
 
-        <div className="mb-8 max-w-md">
+        <div className="mb-6 max-w-md">
           <Input
             type="search"
             value={query}
@@ -604,6 +643,27 @@ export function OnboardingFlow({
             placeholder="Search any title…"
           />
         </div>
+
+        {/* Genre filter chips - only shown when not actively searching */}
+        {!dislikeShowingSearch && (
+          <div className="mb-8 flex flex-wrap gap-2">
+            {ONBOARDING_GENRES.map((genre) => (
+              <button
+                key={genre}
+                type="button"
+                onClick={() => setSelectedGenre((prev) => (prev === genre ? null : genre))}
+                className={cn(
+                  'rounded-full border px-3 py-1 text-sm transition-colors',
+                  selectedGenre === genre
+                    ? 'border-foreground bg-foreground text-background'
+                    : 'border-border bg-transparent text-muted-foreground hover:border-foreground hover:text-foreground',
+                )}
+              >
+                {genre}
+              </button>
+            ))}
+          </div>
+        )}
 
         {mainstreamQuery.isLoading && !dislikeShowingSearch ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
@@ -878,14 +938,39 @@ export function OnboardingFlow({
         ) : null}
       </div>
 
+      {/* Genre filter chips - only shown when not actively searching */}
+      {!showingSearchResults && (
+        <div className="mb-6 flex flex-wrap gap-2">
+          {ONBOARDING_GENRES.map((genre) => (
+            <button
+              key={genre}
+              type="button"
+              onClick={() => setSelectedGenre((prev) => (prev === genre ? null : genre))}
+              className={cn(
+                'rounded-full border px-3 py-1 text-sm transition-colors',
+                selectedGenre === genre
+                  ? 'border-foreground bg-foreground text-background'
+                  : 'border-border bg-transparent text-muted-foreground hover:border-foreground hover:text-foreground',
+              )}
+            >
+              {genre}
+            </button>
+          ))}
+        </div>
+      )}
+
       <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
         {showingSearchResults
           ? isLoadingResults
             ? 'Searching…'
             : titlesToShow.length === 0
-              ? `No titles match “${debouncedQuery.trim()}”`
+              ? `No titles match "${debouncedQuery.trim()}"`
               : 'Search results'
-          : 'Popular right now'}
+          : selectedGenre
+            ? likePoolLoading
+              ? `${selectedGenre}…`
+              : `${selectedGenre}`
+            : 'Popular right now'}
       </h2>
 
       {titlesToShow.length > 0 ? (

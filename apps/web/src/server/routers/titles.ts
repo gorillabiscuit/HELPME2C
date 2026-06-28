@@ -73,6 +73,9 @@ export const titlesRouter = router({
            *  toward curated critical canon (adventurous). When omitted the
            *  endpoint reads the user's saved preference (default 0.3). */
           novelty: z.number().min(0).max(1).optional(),
+          /** Filter to titles that include this genre string (e.g. "Action").
+           *  Applied via `genre = ANY(titles.genres)`. */
+          genre: z.string().optional(),
         })
         .optional(),
     )
@@ -151,9 +154,11 @@ export const titlesRouter = router({
       // apply, just dedup + cap. Overfetch 3× so dedup has room to find
       // representatives without leaving the grid short.
       if (input?.mediaType) {
-        const whereClause = hasExclusion
-          ? and(eq(titles.mediaType, input.mediaType), notInArray(titles.id, userTouchedIds))
-          : eq(titles.mediaType, input.mediaType);
+        const whereClause = and(
+          eq(titles.mediaType, input.mediaType),
+          hasExclusion ? notInArray(titles.id, userTouchedIds) : undefined,
+          input?.genre ? sql`${input.genre} = ANY(${titles.genres})` : undefined,
+        );
         const rows = await ctx.db
           .select(projection)
           .from(titles)
@@ -216,9 +221,11 @@ export const titlesRouter = router({
             .select(projection)
             .from(titles)
             .where(
-              hasExclusion
-                ? and(eq(titles.mediaType, mt), notInArray(titles.id, userTouchedIds))
-                : eq(titles.mediaType, mt),
+              and(
+                eq(titles.mediaType, mt),
+                hasExclusion ? notInArray(titles.id, userTouchedIds) : undefined,
+                input?.genre ? sql`${input.genre} = ANY(${titles.genres})` : undefined,
+              ),
             )
             .orderBy(sql`${titles.popularityScore} DESC NULLS LAST, ${titles.title} ASC`)
             .limit(slotsByType[mt] * 3 + userTouchedIds.length),
@@ -486,6 +493,8 @@ export const titlesRouter = router({
       z.object({
         limit: z.number().int().min(1).max(50).optional().default(36),
         excludeTitleIds: z.array(z.string().uuid()).optional().default([]),
+        /** Filter to titles that include this genre (e.g. "Action"). */
+        genre: z.string().optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -517,10 +526,11 @@ export const titlesRouter = router({
       const perType = Math.ceil((input.limit / 3) * 3);
       const mediaTypeResults = await Promise.all(
         (['tv', 'film', 'anime'] as const).map((mt) => {
-          const where =
-            excludeIds.length > 0
-              ? and(eq(titles.mediaType, mt), notInArray(titles.id, excludeIds))
-              : eq(titles.mediaType, mt);
+          const where = and(
+            eq(titles.mediaType, mt),
+            excludeIds.length > 0 ? notInArray(titles.id, excludeIds) : undefined,
+            input.genre ? sql`${input.genre} = ANY(${titles.genres})` : undefined,
+          );
           return ctx.db
             .select(projection)
             .from(titles)

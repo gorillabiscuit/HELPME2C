@@ -68,6 +68,7 @@ const DDL = `
     trailer_provider text,
     trailer_video_id text,
     is_curated boolean NOT NULL DEFAULT false,
+    genres text[],
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
   );
