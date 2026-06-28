@@ -1,6 +1,6 @@
 # ADR-0018: Project tracker (Linear)
 
-**Status:** Accepted
+**Status:** Superseded by ADR-0029
 **Date:** 2026-05-05
 **Supersedes:** —
 
