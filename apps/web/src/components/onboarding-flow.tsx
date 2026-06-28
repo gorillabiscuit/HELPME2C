@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -154,6 +154,38 @@ export function OnboardingFlow({
       setDebouncedQuery('');
     }
   }, [phase]);
+
+  // Browser history management: push a history entry on each phase
+  // transition so the browser back button navigates within the flow
+  // rather than leaving /onboarding entirely. React state is preserved
+  // because the component never unmounts — only the phase changes.
+  const isPopStateNavigation = useRef(false);
+  const isFirstPhaseRender = useRef(true);
+  useEffect(() => {
+    if (isFirstPhaseRender.current) {
+      isFirstPhaseRender.current = false;
+      // Tag the existing history entry so popstate can identify the
+      // initial phase if the user presses back to it.
+      history.replaceState({ phase }, '', '/onboarding');
+      return;
+    }
+    if (!isPopStateNavigation.current) {
+      history.pushState({ phase }, '', '/onboarding');
+    }
+    isPopStateNavigation.current = false;
+  }, [phase]);
+
+  useEffect(() => {
+    const onPopState = (e: PopStateEvent) => {
+      const prev = e.state?.phase as typeof phase | undefined;
+      if (prev) {
+        isPopStateNavigation.current = true;
+        setPhase(prev);
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   // Dislike phase — mainstream titles for Screen 2.
   // seenDislikeIds grows on each refresh so we never show the same title twice.
