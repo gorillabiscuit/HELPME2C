@@ -12,6 +12,11 @@ const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 // catalog, which skews niche by design (catalog-broaden.ts indexes many obscure titles).
 const TMDB_CURATED_THRESHOLD = 30;
 
+// TMDB uses "Science Fiction"; normalise to our canonical "Sci-Fi".
+function normalizeTmdbGenres(genres: Array<{ name: string }>): string[] {
+  return genres.map((g) => (g.name === 'Science Fiction' ? 'Sci-Fi' : g.name));
+}
+
 function tmdbHeaders() {
   return {
     Authorization: `Bearer ${process.env.TMDB_READ_ACCESS_TOKEN}`,
@@ -56,6 +61,7 @@ interface TmdbTvDetail {
   poster_path: string | null;
   backdrop_path: string | null;
   popularity: number;
+  genres: Array<{ id: number; name: string }>;
   keywords: { results: { id: number; name: string }[] };
   videos?: TmdbVideosResponse;
 }
@@ -74,6 +80,7 @@ interface TmdbMovieDetail {
   poster_path: string | null;
   backdrop_path: string | null;
   popularity: number;
+  genres: Array<{ id: number; name: string }>;
   keywords: { keywords: { id: number; name: string }[] };
   videos?: TmdbVideosResponse;
 }
@@ -218,6 +225,7 @@ export async function processTmdbTvShow(showId: number): Promise<string | null> 
       backdropUrl: detail.backdrop_path ? `${TMDB_IMAGE_BASE}${detail.backdrop_path}` : null,
       popularityScore: detail.popularity,
       isCurated: detail.popularity < TMDB_CURATED_THRESHOLD,
+      genres: normalizeTmdbGenres(detail.genres ?? []),
       trailerProvider: trailer?.provider ?? null,
       trailerVideoId: trailer?.videoId ?? null,
     })
@@ -230,6 +238,7 @@ export async function processTmdbTvShow(showId: number): Promise<string | null> 
         episodeCount: detail.number_of_episodes || null,
         popularityScore: detail.popularity,
         isCurated: detail.popularity < TMDB_CURATED_THRESHOLD,
+        genres: normalizeTmdbGenres(detail.genres ?? []),
         trailerProvider: trailer?.provider ?? null,
         trailerVideoId: trailer?.videoId ?? null,
         updatedAt: new Date(),
@@ -316,6 +325,7 @@ export async function processTmdbMovie(movieId: number): Promise<string | null> 
       backdropUrl: detail.backdrop_path ? `${TMDB_IMAGE_BASE}${detail.backdrop_path}` : null,
       popularityScore: detail.popularity,
       isCurated: detail.popularity < TMDB_CURATED_THRESHOLD,
+      genres: normalizeTmdbGenres(detail.genres ?? []),
       trailerProvider: trailer?.provider ?? null,
       trailerVideoId: trailer?.videoId ?? null,
     })
@@ -328,6 +338,7 @@ export async function processTmdbMovie(movieId: number): Promise<string | null> 
         episodeDurationMinutes: detail.runtime ?? null,
         popularityScore: detail.popularity,
         isCurated: detail.popularity < TMDB_CURATED_THRESHOLD,
+        genres: normalizeTmdbGenres(detail.genres ?? []),
         trailerProvider: trailer?.provider ?? null,
         trailerVideoId: trailer?.videoId ?? null,
         updatedAt: new Date(),

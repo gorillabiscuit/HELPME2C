@@ -51,6 +51,9 @@ interface AniListMedia {
   };
   bannerImage: string | null;
   popularity: number;
+  // Top-level genre strings from AniList (e.g. "Action", "Comedy").
+  // Distinct from `tags` which are thematic subcategories.
+  genres: string[];
   // AniList's trailer field — present when they know of one. `site` is
   // 'youtube' (lowercased) for YouTube trailers; we normalise on
   // 'youtube' before storage.
@@ -105,6 +108,7 @@ const PAGE_QUERY = /* GraphQL */ `
         }
         bannerImage
         popularity
+        genres
         trailer {
           id
           site
@@ -259,6 +263,7 @@ export async function processAnilistMedia(media: AniListMedia): Promise<string |
       backdropUrl: media.bannerImage,
       popularityScore: media.popularity,
       isCurated: media.popularity < ANILIST_CURATED_THRESHOLD,
+      genres: media.genres ?? [],
       idMal: media.idMal,
       trailerProvider,
       trailerVideoId,
@@ -272,6 +277,7 @@ export async function processAnilistMedia(media: AniListMedia): Promise<string |
         episodeCount: media.episodes,
         popularityScore: media.popularity,
         isCurated: media.popularity < ANILIST_CURATED_THRESHOLD,
+        genres: media.genres ?? [],
         idMal: media.idMal,
         trailerProvider,
         trailerVideoId,

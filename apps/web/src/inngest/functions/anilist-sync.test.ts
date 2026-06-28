@@ -188,6 +188,7 @@ interface AniListMediaFixture {
   coverImage: { extraLarge: string | null; large: string | null };
   bannerImage: string | null;
   popularity: number;
+  genres: string[];
   trailer: { id: string | null; site: string | null } | null;
   tags: AniListTagFixture[];
 }
@@ -205,6 +206,7 @@ interface AniListMediaOverrides {
   coverImage?: Partial<AniListMediaFixture['coverImage']>;
   bannerImage?: string | null;
   popularity?: number;
+  genres?: string[];
   tags?: AniListTagFixture[];
 }
 
@@ -229,6 +231,7 @@ function anilistMediaFixture(overrides: AniListMediaOverrides = {}): AniListMedi
     },
     bannerImage: 'https://example.test/banner.jpg',
     popularity: 555_000,
+    genres: ['Action', 'Adventure'],
     trailer: null,
     tags: [
       {
