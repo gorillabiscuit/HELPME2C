@@ -146,6 +146,15 @@ export function OnboardingFlow({
     return () => clearTimeout(t);
   }, [query]);
 
+  // Clear the search box whenever entering the dislike phase so a previous
+  // like-phase search doesn't bleed through to "What really isn't for you?".
+  useEffect(() => {
+    if (phase === 'dislikes') {
+      setQuery('');
+      setDebouncedQuery('');
+    }
+  }, [phase]);
+
   // Dislike phase — mainstream titles for Screen 2.
   // seenDislikeIds grows on each refresh so we never show the same title twice.
   const [seenDislikeIds, setSeenDislikeIds] = useState<string[]>([]);
