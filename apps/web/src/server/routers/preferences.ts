@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import * as Sentry from '@sentry/nextjs';
 import { eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import {
@@ -190,6 +191,9 @@ Return ONLY a JSON array, one entry per show, in the same order. No markdown, no
   }
 ]`;
 
+      // Non-null assert: ANTHROPIC_API_KEY is required server config. If it's
+      // missing the SDK throws, which the catch below logs (not silent) and
+      // surfaces as the "couldn't analyse" state — never a swallowed error.
       const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
       let raw: string;
       try {
@@ -203,11 +207,17 @@ Return ONLY a JSON array, one entry per show, in the same order. No markdown, no
         });
         const block = response.content[0];
         raw = '[' + (block?.type === 'text' ? block.text : '');
-      } catch {
+      } catch (err) {
+        // §3: log, don't swallow. null → the client's "couldn't analyse" state.
+        Sentry.captureException(err, {
+          tags: { surface: 'preferences.generateInsight', step: 'anthropic-call' },
+        });
         return null;
       }
 
       try {
+        // Cast: JSON.parse returns unknown; the model is prompted for this exact
+        // shape and the Array/field guards below drop anything malformed.
         const parsed = JSON.parse(raw) as Array<{
           titleId: string;
           question: string;
@@ -240,7 +250,11 @@ Return ONLY a JSON array, one entry per show, in the same order. No markdown, no
               posterUrl: titleMap.get(p.titleId)?.posterUrl ?? null,
             };
           });
-      } catch {
+      } catch (err) {
+        // §3: log malformed-JSON, don't swallow. null → "couldn't analyse".
+        Sentry.captureException(err, {
+          tags: { surface: 'preferences.generateInsight', step: 'parse' },
+        });
         return null;
       }
     }),
