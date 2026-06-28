@@ -1,5 +1,8 @@
+'use client';
+
 import Image from 'next/image';
 import Link from 'next/link';
+import { useState } from 'react';
 import { Star, Users } from 'lucide-react';
 import { FirstVisitCallout } from '@/components/first-visit-callout';
 import { PreviewOverlay } from '@/components/preview-overlay';
@@ -45,6 +48,7 @@ interface DashboardHomeProps {
 }
 
 export function DashboardHome({ firstName, recs, filter, novelty }: DashboardHomeProps) {
+  const [isUpdating, setIsUpdating] = useState(false);
   const greetingSuffix = firstName ? `, ${firstName}` : '';
 
   if (recs.length === 0) {
@@ -90,7 +94,7 @@ export function DashboardHome({ firstName, recs, filter, novelty }: DashboardHom
         </p>
 
         <div className="mt-4 max-w-sm">
-          <NoveltySlider initialValue={novelty} compact />
+          <NoveltySlider initialValue={novelty} compact onLoadingChange={setIsUpdating} />
         </div>
 
         {filter.active ? (
@@ -167,7 +171,7 @@ export function DashboardHome({ firstName, recs, filter, novelty }: DashboardHom
 
       <ul
         aria-label="Recommendations"
-        className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4"
+        className={`grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4 transition-opacity duration-300 ${isUpdating ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}
       >
         {recs.map((rec, i) => {
           const mediaTypeLabel = MEDIA_TYPE_LABEL[rec.mediaType];

@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { trpc } from '@/lib/trpc';
 
 interface NoveltySliderProps {
@@ -11,6 +12,8 @@ interface NoveltySliderProps {
   /** If true, renders a compact inline version (recs page).
    *  If false (default), renders the full onboarding card version. */
   compact?: boolean;
+  /** Called whenever the loading state changes (saving + router refresh). */
+  onLoadingChange?: (loading: boolean) => void;
 }
 
 const LABELS = [
@@ -29,10 +32,17 @@ function getLabelForValue(value: number) {
   return LABELS[1];
 }
 
-export function NoveltySlider({ initialValue, onChange, compact = false }: NoveltySliderProps) {
+export function NoveltySlider({
+  initialValue,
+  onChange,
+  compact = false,
+  onLoadingChange,
+}: NoveltySliderProps) {
   const [value, setValue] = useState<number>(initialValue ?? 0.3);
   const [isSaving, setIsSaving] = useState(false);
+  const [isRefreshing, startRefresh] = useTransition();
   const saveNovelty = trpc.preferences.saveNovelty.useMutation();
+  const router = useRouter();
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -47,12 +57,25 @@ export function NoveltySlider({ initialValue, onChange, compact = false }: Novel
     setIsSaving(true);
     await saveNovelty.mutateAsync({ novelty: value });
     setIsSaving(false);
-  }, [saveNovelty, value]);
+    // Re-run the Server Component so recommendations.list re-reads with
+    // the updated novelty preference and applies the new blend order.
+    // useTransition keeps isPending=true until the refresh settles so we
+    // can show a loading state without blocking the input.
+    startRefresh(() => {
+      router.refresh();
+    });
+  }, [saveNovelty, value, router]);
 
   // getLabelForValue always returns one of the three LABELS entries.
   // The non-null assertion is safe: value is always 0–1 so a match exists.
 
   const current = getLabelForValue(value)!;
+
+  const isLoading = isSaving || isRefreshing;
+
+  useEffect(() => {
+    onLoadingChange?.(isLoading);
+  }, [isLoading, onLoadingChange]);
 
   if (compact) {
     return (
@@ -67,12 +90,14 @@ export function NoveltySlider({ initialValue, onChange, compact = false }: Novel
           onChange={handleChange}
           onMouseUp={handleCommit}
           onTouchEnd={handleCommit}
-          className="h-1.5 w-full cursor-pointer accent-primary"
+          disabled={isLoading}
+          className="h-1.5 w-full cursor-pointer accent-primary disabled:opacity-50"
           aria-label="Novelty preference"
         />
         <span className="shrink-0 text-xs text-muted-foreground">Adventurous</span>
-        <span className="ml-1 shrink-0 text-xs font-medium text-primary">
-          {isSaving ? '…' : current.label}
+        {/* Fixed width so the slider doesn't resize as the label text changes. */}
+        <span className="ml-1 w-20 shrink-0 text-right text-xs font-medium text-primary">
+          {isLoading ? 'Updating…' : current.label}
         </span>
       </div>
     );
