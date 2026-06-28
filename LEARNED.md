@@ -202,6 +202,10 @@ either. The 50 AniList anime came from a one-off page-1 trigger, not a
 fan-out — also a manual local action. Easy to misread as "AniList
 fan-out has a bug."
 
+**Update 2026-06-28:** catalog now fully synced — 6,623 TV + 10,712
+film (tmdb) + 5,013 anime (anilist) = ~22,348 titles. The tiny counts
+above are historical (the 2026-05-08 incident), not the current state.
+
 **How to spot it next time:**
 - `vercel env ls production | grep INNGEST` — if `INNGEST_EVENT_KEY`
   and `INNGEST_SIGNING_KEY` aren't both there, prod is dead.

@@ -68,3 +68,10 @@ android/.gradle/
 # graphify skill output — local tool artifact (AST cache + generated graph),
 # regenerable, hundreds of files / tens of MB. Never belongs in git.
 graphify-out/
+
+# search-coverage harness outputs — regenerable diagnostic artifacts
+# (run apps/web/scripts/search-coverage/search-coverage.ts). The scripts are
+# tracked; their generated report/results are not. NB: dir is "search-coverage"
+# not "coverage" because the generic `coverage/` rule above would ignore it.
+apps/web/scripts/search-coverage/coverage-report.md
+apps/web/scripts/search-coverage/coverage-results.json

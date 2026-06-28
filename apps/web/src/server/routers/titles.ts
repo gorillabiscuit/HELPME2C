@@ -350,6 +350,21 @@ export const titlesRouter = router({
       // Fix: normalise each row's score by the per-type max across the
       // matching result set, then sort descending. This preserves the
       // "most popular match" intent while removing the scale bias.
+      //
+      // CRITICAL: the candidate window below must be ordered by RELEVANCE before
+      // the LIMIT, not alphabetically. The textMatch clause is deliberately
+      // broad (word_similarity > 0.4 matches any title sharing a word), so a
+      // query like "Mad Men" matches hundreds of rows. Ordering by title ASC and
+      // then limiting would keep the alphabetically-first matches ("12 Angry
+      // Men", …) and discard the exact match before the JS re-rank ever sees it.
+      // We order by exact-substring-hit, then trigram closeness, then
+      // popularity, so the LIMIT keeps the best candidates. The JS pass below
+      // then refines ranking (cross-type popularity normalisation + match grade).
+      const exactHit = sql`CASE WHEN ${titles.title} ILIKE ${pattern} OR ${titles.originalTitle} ILIKE ${pattern} THEN 1 ELSE 0 END`;
+      const closeness = sql`GREATEST(word_similarity(${trimmed}, ${titles.title}), word_similarity(${trimmed}, COALESCE(${titles.originalTitle}, '')))`;
+      // Keep a generous candidate pool so the JS re-rank has room to work, with
+      // a floor so small limits (e.g. autocomplete) still pull enough context.
+      const candidatePool = Math.max(input.limit * 3, 60);
       const rows = await ctx.db
         .select({
           id: titles.id,
@@ -364,20 +379,34 @@ export const titlesRouter = router({
         })
         .from(titles)
         .where(where)
-        .orderBy(sql`${titles.title} ASC`) // stable base order; re-sorted below
-        .limit(input.limit * 3);
+        .orderBy(
+          sql`${exactHit} DESC`,
+          sql`${closeness} DESC`,
+          sql`${titles.popularityScore} DESC NULLS LAST`,
+        )
+        .limit(candidatePool);
 
-      // Scoring: exact substring matches rank above fuzzy trigram matches,
-      // and within each tier we sort by normalised popularity.
+      // Scoring: grade match quality, then break ties by normalised popularity.
       //
-      // exactScore: 1 if the title/originalTitle contains the query as a
-      // substring (case-insensitive), 0 otherwise. This ensures "Breaking
-      // Bad" always beats "Braking Bad" even if the latter has higher
-      // popularity somehow.
+      // Match grade (high → low) — a binary "contains substring" is too coarse:
+      // for the query "Lost" both "Lost" and "Aquaman and the Lost Kingdom"
+      // contain the substring, so a binary flag lets the more popular partial
+      // match bury the exact title. Grading fixes that:
+      //   3 = title/original equals the query exactly
+      //   2 = title/original starts with the query (at a word boundary)
+      //   1 = title/original contains the query as a substring
+      //   0 = trigram-only (fuzzy) match
       const lowerQ = trimmed.toLowerCase();
-      const isExact = (row: { title: string; originalTitle: string | null }) =>
-        row.title.toLowerCase().includes(lowerQ) ||
-        (row.originalTitle?.toLowerCase().includes(lowerQ) ?? false);
+      const grade = (value: string | null): number => {
+        if (!value) return 0;
+        const v = value.toLowerCase();
+        if (v === lowerQ) return 3;
+        if (v.startsWith(lowerQ + ' ') || v.startsWith(lowerQ + ':')) return 2;
+        if (v.includes(lowerQ)) return 1;
+        return 0;
+      };
+      const matchGrade = (row: { title: string; originalTitle: string | null }) =>
+        Math.max(grade(row.title), grade(row.originalTitle));
 
       // Compute per-type max for normalisation.
       const maxByType: Record<string, number> = { tv: 1, film: 1, anime: 1 };
@@ -387,11 +416,11 @@ export const titlesRouter = router({
         if (score > (maxByType[mt] ?? 1)) maxByType[mt] = score;
       }
       const sorted = [...rows].sort((a, b) => {
-        // Tier 1: exact substring match wins over fuzzy match.
-        const aExact = isExact(a) ? 1 : 0;
-        const bExact = isExact(b) ? 1 : 0;
-        if (bExact !== aExact) return bExact - aExact;
-        // Tier 2: within the same tier, sort by normalised popularity.
+        // Tier 1: better match grade wins (exact > prefix > substring > fuzzy).
+        const aGrade = matchGrade(a);
+        const bGrade = matchGrade(b);
+        if (bGrade !== aGrade) return bGrade - aGrade;
+        // Tier 2: within the same grade, sort by normalised popularity.
         const aNorm = (a.popularityScore ?? 0) / (maxByType[a.mediaType] ?? 1);
         const bNorm = (b.popularityScore ?? 0) / (maxByType[b.mediaType] ?? 1);
         if (bNorm !== aNorm) return bNorm - aNorm;
