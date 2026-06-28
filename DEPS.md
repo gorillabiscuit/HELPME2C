@@ -81,6 +81,7 @@ Group by package within the monorepo (root, then per-app, per-package).
 - **drizzle-kit** *(^0.31.10)* — Drizzle CLI for schema introspection, migration generation (`drizzle-kit generate`), and migration application (`drizzle-kit migrate`). Dev-only; not shipped to production.
 - **pg** *(^8.20.0)* — `node-postgres` driver. Used by drizzle-kit only (so dev-only): the Neon serverless WebSocket driver hangs inside `drizzle-kit migrate`, so `pg` is the migration-time driver. Runtime app code still uses `@neondatabase/serverless` per ADR-0019.
 - **@types/pg** *(^8.20.0)* — TypeScript types for `pg`. Dev-only; required for typecheck.
+- **@electric-sql/pglite** *(^0.5.3)* — in-process Postgres (WASM) with the `pg_trgm` contrib extension. Dev-only; used by the search-ranking regression test (`titles.search.test.ts`) to run the genuine SQL query path against real Postgres semantics (`word_similarity`, `ILIKE`, `ORDER BY … LIMIT`). Chosen over Testcontainers because the bug guarded is query-structure, not planner/version-sensitive — PGlite keeps CI Docker-free and fast. The repo's other router tests mock the DB; this one must not, because the bug lives in SQL the mock can't reproduce.
 - **@types/react** *(^19.0.0)* — React 19 type definitions.
 - **@types/react-dom** *(^19.0.0)* — React DOM type definitions.
 
