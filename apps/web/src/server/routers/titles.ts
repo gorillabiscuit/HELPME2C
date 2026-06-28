@@ -9,43 +9,9 @@ import {
   watchEntries,
 } from '../schema';
 import { dedupeByFranchise } from '../lib/franchise';
+import { blendByNovelty } from '../lib/novelty';
 import { protectedProcedure, router } from '../trpc';
 import { searchTmdbAndIngest } from '@/inngest/functions/tmdb-sync';
-
-/**
- * Blend a sorted list of titles by novelty preference.
- *
- * novelty=0  → pure popularity order (all popular, no curated bump)
- * novelty=1  → curated titles first, then popular remainder
- * in between → proportional mix
- *
- * The input list is already deduped and sorted popularity-DESC.
- * We split into curated / non-curated sub-lists, take the proportional
- * share from each, then interleave curated-first so they're visible at
- * the top of the grid when novelty > 0.
- */
-function blendByNovelty<T extends { isCurated: boolean }>(
-  rows: T[],
-  novelty: number,
-  limit: number,
-): T[] {
-  if (novelty <= 0) return rows.slice(0, limit);
-  const curated = rows.filter((r) => r.isCurated);
-  const popular = rows.filter((r) => !r.isCurated);
-  const curatedSlots = Math.round(limit * novelty);
-  const popularSlots = limit - curatedSlots;
-  const blended: T[] = [];
-  // Interleave: for every popular item add a curated item after it until
-  // we hit the curated slot cap, then flush the remaining popular items.
-  const cQ = [...curated.slice(0, curatedSlots)];
-  const pQ = [...popular.slice(0, popularSlots)];
-  while (blended.length < limit) {
-    if (pQ.length) blended.push(pQ.shift()!);
-    if (blended.length < limit && cQ.length) blended.push(cQ.shift()!);
-    if (!pQ.length && !cQ.length) break;
-  }
-  return blended;
-}
 
 // Auto-synced with the Drizzle pgEnum values, same single-source-of-truth
 // pattern as watch.ts.
