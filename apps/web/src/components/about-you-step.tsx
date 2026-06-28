@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import * as Sentry from '@sentry/nextjs';
 import { trpc } from '@/lib/trpc';
 
 interface AboutYouStepProps {
@@ -37,7 +38,7 @@ type AffinitySlug = (typeof AFFINITY_OPTIONS)[number]['value'];
 const CURRENT_YEAR = new Date().getFullYear();
 
 export function AboutYouStep({ onComplete }: AboutYouStepProps) {
-  const [gender, setGender] = useState<string | null>(null);
+  const [gender, setGender] = useState<(typeof GENDER_OPTIONS)[number]['value'] | null>(null);
   const [birthYear, setBirthYear] = useState('');
   const [affinities, setAffinities] = useState<AffinitySlug[]>([]);
   const [filterProviders, setFilterProviders] = useState(false);
@@ -55,16 +56,22 @@ export function AboutYouStep({ onComplete }: AboutYouStepProps) {
 
   async function handleContinue() {
     setSaving(true);
-    await updateProfile.mutateAsync({
-      ...(gender
-        ? { gender: gender as 'male' | 'female' | 'non-binary' | 'prefer_not_to_say' }
-        : {}),
-      ...(birthYear && birthYearValid ? { birthYear: birthYearNum } : {}),
-      ...(affinities.length > 0 ? { contentAffinities: affinities } : {}),
-      filterProviders,
-    });
-    setSaving(false);
-    onComplete();
+    try {
+      await updateProfile.mutateAsync({
+        ...(gender ? { gender } : {}),
+        ...(birthYear && birthYearValid ? { birthYear: birthYearNum } : {}),
+        ...(affinities.length > 0 ? { contentAffinities: affinities } : {}),
+        filterProviders,
+      });
+      onComplete();
+    } catch (err) {
+      // §3: surface, don't swallow. Keep the user on the step (saving resets in
+      // finally so the button is usable again) rather than advancing as if it
+      // saved.
+      Sentry.captureException(err, { tags: { surface: 'about-you-step', step: 'updateProfile' } });
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -83,6 +90,7 @@ export function AboutYouStep({ onComplete }: AboutYouStepProps) {
           {GENDER_OPTIONS.map((opt) => (
             <button
               key={opt.value}
+              type="button"
               onClick={() => setGender(gender === opt.value ? null : opt.value)}
               className={[
                 'rounded-lg border px-4 py-2.5 text-sm transition-colors',
@@ -159,6 +167,7 @@ export function AboutYouStep({ onComplete }: AboutYouStepProps) {
             </p>
           </div>
           <button
+            type="button"
             role="switch"
             aria-checked={filterProviders}
             onClick={() => setFilterProviders((v) => !v)}
@@ -190,6 +199,7 @@ export function AboutYouStep({ onComplete }: AboutYouStepProps) {
       </div>
 
       <button
+        type="button"
         onClick={handleContinue}
         disabled={saving || !birthYearValid}
         className="w-full rounded-lg bg-primary px-4 py-3 text-sm font-medium text-primary-foreground transition-opacity disabled:opacity-50"
@@ -198,6 +208,7 @@ export function AboutYouStep({ onComplete }: AboutYouStepProps) {
       </button>
 
       <button
+        type="button"
         onClick={onComplete}
         className="text-center text-sm text-muted-foreground underline-offset-4 hover:underline"
       >

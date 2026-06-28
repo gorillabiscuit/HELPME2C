@@ -170,7 +170,7 @@ export const meRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const patch: Record<string, unknown> = { updatedAt: new Date() };
+      const patch: Partial<typeof users.$inferInsert> = { updatedAt: new Date() };
       if (input.birthYear !== undefined) patch.birthYear = input.birthYear;
       if (input.gender !== undefined) patch.gender = input.gender;
       if (input.filterProviders !== undefined) patch.filterProviders = input.filterProviders;
