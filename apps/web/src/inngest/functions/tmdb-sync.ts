@@ -7,6 +7,11 @@ import { titles, tags, titleTags, streamingAvailability } from '@/server/schema'
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 
+// Titles with TMDB popularity below this are "curated niche" — engine-approved
+// but not mainstream. TMDB blockbusters reach 500-1000; < 30 covers ~92% of our
+// catalog, which skews niche by design (catalog-broaden.ts indexes many obscure titles).
+const TMDB_CURATED_THRESHOLD = 30;
+
 function tmdbHeaders() {
   return {
     Authorization: `Bearer ${process.env.TMDB_READ_ACCESS_TOKEN}`,
@@ -212,6 +217,7 @@ export async function processTmdbTvShow(showId: number): Promise<string | null> 
       posterUrl: detail.poster_path ? `${TMDB_IMAGE_BASE}${detail.poster_path}` : null,
       backdropUrl: detail.backdrop_path ? `${TMDB_IMAGE_BASE}${detail.backdrop_path}` : null,
       popularityScore: detail.popularity,
+      isCurated: detail.popularity < TMDB_CURATED_THRESHOLD,
       trailerProvider: trailer?.provider ?? null,
       trailerVideoId: trailer?.videoId ?? null,
     })
@@ -223,6 +229,7 @@ export async function processTmdbTvShow(showId: number): Promise<string | null> 
         status: tmdbStatusToEnum(detail.status),
         episodeCount: detail.number_of_episodes || null,
         popularityScore: detail.popularity,
+        isCurated: detail.popularity < TMDB_CURATED_THRESHOLD,
         trailerProvider: trailer?.provider ?? null,
         trailerVideoId: trailer?.videoId ?? null,
         updatedAt: new Date(),
@@ -308,6 +315,7 @@ export async function processTmdbMovie(movieId: number): Promise<string | null> 
       posterUrl: detail.poster_path ? `${TMDB_IMAGE_BASE}${detail.poster_path}` : null,
       backdropUrl: detail.backdrop_path ? `${TMDB_IMAGE_BASE}${detail.backdrop_path}` : null,
       popularityScore: detail.popularity,
+      isCurated: detail.popularity < TMDB_CURATED_THRESHOLD,
       trailerProvider: trailer?.provider ?? null,
       trailerVideoId: trailer?.videoId ?? null,
     })
@@ -319,6 +327,7 @@ export async function processTmdbMovie(movieId: number): Promise<string | null> 
         status: tmdbStatusToEnum(detail.status),
         episodeDurationMinutes: detail.runtime ?? null,
         popularityScore: detail.popularity,
+        isCurated: detail.popularity < TMDB_CURATED_THRESHOLD,
         trailerProvider: trailer?.provider ?? null,
         trailerVideoId: trailer?.videoId ?? null,
         updatedAt: new Date(),

@@ -4,6 +4,10 @@ import { db } from '@/server/db';
 import { tags, titles, titleTags } from '@/server/schema';
 
 const ANILIST_API = 'https://graphql.anilist.co';
+
+// AniList popularity is total users who added the title to their list.
+// < 30,000 marks ~52% of our catalog as niche (our catalog median is 25,098).
+const ANILIST_CURATED_THRESHOLD = 30_000;
 // AniList rate limit: 90 req/min. Per-page is one GraphQL call (the page +
 // all its media + tags in one shot — much more efficient than TMDB's
 // per-show fetches), so 100 pages × 1 = 100 calls per cron run, well under
@@ -254,6 +258,7 @@ export async function processAnilistMedia(media: AniListMedia): Promise<string |
       posterUrl: media.coverImage.extraLarge || media.coverImage.large,
       backdropUrl: media.bannerImage,
       popularityScore: media.popularity,
+      isCurated: media.popularity < ANILIST_CURATED_THRESHOLD,
       idMal: media.idMal,
       trailerProvider,
       trailerVideoId,
@@ -266,6 +271,7 @@ export async function processAnilistMedia(media: AniListMedia): Promise<string |
         status,
         episodeCount: media.episodes,
         popularityScore: media.popularity,
+        isCurated: media.popularity < ANILIST_CURATED_THRESHOLD,
         idMal: media.idMal,
         trailerProvider,
         trailerVideoId,

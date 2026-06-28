@@ -254,7 +254,6 @@ export const recommendationsRouter = router({
           posterUrl: titles.posterUrl,
           trailerProvider: titles.trailerProvider,
           trailerVideoId: titles.trailerVideoId,
-          isCurated: titles.isCurated,
           popularityScore: titles.popularityScore,
         })
         .from(titles)
@@ -275,7 +274,6 @@ export const recommendationsRouter = router({
         posterUrl: string | null;
         trailerProvider: string | null;
         trailerVideoId: string | null;
-        isCurated: boolean;
         popularityScore: number | null;
         score: number;
         reasonHint: string | null;
