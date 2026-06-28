@@ -318,25 +318,56 @@ export const recommendationsRouter = router({
         .sort((a, b) => b.firstScore - a.firstScore)
         .map((g) => g.representative);
 
-      // isCurated is always false during ingest (not yet populated by the sync
-      // jobs). Derive adventurousness from popularity rank within this pool:
-      // titles below the median popularity are the "niche" picks that surface
-      // when the user slides toward Adventurous.
-      const sortedByPop = [...sortedReps].sort(
-        (a, b) => (a.popularityScore ?? 0) - (b.popularityScore ?? 0),
-      );
-      const medianPop = sortedByPop[Math.floor(sortedByPop.length / 2)]?.popularityScore ?? 0;
-      // Filter preserves engine-rank order (sortedReps is already sorted by score).
-      const niche = sortedReps.filter((r) => (r.popularityScore ?? 0) <= medianPop);
-      const mainstream = sortedReps.filter((r) => (r.popularityScore ?? 0) > medianPop);
-
-      // Front-load niche titles so the visual difference between familiar and
-      // adventurous is immediately obvious (rather than interleaving, which
-      // buries niche titles at even positions). Backfill with mainstream when
-      // niche supply runs short.
-      const nicheCount = Math.min(Math.round(limit * novelty), niche.length);
-      const mainstreamCount = Math.min(limit - nicheCount, mainstream.length);
-      const items = [...niche.slice(0, nicheCount), ...mainstream.slice(0, mainstreamCount)];
+      // Rank-based novelty reorder.
+      //
+      // The partition approach (split by median popularity, front-load niche)
+      // breaks when the pool has ≤ limit unique franchise groups — Mixed and
+      // Adventurous both exhaust the niche supply and show identical content.
+      // It also crashes at Familiar when popularityScore is mostly null (all
+      // items land in niche, mainstream is empty, result is 0 items → redirect
+      // to /onboarding for a user who actually has recs).
+      //
+      // Instead: assign each item normalised engine rank and popularity rank,
+      // then compute a blended sort key.
+      //
+      //   engNorm ∈ [0,1]  — 0 = top engine pick, 1 = worst
+      //   popNorm ∈ [0,1]  — 0 = most popular, 1 = least popular (niche)
+      //   sortKey = engNorm + (1 − 2·novelty) · popNorm   (sort ascending)
+      //
+      //   novelty=0 (familiar):    sortKey = engNorm + popNorm
+      //     → popular engine picks score lowest → appear first
+      //   novelty=0.5 (mixed):     sortKey = engNorm
+      //     → popularity has no effect; pure engine order
+      //   novelty=1 (adventurous): sortKey = engNorm − popNorm
+      //     → niche engine picks score lowest → appear first
+      //
+      // Graceful degradation: null popularityScore treated as 0 in the
+      // descending popularity sort → placed last (highest popNorm ≈ 1) → at
+      // adventurous they rank first, at familiar they rank last. This is
+      // directionally correct (unknown popularity ≈ niche) and never produces
+      // an empty result.
+      const N = sortedReps.length;
+      let items: typeof sortedReps;
+      if (N <= 1) {
+        items = sortedReps.slice(0, limit);
+      } else {
+        const norm = N - 1;
+        // Popularity rank: sort descending so most popular = index 0.
+        const byPopDesc = [...sortedReps].sort(
+          (a, b) => (b.popularityScore ?? 0) - (a.popularityScore ?? 0),
+        );
+        const popNormMap = new Map(byPopDesc.map((r, i) => [r.id, i / norm]));
+        // Engine rank: sortedReps is already in engine-score order.
+        const engNormMap = new Map(sortedReps.map((r, i) => [r.id, i / norm]));
+        const weight = 1 - 2 * novelty;
+        items = [...sortedReps]
+          .sort((a, b) => {
+            const aKey = (engNormMap.get(a.id) ?? 0) + weight * (popNormMap.get(a.id) ?? 1);
+            const bKey = (engNormMap.get(b.id) ?? 0) + weight * (popNormMap.get(b.id) ?? 1);
+            return aKey - bKey;
+          })
+          .slice(0, limit);
+      }
 
       return {
         items,
