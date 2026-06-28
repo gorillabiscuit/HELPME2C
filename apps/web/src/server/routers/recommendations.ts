@@ -4,6 +4,7 @@ import {
   recFeedback,
   streamingAvailability,
   titles,
+  userPreferences,
   userRecommendations,
   userStreamingProviders,
   users,
@@ -65,11 +66,32 @@ export const recommendationsRouter = router({
         return { items: [], computedAt: null, filtered: false, filter: emptyFilter };
       }
 
-      const [row] = await ctx.db
-        .select()
-        .from(userRecommendations)
-        .where(eq(userRecommendations.userId, internalUserId))
-        .limit(1);
+      // Run independent single-row lookups in parallel — each only needs
+      // internalUserId / ctx.userId which are already resolved above.
+      const [prefRow, row, userRow] = await Promise.all([
+        ctx.db
+          .select({ preferences: userPreferences.preferences })
+          .from(userPreferences)
+          .where(eq(userPreferences.userId, internalUserId))
+          .limit(1)
+          .then((r) => r[0]),
+        ctx.db
+          .select()
+          .from(userRecommendations)
+          .where(eq(userRecommendations.userId, internalUserId))
+          .limit(1)
+          .then((r) => r[0]),
+        ctx.db
+          .select({ filterProviders: users.filterProviders })
+          .from(users)
+          .where(eq(users.clerkId, ctx.userId))
+          .limit(1)
+          .then((r) => r[0]),
+      ]);
+
+      // Default 0.3 matches the slider's initialValue default and the
+      // comment in UserPreferencesData: "slightly familiar-leaning".
+      const novelty: number = prefRow?.preferences?.novelty ?? 0.3;
 
       if (!row) {
         return { items: [], computedAt: null, filtered: false, filter: emptyFilter };
@@ -91,11 +113,6 @@ export const recommendationsRouter = router({
       // regardless of how many providers the user has saved. When true,
       // restrict to titles that have a streaming_availability row in the
       // request country with one of those provider_ids.
-      const [userRow] = await ctx.db
-        .select({ filterProviders: users.filterProviders })
-        .from(users)
-        .where(eq(users.clerkId, ctx.userId))
-        .limit(1);
       const filterOptIn = userRow?.filterProviders ?? false;
 
       const connectedRows = filterOptIn
@@ -231,6 +248,8 @@ export const recommendationsRouter = router({
           posterUrl: titles.posterUrl,
           trailerProvider: titles.trailerProvider,
           trailerVideoId: titles.trailerVideoId,
+          isCurated: titles.isCurated,
+          popularityScore: titles.popularityScore,
         })
         .from(titles)
         .where(inArray(titles.id, allFilteredIds));
@@ -250,6 +269,8 @@ export const recommendationsRouter = router({
         posterUrl: string | null;
         trailerProvider: string | null;
         trailerVideoId: string | null;
+        isCurated: boolean;
+        popularityScore: number | null;
         score: number;
         reasonHint: string | null;
       };
@@ -287,10 +308,29 @@ export const recommendationsRouter = router({
         }
       }
 
-      const items = Array.from(groups.values())
+      const sortedReps = Array.from(groups.values())
         .sort((a, b) => b.firstScore - a.firstScore)
-        .slice(0, limit)
         .map((g) => g.representative);
+
+      // isCurated is always false during ingest (not yet populated by the sync
+      // jobs). Derive adventurousness from popularity rank within this pool:
+      // titles below the median popularity are the "niche" picks that surface
+      // when the user slides toward Adventurous.
+      const sortedByPop = [...sortedReps].sort(
+        (a, b) => (a.popularityScore ?? 0) - (b.popularityScore ?? 0),
+      );
+      const medianPop = sortedByPop[Math.floor(sortedByPop.length / 2)]?.popularityScore ?? 0;
+      // Filter preserves engine-rank order (sortedReps is already sorted by score).
+      const niche = sortedReps.filter((r) => (r.popularityScore ?? 0) <= medianPop);
+      const mainstream = sortedReps.filter((r) => (r.popularityScore ?? 0) > medianPop);
+
+      // Front-load niche titles so the visual difference between familiar and
+      // adventurous is immediately obvious (rather than interleaving, which
+      // buries niche titles at even positions). Backfill with mainstream when
+      // niche supply runs short.
+      const nicheCount = Math.min(Math.round(limit * novelty), niche.length);
+      const mainstreamCount = Math.min(limit - nicheCount, mainstream.length);
+      const items = [...niche.slice(0, nicheCount), ...mainstream.slice(0, mainstreamCount)];
 
       return {
         items,
