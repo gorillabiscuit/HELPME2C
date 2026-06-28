@@ -38,6 +38,7 @@ vi.mock('@/inngest/functions/tmdb-sync', () => ({
 // Imported after the mocks above so the mocks are in place at module load.
 const { titlesRouter } = await import('./titles');
 const schema = await import('../schema');
+const { searchTmdbAndIngest } = await import('@/inngest/functions/tmdb-sync');
 
 // Full mirror of the `titles` table (schema/titles.ts) — drizzle's INSERT
 // enumerates every column (DEFAULT for omitted ones), so the test table must
@@ -85,7 +86,7 @@ async function makeCaller(seed: SeedTitle[]) {
   const client = new PGlite({ extensions: { pg_trgm } });
   await client.exec(DDL);
   const db = drizzle(client, { schema });
-  await db.insert(schema.titles).values(seed);
+  if (seed.length > 0) await db.insert(schema.titles).values(seed);
   // protectedProcedure only checks userId; search uses only ctx.db.
   // `db as never` because the PGlite drizzle type is structurally distinct from
   // the production neon-http drizzle type, but exposes the identical query API.
@@ -171,5 +172,45 @@ describe('titlesRouter.search ranking', () => {
     const results = await caller.search({ q: 'Shingeki no Kyojin' });
 
     expect(results[0]?.title).toBe('Attack on Titan');
+  });
+});
+
+describe('titlesRouter.search on-demand ingest fallback', () => {
+  // The fallback fires when trimmed.length >= 5 AND the top local result has
+  // matchGrade < 2 (no prefix or exact match). A count-based guard ("< 3
+  // results") was dead at 22k+ titles because the broad fuzzy filter always
+  // returns ≥3 rows even when the real show isn't in the catalog.
+  let nextId = 0;
+  beforeEach(() => {
+    nextId = 0;
+    vi.mocked(searchTmdbAndIngest).mockClear();
+  });
+  const seedId = () => `ext-${nextId++}`;
+
+  it('fires ingest when the catalog has no result with grade >= 2 for a long-enough query', async () => {
+    // Empty catalog — topGrade = 0.
+    const caller = await makeCaller([]);
+    await caller.search({ q: 'Baahubali' });
+    expect(vi.mocked(searchTmdbAndIngest)).toHaveBeenCalledWith('Baahubali', 5);
+  });
+
+  it('suppresses ingest when the top local result is a prefix match (grade 2) or better', async () => {
+    const caller = await makeCaller([
+      {
+        externalId: seedId(),
+        source: 'tmdb',
+        mediaType: 'tv',
+        title: 'Breaking Bad',
+        popularityScore: 100,
+      },
+    ]);
+    await caller.search({ q: 'Breaking Bad' });
+    expect(vi.mocked(searchTmdbAndIngest)).not.toHaveBeenCalled();
+  });
+
+  it('suppresses ingest for queries shorter than 5 characters even with no local match', async () => {
+    const caller = await makeCaller([]);
+    await caller.search({ q: 'Lost' }); // 4 chars — below the minimum
+    expect(vi.mocked(searchTmdbAndIngest)).not.toHaveBeenCalled();
   });
 });

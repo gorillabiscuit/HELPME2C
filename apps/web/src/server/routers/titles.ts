@@ -429,22 +429,26 @@ export const titlesRouter = router({
 
       const deduped = dedupeByFranchise(sorted).slice(0, input.limit);
 
-      // On-demand ingest: if our catalog has no matches for a query of ≥3
-      // characters, fetch from TMDB in real-time and upsert. This handles
-      // the "catalog gap" — culturally significant titles that haven't been
-      // picked up by the batch broaden run yet (e.g. a show that ended
-      // before we launched, or an obscure title below our vote_count floor).
+      // On-demand ingest: if the catalog has no strong local match for a query
+      // of ≥5 characters, fetch from TMDB in real-time and upsert. This
+      // handles the "catalog gap" — culturally significant titles not yet
+      // picked up by the batch sync (show ended before we launched, obscure
+      // title below our vote_count floor, etc.).
       //
       // We ingest at most 5 titles, then re-query our DB so the response
       // still comes from the single source of truth (our catalog), not
       // directly from TMDB. This means the latency hit is only paid on the
       // first search; subsequent searches for the same title hit the DB.
       //
-      // Guard: fire if ≥5 chars AND fewer than 3 local results. "Fewer than 3"
-      // rather than "zero" because an unrelated partial match (e.g. "Modern
-      // Farmer" for the query "modern f") can suppress ingest of the intended
-      // title. The 5-char minimum keeps noisy short queries from hammering TMDB.
-      if (deduped.length < 3 && trimmed.length >= 5) {
+      // Guard: fire if ≥5 chars AND the top local result has matchGrade < 2
+      // (i.e. no local title starts with or equals the query). A count-based
+      // guard ("< 3 results") is dead at 22k+ titles: the broad fuzzy filter
+      // (word_similarity > 0.4) always returns ≥3 rows for common words, so
+      // a low-quality fuzzy match silently suppresses ingest even when the
+      // real show isn't in the catalog.
+      const topEntry = deduped[0];
+      const topGrade = topEntry ? matchGrade(topEntry) : 0;
+      if (trimmed.length >= 5 && topGrade < 2) {
         try {
           const ingestedIds = await searchTmdbAndIngest(trimmed, 5);
           if (ingestedIds.length > 0) {
@@ -481,6 +485,9 @@ export const titlesRouter = router({
                 mergedMaxByType[row.mediaType] = score;
             }
             const merged = [...all].sort((a, b) => {
+              const aGrade = matchGrade(a);
+              const bGrade = matchGrade(b);
+              if (bGrade !== aGrade) return bGrade - aGrade;
               const aNorm = (a.popularityScore ?? 0) / (mergedMaxByType[a.mediaType] ?? 1);
               const bNorm = (b.popularityScore ?? 0) / (mergedMaxByType[b.mediaType] ?? 1);
               if (bNorm !== aNorm) return bNorm - aNorm;
