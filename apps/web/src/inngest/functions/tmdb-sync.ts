@@ -188,7 +188,7 @@ async function upsertStreamingProviders(
       }
     }
   }
-  if (rows.length > 0) await db.insert(streamingAvailability).values(rows);
+  if (rows.length > 0) await db.insert(streamingAvailability).values(rows).onConflictDoNothing();
 }
 
 // Fetches and upserts a single TMDB TV show — title row, keyword tags, tag joins,
@@ -260,7 +260,12 @@ export async function processTmdbTvShow(showId: number): Promise<string | null> 
     await db.insert(titleTags).values(tagRows).onConflictDoNothing();
   }
 
-  await upsertStreamingProviders(upserted.id, providers);
+  try {
+    await upsertStreamingProviders(upserted.id, providers);
+  } catch (e) {
+    // eslint-disable-next-line no-console -- no logger abstraction yet; tracked in HM2C backlog
+    console.warn('[processTmdbTvShow] streaming availability upsert failed', { showId }, e);
+  }
   return upserted.id;
 }
 
@@ -362,7 +367,12 @@ export async function processTmdbMovie(movieId: number): Promise<string | null> 
     await db.insert(titleTags).values(tagRows).onConflictDoNothing();
   }
 
-  await upsertStreamingProviders(upserted.id, providers);
+  try {
+    await upsertStreamingProviders(upserted.id, providers);
+  } catch (e) {
+    // eslint-disable-next-line no-console -- no logger abstraction yet; tracked in HM2C backlog
+    console.warn('[processTmdbMovie] streaming availability upsert failed', { movieId }, e);
+  }
   return upserted.id;
 }
 
