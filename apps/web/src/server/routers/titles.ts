@@ -289,9 +289,16 @@ export const titlesRouter = router({
       const escaped = trimmed.replace(/[%_\\]/g, (c) => '\\' + c);
       const pattern = `%${escaped}%`;
 
-      // Hybrid match: exact substring (fast, precise) OR trigram similarity
-      // (handles typos and alternate spellings, e.g. "Kenshim" → "Kenshin",
-      // "Trust and Betrayal" → "Trust & Betrayal").
+      // Hybrid match: exact substring (fast, precise) OR full-text search with
+      // English stemming (handles word-form variants, e.g. "crouch" → "crouching",
+      // "run" → "running") OR trigram similarity (handles typos and alternate
+      // spellings, e.g. "Kenshim" → "Kenshin", "Trust and Betrayal" → "Trust & Betrayal").
+      //
+      // Full-text search uses plainto_tsquery so the English Snowball stemmer
+      // reduces both query and title words to their base form — "crouch" and
+      // "crouching" share the same lexeme, so they match. No migration needed;
+      // to_tsvector / plainto_tsquery work inline (GIN tsvector index would
+      // speed this up on large tables but 22k rows is fine without one).
       //
       // word_similarity() rather than similarity() so the query term is
       // matched against words *within* a longer title — "Kenshin" scores
@@ -308,6 +315,8 @@ export const titlesRouter = router({
       const textMatch = or(
         ilike(titles.title, pattern),
         ilike(titles.originalTitle, pattern),
+        sql`to_tsvector('english', coalesce(${titles.title}, '')) @@ plainto_tsquery('english', ${trimmed})`,
+        sql`to_tsvector('english', coalesce(${titles.originalTitle}, '')) @@ plainto_tsquery('english', ${trimmed})`,
         sql`word_similarity(${trimmed}, ${titles.title}) > ${TRGM_THRESHOLD}`,
         sql`word_similarity(${trimmed}, ${titles.originalTitle}) > ${TRGM_THRESHOLD}`,
       );
