@@ -238,10 +238,22 @@ Return ONLY a JSON array, one entry per show, in the same order. No markdown, no
             const skip =
               input.mode === 'dislike'
                 ? [
+                    {
+                      label: "It just didn't grab me",
+                      slugs: [] as string[],
+                      isAffectiveEscape: true as const,
+                    },
                     { label: "I just wasn't in the mood for it", slugs: [] as string[] },
                     { label: 'None of these fit', slugs: [] as string[], isNoneOfThese: true },
                   ]
-                : [{ label: 'None of these fit', slugs: [] as string[], isNoneOfThese: true }];
+                : [
+                    {
+                      label: 'I just liked it',
+                      slugs: [] as string[],
+                      isAffectiveEscape: true as const,
+                    },
+                    { label: 'None of these fit', slugs: [] as string[], isNoneOfThese: true },
+                  ];
             return {
               titleId: p.titleId,
               question: p.question,
@@ -325,6 +337,7 @@ Return ONLY a JSON array, one entry per show, in the same order. No markdown, no
               // generateInsight) — logged so the discovery analysis knows
               // which option was the "None of these fit" tap.
               isNoneOfThese: z.boolean().optional(),
+              isAffectiveEscape: z.boolean().optional(),
             }),
           )
           .max(10),

@@ -110,7 +110,12 @@ export function OnboardingFlow({
   >(initialPhase);
 
   // Insight screen state — populated by the generateInsight mutation.
-  type InsightOption = { label: string; slugs: string[]; isNoneOfThese?: boolean };
+  type InsightOption = {
+    label: string;
+    slugs: string[];
+    isNoneOfThese?: boolean;
+    isAffectiveEscape?: boolean;
+  };
   type PerShowInsight = {
     titleId: string;
     titleName: string;
