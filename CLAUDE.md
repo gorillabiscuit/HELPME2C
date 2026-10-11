@@ -11,7 +11,7 @@ Keep this file under 500 lines. Detail goes in `docs/decisions/` (ADRs), per-pac
 - **Service:** HelpME2C — cross-medium recommendation engine for TV and anime.
 - **Differentiator:** group recommendations with ghost-profile inference + theme-based cross-medium taxonomy.
 - **Phase:** 1A (MVP, web only, registered users only). Target: TBD; no time pressure; ship when ready.
-- **Tracker:** GitHub Issues on `gorillabiscuit/HELPME2C` (per [ADR-0029](docs/decisions/0029-project-tracker-github.md), which supersedes the original Linear choice in [ADR-0018](docs/decisions/0018-project-tracker.md)).
+- **Tracker:** Linear, workspace `helpme2c`, team `HEL` (per [ADR-0030](docs/decisions/0030-project-tracker-linear.md), which supersedes the GitHub Issues interlude in [ADR-0029](docs/decisions/0029-project-tracker-github.md)). Cards are dispatched to worker sessions; worker rules live in `.claude/skills/worker/`. Reference the card in commit scopes and PR descriptions, e.g. `feat(ml): … (HEL-12)`.
 - **Read first:** `PROJECT.md` (product scope, including the North Star — see below), `docs/decisions/0000-architecture-overview.md` (system shape).
 
 ### North Star (the relevance gate)
