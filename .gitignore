@@ -49,8 +49,10 @@ android/.gradle/
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 # Claude Code skill symlinks — restored by `npx skills experimental_install`
-# from skills-lock.json (the lock file IS tracked).
-.claude/skills/
+# from skills-lock.json (the lock file IS tracked). The repo's own worker
+# rules (ADR-0030) are a real directory there and ARE tracked.
+.claude/skills/*
+!.claude/skills/worker/
 
 # Skills installed by `npx skills add` — restored from skills-lock.json,
 # same pattern as node_modules / package-lock.json. Lock file tracked,
@@ -75,3 +77,9 @@ graphify-out/
 # not "coverage" because the generic `coverage/` rule above would ignore it.
 apps/web/scripts/search-coverage/coverage-report.md
 apps/web/scripts/search-coverage/coverage-results.json
+
+# dispatcher (ADR-0030): lanes, log and mutable state live beside the repo, never in it
+.worktrees/
+dispatch.json
+dispatch.log
+prune-state.json
