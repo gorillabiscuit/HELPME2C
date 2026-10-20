@@ -5,6 +5,7 @@
 #   scripts/card list             show the open lanes and where each one stands
 #   scripts/card close HEL-13     remove HEL-13's lane once its pull request is merged
 #   scripts/card close HEL-13 --discard   remove it anyway, throwing the work away
+#   scripts/card HEL-13 --review  only run a fresh review of the lane as it stands (no worker)
 #
 # What one run does, in order:
 #   1. Reads the card from Linear into .agent-runs/HEL-N/card.md. Refuses a card that is Done or
@@ -83,6 +84,8 @@ fi
 # ------------------------------------------------------------------------------------ build run
 ID="$(printf '%s' "${1:-}" | tr '[:lower:]' '[:upper:]')"
 case "$ID" in HEL-[0-9]*) ;; *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;; esac
+MODE=build
+[ "${2:-}" = "--review" ] && MODE=review
 RUN="$RUNS/$ID"
 mkdir -p "$RUN"
 
@@ -167,12 +170,24 @@ else
   say "Using the existing lane $LANE (branch $BRANCH)."
 fi
 echo "$BASE_REF" > "$RUN/base-ref"
+# Bring the lane up to its base here, outside the worker's sandbox (Codex treats git's own
+# files as read-only, so a worker cannot merge or commit).
+if [ "$MODE" = build ] && ! git -C "$LANE" merge-base --is-ancestor "$BASE_REF" HEAD; then
+  if ! git -C "$LANE" merge --no-edit "$BASE_REF" > "$RUN/merge.log" 2>&1; then
+    git -C "$LANE" merge --abort 2>/dev/null || true
+    die "merging $BASE_REF into the lane conflicts (see $RUN/merge.log). Resolve it in the lane by hand, then run again."
+  fi
+  say "Merged $BASE_REF into the lane."
+fi
 status "installing packages in the lane"
 ( cd "$LANE" && pnpm install --frozen-lockfile --prefer-offline ) > "$RUN/install.log" 2>&1 \
   || die "pnpm install failed in the lane; see $RUN/install.log"
 
-# 3. The worker.
-ROUND=$(( $(ls "$RUN"/worker-*.report.md 2>/dev/null | wc -l) + 1 ))
+# 3. The worker (skipped with --review).
+OUTCOME="review only"
+if [ "$MODE" = build ]; then
+ROUND=1
+while [ -e "$RUN/worker-$ROUND.report.md" ]; do ROUND=$((ROUND + 1)); done
 PROMPT="$RUN/worker-$ROUND.prompt.md"
 {
   echo "You are the worker for Linear card $ID, round $ROUND, running unattended."
@@ -255,13 +270,34 @@ W_CODE=0
 run_agent "$WORKER_TOOL" "$WORKER_MODEL" high "$LANE" "" "$PROMPT" "$W_REPORT" \
   "$RUN/worker-$ROUND.log" "${WORKER_SECONDS:-3600}" || W_CODE=$?
 
+# The worker leaves its changes uncommitted (see above); commit them here with the message from
+# its report's "## Commit message" section, so the pre-commit hook runs as usual.
+COMMIT_NOTE=""
+if [ -n "$(git -C "$LANE" status --porcelain)" ]; then
+  MSG="$RUN/worker-$ROUND.commit-msg"
+  sed -n '/^## Commit message/,/^## /p' "$W_REPORT" | sed '1d; /^## /d; /^```/d' | sed '/./,$!d' > "$MSG"
+  if [ ! -s "$MSG" ]; then
+    printf 'chore: worker round %s for %s\n\nThe worker report had no commit message.\n' "$ROUND" "$ID" > "$MSG"
+    COMMIT_NOTE="The report had no commit message, so a placeholder was used."
+  fi
+  git -C "$LANE" add -A
+  if git -C "$LANE" commit -q -F "$MSG" > "$RUN/worker-$ROUND.commit.log" 2>&1; then
+    COMMIT_NOTE="scripts/card committed the worker's changes as $(git -C "$LANE" rev-parse --short HEAD). $COMMIT_NOTE"
+  else
+    COMMIT_NOTE="Committing the worker's changes failed (see \`$RUN/worker-$ROUND.commit.log\`); they are still uncommitted in the lane."
+  fi
+fi
+OUTCOME="$(head -n 5 "$W_REPORT" | sed -n 's/^Outcome: *//p' | head -n 1)"
+fi
+
 HEAD_SHA="$(git -C "$LANE" rev-parse HEAD)"
 BASE_SHA="$(git -C "$LANE" merge-base HEAD "$BASE_REF")"
 COMMITS="$(git -C "$LANE" rev-list --count "$BASE_SHA..HEAD")"
 LEFT_OVER="$(git -C "$LANE" status --porcelain | wc -l | tr -d ' ')"
 SIZE="$(git -C "$LANE" diff --numstat "$BASE_SHA" HEAD -- . ':(exclude)reports' ':(exclude)pnpm-lock.yaml' \
   | awk '{a+=$1; d+=$2} END {print a+d+0}')"
-OUTCOME="$(head -n 5 "$W_REPORT" | sed -n 's/^Outcome: *//p' | head -n 1)"
+
+if [ "$MODE" = build ]; then
 
 # 4. Worker report on the card.
 {
@@ -269,28 +305,33 @@ OUTCOME="$(head -n 5 "$W_REPORT" | sed -n 's/^Outcome: *//p' | head -n 1)"
   echo
   echo "Lane \`$LANE\`, branch \`$BRANCH\`: $COMMITS commit(s) on top of \`$BASE_REF\`, $SIZE changed lines (generated reports and the lockfile not counted)."
   [ "$SIZE" -gt 400 ] && echo "That is over the 400-line aim for one pull request; consider splitting before shipping."
-  [ "$LEFT_OVER" -gt 0 ] && echo "The worker left $LEFT_OVER uncommitted file(s) in the lane."
+  [ -n "$COMMIT_NOTE" ] && echo "$COMMIT_NOTE"
+  [ "$LEFT_OVER" -gt 0 ] && echo "$LEFT_OVER uncommitted file(s) are left in the lane."
   [ "$W_CODE" -ne 0 ] && echo "The worker process ended with exit code $W_CODE (a timeout or an error); see the log in \`$RUN\`."
   echo; echo "---"; echo; cat "$W_REPORT"
 } > "$RUN/worker-$ROUND.comment.md"
 "${LINEAR[@]}" comment "$ID" "$RUN/worker-$ROUND.comment.md" || say "Could not post the worker report; it is in $RUN."
+fi
 
 # 5. Fresh review on the other tool.
 VERDICT="not run"
+REV=1
+while [ -e "$RUN/review-$REV.report.md" ]; do REV=$((REV + 1)); done
+R_REPORT=""
 if [ "$COMMITS" -gt 0 ]; then
-  status "review round $ROUND running: $REVIEW_TOOL $REVIEW_MODEL"
+  status "review round $REV running: $REVIEW_TOOL $REVIEW_MODEL"
   REVIEW_DIR="$LANES/review/$ID"
   rm -rf "$REVIEW_DIR"; mkdir -p "$REVIEW_DIR"
   git -C "$MAIN" worktree add -q --detach "$REVIEW_DIR/head" "$HEAD_SHA"
   git -C "$MAIN" worktree add -q --detach "$REVIEW_DIR/base" "$BASE_SHA"
   for d in head base; do
-    ( cd "$REVIEW_DIR/$d" && pnpm install --frozen-lockfile --prefer-offline ) >> "$RUN/review-$ROUND.install.log" 2>&1 \
-      || die "pnpm install failed in the review checkout; see $RUN/review-$ROUND.install.log"
+    ( cd "$REVIEW_DIR/$d" && pnpm install --frozen-lockfile --prefer-offline ) >> "$RUN/review-$REV.install.log" 2>&1 \
+      || die "pnpm install failed in the review checkout; see $RUN/review-$REV.install.log"
   done
   CHANGED="$(git -C "$LANE" diff --name-only "$BASE_SHA" HEAD)"
   TESTS="$(printf '%s\n' "$CHANGED" | grep -E '(\.(test|spec)\.[cm]?[jt]sx?$|/__tests__/|/fixtures?/)' || true)"
   PROD="$(printf '%s\n' "$CHANGED" | grep -vE '(\.(test|spec)\.[cm]?[jt]sx?$|/__tests__/|/fixtures?/)' || true)"
-  R_PROMPT="$RUN/review-$ROUND.prompt.md"
+  R_PROMPT="$RUN/review-$REV.prompt.md"
   {
     echo "You are the independent reviewer for Linear card $ID. You have no context from the build"
     echo "and must not look for any. First read $RULES/REVIEWER.md in full and follow it exactly."
@@ -306,26 +347,26 @@ if [ "$COMMITS" -gt 0 ]; then
     if [ -n "$TESTS" ]; then printf '%s\n' "$TESTS" | sed 's/^/- /'; else echo "- none"; fi
     echo; echo "----- CARD $ID -----"; cat "$RUN/card.md"
   } > "$R_PROMPT"
-  R_REPORT="$RUN/review-$ROUND.report.md"
+  R_REPORT="$RUN/review-$REV.report.md"
   R_CODE=0
   run_agent "$REVIEW_TOOL" "$REVIEW_MODEL" medium "$REVIEW_DIR/head" "$REVIEW_DIR/base" "$R_PROMPT" "$R_REPORT" \
-    "$RUN/review-$ROUND.log" "${REVIEW_SECONDS:-2700}" || R_CODE=$?
+    "$RUN/review-$REV.log" "${REVIEW_SECONDS:-2700}" || R_CODE=$?
   # Keep the reviewer's checks and logs, and note anything it left changed in the checkouts.
-  [ -d "$REVIEW_DIR/head/.review" ] && cp -R "$REVIEW_DIR/head/.review" "$RUN/review-$ROUND.evidence"
+  [ -d "$REVIEW_DIR/head/.review" ] && cp -R "$REVIEW_DIR/head/.review" "$RUN/review-$REV.evidence"
   UNRESTORED="$(git -C "$REVIEW_DIR/head" status --porcelain -- . ':(exclude).review'; git -C "$REVIEW_DIR/base" status --porcelain)"
   VERDICT="$(head -n 3 "$R_REPORT" | sed -n 's/^Verdict: *\([a-z]*\).*/\1/p' | head -n 1)"
   [ -n "$VERDICT" ] || VERDICT="unreadable"
   {
-    echo "**Independent review, round $ROUND** ($REVIEW_TOOL, $REVIEW_MODEL), from \`scripts/card\`."
+    echo "**Independent review, round $REV** ($REVIEW_TOOL, $REVIEW_MODEL), from \`scripts/card\`."
     echo
-    echo "A fresh reviewer on the other tool, briefed only from this card and the review rules (\`.claude/skills/worker/REVIEWER.md\`), checked commit \`${HEAD_SHA:0:12}\` against base \`${BASE_SHA:0:12}\`. It did not see the worker's report. Its checks and logs are in \`$RUN/review-$ROUND.evidence\`."
+    echo "A fresh reviewer on the other tool, briefed only from this card and the review rules (\`.claude/skills/worker/REVIEWER.md\`), checked commit \`${HEAD_SHA:0:12}\` against base \`${BASE_SHA:0:12}\`. It did not see the worker's report. Its checks and logs are in \`$RUN/review-$REV.evidence\`."
     [ "$R_CODE" -ne 0 ] && echo "The review process ended with exit code $R_CODE (a timeout or an error)."
     [ -n "$UNRESTORED" ] && echo "The reviewer left changes in its checkouts; they were discarded with the checkouts."
     echo; echo "---"; echo; cat "$R_REPORT"
-  } > "$RUN/review-$ROUND.comment.md"
-  "${LINEAR[@]}" comment "$ID" "$RUN/review-$ROUND.comment.md" || say "Could not post the review; it is in $RUN."
+  } > "$RUN/review-$REV.comment.md"
+  "${LINEAR[@]}" comment "$ID" "$RUN/review-$REV.comment.md" || say "Could not post the review; it is in $RUN."
   if [ "$VERDICT" = findings ]; then
-    { echo "The independent review of round $ROUND reproduced the findings below. Fix each one, or say why it is wrong."
+    { echo "The independent review of round $REV reproduced the findings below. Fix each one, or say why it is wrong."
       echo; cat "$R_REPORT"; } > "$RUN/next-round.md"
   fi
 fi
@@ -337,10 +378,10 @@ else
   NEXT="In Review"
 fi
 "${LINEAR[@]}" state "$ID" "$NEXT" || say "Could not move $ID to $NEXT."
-status "round $ROUND finished: worker said '${OUTCOME:-no outcome line}', $COMMITS commit(s), review '$VERDICT', card moved to $NEXT"
+status "finished: worker said '${OUTCOME:-no outcome line}', $COMMITS commit(s), review '$VERDICT', card moved to $NEXT"
 
 say ""
-say "Reports: $W_REPORT${R_REPORT:+ and $R_REPORT} (both are on the card too)."
+say "Reports in $RUN (also on the card): ${W_REPORT:+$(basename "$W_REPORT") }${R_REPORT:+$(basename "$R_REPORT")}"
 case "$NEXT" in
   "In Review") say "Next: read the reports, try the change, then run scripts/ship $ID to push it and open the pull request." ;;
   *) say "Next: read the card. If the review found something, run scripts/card $ID again for a fix round (it gets the findings)." ;;
