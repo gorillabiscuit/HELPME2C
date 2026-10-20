@@ -183,30 +183,6 @@ status "installing packages in the lane"
 ( cd "$LANE" && pnpm install --frozen-lockfile --prefer-offline ) > "$RUN/install.log" 2>&1 \
   || die "pnpm install failed in the lane; see $RUN/install.log"
 
-# 3. The worker (skipped with --review).
-OUTCOME="review only"
-if [ "$MODE" = build ]; then
-ROUND=1
-while [ -e "$RUN/worker-$ROUND.report.md" ]; do ROUND=$((ROUND + 1)); done
-PROMPT="$RUN/worker-$ROUND.prompt.md"
-{
-  echo "You are the worker for Linear card $ID, round $ROUND, running unattended."
-  echo
-  echo "Lane (work only here, full paths): $LANE"
-  echo "Branch: $BRANCH. Base: $BASE_REF (already fetched)."
-  echo "Main checkout (never edit it): $MAIN"
-  echo
-  echo "First read $RULES/SKILL.md in full and follow it."
-  [ "$WORKER_TOOL" = codex ] && echo "You are on Codex: also read $RULES/CODEX.md."
-  echo "There is no Linear connection. The card is below. Your final reply is your report, in the"
-  echo "format of SKILL.md rule 9, starting with the Outcome line."
-  if [ -f "$RUN/next-round.md" ]; then
-    echo; echo "----- NOTE FOR THIS ROUND (from Wouter or an earlier review) -----"; cat "$RUN/next-round.md"
-  fi
-  echo; echo "----- CARD $ID -----"; cat "$RUN/card.md"
-} > "$PROMPT"
-[ -f "$RUN/next-round.md" ] && mv "$RUN/next-round.md" "$RUN/next-round.used-in-$ROUND.md"
-
 # run_agent TOOL MODEL EFFORT CWD EXTRA_WRITABLE PROMPT REPORT LOG SECONDS
 run_agent() {
   local tool="$1" model="$2" effort="$3" cwd="$4" extra="$5" prompt="$6" report="$7" log="$8" secs="$9"
@@ -263,6 +239,30 @@ PY
   [ -s "$report" ] || echo "(no report: the run stopped before it wrote one; see $log)" > "$report"
   return "$code"
 }
+
+# 3. The worker (skipped with --review).
+OUTCOME="review only"
+if [ "$MODE" = build ]; then
+ROUND=1
+while [ -e "$RUN/worker-$ROUND.report.md" ]; do ROUND=$((ROUND + 1)); done
+PROMPT="$RUN/worker-$ROUND.prompt.md"
+{
+  echo "You are the worker for Linear card $ID, round $ROUND, running unattended."
+  echo
+  echo "Lane (work only here, full paths): $LANE"
+  echo "Branch: $BRANCH. Base: $BASE_REF (already fetched)."
+  echo "Main checkout (never edit it): $MAIN"
+  echo
+  echo "First read $RULES/SKILL.md in full and follow it."
+  [ "$WORKER_TOOL" = codex ] && echo "You are on Codex: also read $RULES/CODEX.md."
+  echo "There is no Linear connection. The card is below. Your final reply is your report, in the"
+  echo "format of SKILL.md rule 9, starting with the Outcome line."
+  if [ -f "$RUN/next-round.md" ]; then
+    echo; echo "----- NOTE FOR THIS ROUND (from Wouter or an earlier review) -----"; cat "$RUN/next-round.md"
+  fi
+  echo; echo "----- CARD $ID -----"; cat "$RUN/card.md"
+} > "$PROMPT"
+[ -f "$RUN/next-round.md" ] && mv "$RUN/next-round.md" "$RUN/next-round.used-in-$ROUND.md"
 
 status "worker round $ROUND running: $WORKER_TOOL $WORKER_MODEL in $LANE"
 W_REPORT="$RUN/worker-$ROUND.report.md"
