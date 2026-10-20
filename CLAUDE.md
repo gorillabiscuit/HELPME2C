@@ -11,7 +11,7 @@ Keep this file under 500 lines. Detail goes in `docs/decisions/` (ADRs), per-pac
 - **Service:** HelpME2C — cross-medium recommendation engine for TV and anime.
 - **Differentiator:** group recommendations with ghost-profile inference + theme-based cross-medium taxonomy.
 - **Phase:** 1A (MVP, web only, registered users only). Target: TBD; no time pressure; ship when ready.
-- **Tracker:** Linear, workspace `helpme2c`, team `HEL` (per [ADR-0030](docs/decisions/0030-project-tracker-linear.md), which supersedes the GitHub Issues interlude in [ADR-0029](docs/decisions/0029-project-tracker-github.md)). Cards are dispatched to worker sessions; worker rules live in `.claude/skills/worker/`. Reference the card in commit scopes and PR descriptions, e.g. `feat(ml): … (HEL-12)`.
+- **Tracker:** Linear, workspace `helpme2c`, team `HEL` (per [ADR-0030](docs/decisions/0030-project-tracker-linear.md), which supersedes the GitHub Issues interlude in [ADR-0029](docs/decisions/0029-project-tracker-github.md)). Cards are built one at a time with `scripts/card HEL-N` and shipped by the human with `scripts/ship HEL-N` (per [ADR-0031](docs/decisions/0031-cards-run-by-hand.md)); worker and reviewer rules live in `.claude/skills/worker/`. Reference the card in commit scopes and PR descriptions, e.g. `feat(ml): … (HEL-12)`.
 - **Read first:** `PROJECT.md` (product scope, including the North Star — see below), `docs/decisions/0000-architecture-overview.md` (system shape).
 
 ### North Star (the relevance gate)
@@ -261,6 +261,15 @@ pnpm test packages/ml                     # narrow to a path
 
 # All commit-stage gates at once
 pnpm preflight                            # typecheck + lint + test (definition in root package.json)
+```
+
+**Cards** (per ADR-0031; the human runs these, an agent never runs `ship`):
+
+```bash
+scripts/card HEL-N                        # build the card in its own lane, then a fresh review; both reports go on the card
+scripts/card list                         # open lanes (two at most) and where each stands
+scripts/ship HEL-N                        # push the lane and open the pull request
+scripts/card close HEL-N                  # remove the lane once its pull request is merged
 ```
 
 **Pre-push gates** run automatically via `.husky/pre-push` and don't normally need invoking by hand:
