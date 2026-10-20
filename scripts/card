@@ -240,7 +240,7 @@ run_agent() {
   ( sleep "$secs"; echo "card: stopped after ${secs}s" >> "$log"; kill -TERM "$pid" 2>/dev/null ) &
   local watch=$!
   wait "$pid"; code=$?
-  kill "$watch" 2>/dev/null; wait "$watch" 2>/dev/null
+  pkill -P "$watch" 2>/dev/null; kill "$watch" 2>/dev/null; wait "$watch" 2>/dev/null  # and its sleep
   set -e
   if [ "$tool" = claude ]; then
     python3 -I - "$log" "$report" <<'PY'
