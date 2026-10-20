@@ -47,6 +47,12 @@ Vercel, project root `apps/web`. Pushes to `main` deploy automatically, except c
 nothing under `apps/web/` (see `LEARNED.md`). For an explicit deploy, run `pnpm dlx vercel --prod`
 from the repo root, never from `apps/web/`.
 
+## How cards get built
+
+Work is tracked on Linear (team `HEL`). A card is built with `scripts/card HEL-N`: an unattended
+worker builds it in its own worktree, then a fresh reviewer checks the result, and both reports go
+on the card. `scripts/ship HEL-N` pushes the branch and opens the pull request. See ADR-0031.
+
 ## Layout
 
 ```
