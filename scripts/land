@@ -88,7 +88,8 @@ fi
 # ---- tidy up
 git -C "$MAIN" fetch -q --prune origin
 if git -C "$MAIN" ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-  git -C "$MAIN" push -q origin --delete "$BRANCH" && echo "deleted $BRANCH on GitHub"
+  # Through the GitHub API, not a git push: a push would run the pre-push check for nothing.
+  gh api -X DELETE "repos/$REPO/git/refs/heads/$BRANCH" >/dev/null && echo "deleted $BRANCH on GitHub"
 fi
 if [ "$(git -C "$MAIN" rev-parse --abbrev-ref HEAD)" = main ] && [ -z "$(git -C "$MAIN" status --porcelain --untracked-files=no)" ]; then
   git -C "$MAIN" pull -q --ff-only origin main && echo "main checkout is level with GitHub"
