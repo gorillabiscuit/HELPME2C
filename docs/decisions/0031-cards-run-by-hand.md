@@ -1,6 +1,6 @@
 # ADR-0031: Cards run by hand with `scripts/card`, no always-on dispatcher
 
-**Status:** Accepted. Supersedes the dispatcher part of ADR-0030; Linear stays the tracker.
+**Status:** Accepted (amended 2026-10-22). Supersedes the dispatcher part of ADR-0030; Linear stays the tracker.
 **Date:** 2026-10-20
 
 ## What we chose
@@ -15,6 +15,15 @@ pull request and on `main`.
 
 Workers and reviewers run on Codex by default (`CARD_TOOLS=codex`), because Claude capacity is
 the scarcer of the two; `CARD_TOOLS=labels` follows each card's `claude` / `codex` label again.
+
+**Amendment, 2026-10-22: Claude does the git work on Wouter's go.** Running every push and merge
+by hand cost the maintainer time for no gain: the Polymodal reason for it (several people pushing
+to one repo) does not apply to a solo repo. When he says "ship it" for a pull request, Claude runs
+`scripts/ship HEL-N --yes`, then `scripts/land HEL-N --yes` once CI passes, which merges, deletes
+the branch and removes the lane. One go covers one pull request. Because merging into `main`
+deploys the web app, "ship it" is also the go to put it live. Card workers still never push or
+merge (both scripts refuse inside a Codex sandbox), and Done stays his call. Same change as the
+logbook's ADR-0011 amendment of the same day.
 
 ## What we rejected
 

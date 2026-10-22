@@ -24,8 +24,9 @@ file.
    nothing wider.
 2. **Work only in the lane.** Full paths for every command and edit. Never edit the main
    checkout or another lane.
-3. **Never push, never deploy, never touch Linear or an account.** There is no Linear connection
-   in this run; `scripts/card` posts your report. Wouter pushes with `scripts/ship`.
+3. **Never push, merge, deploy, or touch Linear or an account.** There is no Linear connection
+   in this run; `scripts/card` posts your report. Claude pushes and merges, on Wouter's go,
+   after the review.
 4. **No secrets, no live services.** The lane has no `.env.local`. Anything that needs the real
    database (`DATABASE_URL`), an Inngest run, a Vercel deploy or a live API key is not yours to
    run: build and test it locally, then hand Wouter the exact command under **Needs you** (rule 8).

@@ -108,8 +108,8 @@ End the handoff with a short concrete list:
 ## When the human says `ship it`
 
 1. Stage and commit any final changes (one logical change per commit per §5).
-2. `git push`. The pre-push hook automatically runs the AI-attribution scan via `.husky/pre-push` → `bash scripts/scan-ai-attribution.sh`.
-3. Output the PR-creation URL inline (GitHub: run `gh pr create` if the user has explicitly OK'd it, otherwise output the URL `https://github.com/<owner>/<repo>/compare/main...<branch>?expand=1`).
-4. Output the §9.5 PR description draft inline (the same one from step 7), ready to copy.
+2. Push and open the pull request yourself: for a card, `scripts/ship HEL-N --yes`; for any other branch, `git push -u origin <branch>` (the pre-push hook runs the AI-attribution scan and `pnpm preflight`) and `gh pr create` with the step 7 description.
+3. When CI has finished, merge and tidy up: `scripts/land <HEL-N or branch> --yes`. It refuses while CI is running or failing; say so and run it again later.
+4. Give the human the pull request link and one line on what merged. Merging deploys the web app (CLAUDE.md §7).
 
-The human clicks the URL, copies the description, pastes into the PR form, clicks Create.
+`ship it` covers that one pull request, push through merge (ADR-0031, amended 2026-10-22).

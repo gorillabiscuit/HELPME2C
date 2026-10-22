@@ -194,8 +194,11 @@ Three things, all irreducible:
 Agent does, in order:
 
 1. Stages and commits any final changes (one logical change per commit per §5).
-2. `git push`. The pre-push hook automatically runs the AI-attribution scan and aborts on any `Co-Authored-By: Claude` / Anthropic / "Generated with Claude Code" trailer.
-3. Outputs the GitHub / Bitbucket PR-creation URL inline (or runs `gh pr create` if the user explicitly OK'd that, with the description from step 7 of the handoff).
+2. Pushes and opens the pull request itself: for a card, `scripts/ship HEL-N --yes`; for any other branch, `git push -u origin <branch>` and `gh pr create` with the step 7 description. The pre-push hook runs the AI-attribution scan (aborting on any `Co-Authored-By: Claude` / Anthropic / "Generated with Claude Code" trailer) and `pnpm preflight`.
+3. Once CI has passed, merges and tidies up: `scripts/land <HEL-N or branch> --yes`. It refuses while CI is running or failing; the agent says so and runs it again later.
+4. Gives the human the pull request link and one line on what merged.
+
+`ship it` covers one pull request, from push through merge (ADR-0031, amended 2026-10-22). **Merging into `main` deploys:** Vercel builds production from `main` whenever a merge touches `apps/web`, so `ship it` means "make it live". Moving a card to Done stays the human's. Card workers never push or merge.
 
 ### Why this design
 
@@ -263,13 +266,14 @@ pnpm test packages/ml                     # narrow to a path
 pnpm preflight                            # typecheck + lint + test (definition in root package.json)
 ```
 
-**Cards** (per ADR-0031; the human runs these, an agent never runs `ship`):
+**Cards** (per ADR-0031; the agent runs these, `ship` and `land` only after the human's `ship it`):
 
 ```bash
 scripts/card HEL-N                        # build the card in its own lane, then a fresh review; both reports go on the card
 scripts/card list                         # open lanes (two at most) and where each stands
-scripts/ship HEL-N                        # push the lane and open the pull request
-scripts/card close HEL-N                  # remove the lane once its pull request is merged
+scripts/ship HEL-N                        # push the lane and open the pull request (the agent runs it on `ship it`, with --yes)
+scripts/land HEL-N                        # merge once CI passes, delete the branch, remove the lane (likewise)
+scripts/card close HEL-N --discard        # throw a lane away without merging
 ```
 
 **Pre-push gates** run automatically via `.husky/pre-push` and don't normally need invoking by hand:
