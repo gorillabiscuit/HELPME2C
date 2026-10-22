@@ -6,6 +6,7 @@
 #   scripts/ship HEL-13            show what will be pushed, ask, then push and open the PR
 #   scripts/ship HEL-13 --yes      the same without asking (Claude, after Wouter's go)
 #   scripts/ship HEL-13 --anyway   ship even though the last review reproduced a finding
+#   scripts/ship some-branch --yes a branch that is not a card: push it, PR from its commits
 #
 # It checks that the GitHub CLI is logged in as gorillabiscuit (the repo is personal; the
 # Polymodal work login cannot see it), that the lane has commits and nothing uncommitted, and
@@ -24,8 +25,9 @@ N24="$HOME/.nvm/versions/node/v24.16.0/bin"
 [ -d "$N24" ] && export PATH="$N24:$PATH"
 die() { printf 'ship: %s\n' "$*" >&2; exit 1; }
 
-ID="$(printf '%s' "${1:-}" | tr '[:lower:]' '[:upper:]')"
-case "$ID" in HEL-[0-9]*) ;; *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;; esac
+TARGET="${1:-}"
+[ -n "$TARGET" ] || { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+ID="$(printf '%s' "$TARGET" | tr '[:lower:]' '[:upper:]')"
 shift
 GO=0; ANYWAY=0
 for arg in "$@"; do
@@ -34,6 +36,29 @@ done
 if [ -n "${CODEX_SANDBOX:-}" ] || [ -n "${CODEX_SANDBOX_NETWORK_DISABLED:-}" ]; then
   die "a card worker never pushes (.claude/skills/worker/SKILL.md); Claude ships on Wouter's go."
 fi
+
+# A branch that is not a card (docs, CI, tooling): push it and open a pull request whose title
+# and body come from its commits. The pre-push hook still runs the attribution scan and preflight.
+case "$ID" in HEL-[0-9]*) ;; *)
+  BRANCH="$TARGET"
+  git -C "$MAIN" show-ref --verify --quiet "refs/heads/$BRANCH" || die "no local branch $BRANCH"
+  who="$(env -u GH_CONFIG_DIR gh api user --jq .login 2>/dev/null || true)"
+  [ "$who" = gorillabiscuit ] || die "the GitHub CLI is logged in as '${who:-nobody}', not gorillabiscuit."
+  git -C "$MAIN" fetch -q origin main
+  AHEAD="$(git -C "$MAIN" rev-list --count "origin/main..$BRANCH")"
+  [ "$AHEAD" -gt 0 ] || die "$BRANCH has no commits that are not on main."
+  echo "About to ship branch $BRANCH ($AHEAD commit(s) ahead of main):"
+  git -C "$MAIN" log --oneline "origin/main..$BRANCH" | sed 's/^/  /'
+  if [ "$GO" != 1 ]; then
+    [ -r /dev/tty ] || die "nothing pushed. Without a terminal, pass --yes once Wouter has said ship it."
+    printf 'Push %s and open the pull request? [y/N] ' "$BRANCH"
+    read -r answer < /dev/tty || answer=""
+    [ "$answer" = y ] || [ "$answer" = Y ] || die "stopped; nothing was pushed."
+  fi
+  git -C "$MAIN" push -u origin "$BRANCH"
+  ( cd "$MAIN" && env -u GH_CONFIG_DIR gh pr create --repo "$REPO" --base main --head "$BRANCH" --fill )
+  exit 0 ;;
+esac
 RUN="$RUNS/$ID"
 LANE="$(ls -d "$MAIN/.worktrees/$ID-"* 2>/dev/null | head -n 1 || true)"
 [ -n "$LANE" ] || die "$ID has no lane. Run scripts/card $ID first."
