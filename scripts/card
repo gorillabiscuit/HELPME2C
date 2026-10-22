@@ -1,0 +1,388 @@
+#!/usr/bin/env bash
+# scripts/card — build one HEL card unattended, then have it reviewed by a fresh reviewer.
+#
+#   scripts/card HEL-13           build HEL-13 (or run another round in its existing lane)
+#   scripts/card list             show the open lanes and where each one stands
+#   scripts/card close HEL-13     remove HEL-13's lane once its pull request is merged
+#   scripts/card close HEL-13 --discard   remove it anyway, throwing the work away
+#   scripts/card HEL-13 --review  only run a fresh review of the lane as it stands (no worker)
+#
+# What one run does, in order:
+#   1. Reads the card from Linear into .agent-runs/HEL-N/card.md. Refuses a card that is Done or
+#      Canceled, or one waiting on an unfinished card (FORCE=1 overrides the second).
+#   2. Makes the lane: a worktree .worktrees/HEL-N-<slug> on branch hel-n-<slug>, cut from the
+#      card's "## Base" (normally origin/main, fetched first). Refuses a third open lane.
+#   3. Runs the worker unattended, with no network, writing only in the lane. By default it is
+#      Codex (CARD_TOOLS=codex, see below); CARD_TOOLS=labels uses the tool the card's labels
+#      name (codex + luna/sol/astra, or claude + fable/opus/sonnet). Its rules are
+#      .claude/skills/worker/SKILL.md. Its final reply is the report.
+#   4. Posts the worker's report on the card.
+#   5. If the worker committed anything: makes two detached checkouts (base and head) and runs a
+#      fresh reviewer (Codex by default; with CARD_TOOLS=labels, the other tool), briefed only from the card and REVIEWER.md, never from
+#      the worker's report. Posts its report on the card.
+#   6. Moves the card to In Review, or to Needs you when the worker asked for something, made no
+#      commits, or the review reproduced a finding.
+#
+# Everything a run produces stays in .agent-runs/HEL-N/ (gitignored): card, prompts, logs,
+# reports, status, the reviewer's checks. Nothing is pushed: Wouter runs scripts/ship.
+# A note for the next round (yours, or an earlier review's) goes in .agent-runs/HEL-N/next-round.md;
+# the next run hands it to the worker and then files it away.
+#
+# Settings: WORKER_SECONDS (default 3600) and REVIEW_SECONDS (default 2700) cap each step.
+set -euo pipefail
+
+SELF_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"  # holds this script and the rules
+MAIN="$(cd "$(git -C "$SELF_ROOT" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"
+LANES="$MAIN/.worktrees"
+RUNS="$MAIN/.agent-runs"
+RULES="$SELF_ROOT/.claude/skills/worker"
+LINEAR=(python3 -I "$SELF_ROOT/scripts/lib/linear.py")
+MAX_LANES=2
+CODEX_CARDS="${CARD_CODEX_HOME:-$HOME/.codex-cards}"  # isolated Codex config: no MCP, no hooks
+# The checks want Node 24; a sandboxed shell can otherwise pick Node 25 or 26 and fail.
+N24="$HOME/.nvm/versions/node/v24.16.0/bin"
+[ -d "$N24" ] && export PATH="$N24:$PATH"
+
+say() { printf '%s\n' "$*"; }
+die() { printf 'card: %s\n' "$*" >&2; exit 1; }
+lane_of() { ls -d "$LANES/$1-"* 2>/dev/null | head -n 1 || true; }
+open_lanes() { ls -d "$LANES"/HEL-* 2>/dev/null || true; }
+
+# ---------------------------------------------------------------------------------------- list
+if [ "${1:-}" = "list" ]; then
+  lanes="$(open_lanes)"
+  [ -n "$lanes" ] || { say "No open lanes."; exit 0; }
+  git -C "$MAIN" fetch -q origin main 2>/dev/null || say "(could not fetch origin; counts are against the last fetch)"
+  for lane in $lanes; do
+    id="$(basename "$lane" | cut -d- -f1-2)"
+    ahead="$(git -C "$lane" rev-list --count origin/main..HEAD 2>/dev/null || echo '?')"
+    st="$(cat "$RUNS/$id/status" 2>/dev/null || echo 'no status (made before scripts/card)')"
+    say "$id  $(git -C "$lane" branch --show-current)  $ahead commit(s) not on main"
+    say "      $st"
+  done
+  exit 0
+fi
+
+# --------------------------------------------------------------------------------------- close
+if [ "${1:-}" = "close" ]; then
+  id="$(printf '%s' "${2:-}" | tr '[:lower:]' '[:upper:]')"
+  [ -n "$id" ] || die "usage: scripts/card close HEL-N [--discard]"
+  lane="$(lane_of "$id")"
+  [ -n "$lane" ] || die "$id has no lane"
+  branch="$(git -C "$lane" branch --show-current)"
+  merged="$(gh pr view "$branch" --repo gorillabiscuit/HELPME2C --json state -q .state 2>/dev/null || true)"
+  if [ "$merged" != "MERGED" ] && [ "${3:-}" != "--discard" ]; then
+    die "$id's pull request is not merged (state: ${merged:-none}). Merge it first, or add --discard to throw the lane away."
+  fi
+  git -C "$MAIN" worktree remove --force "$lane"
+  git -C "$MAIN" branch -D "$branch" >/dev/null
+  echo "closed $(date -u +%FT%TZ) (pull request: ${merged:-none})" > "$RUNS/$id/status" 2>/dev/null || true
+  say "Removed $id's lane and its local branch. Its reports stay in $RUNS/$id."
+  exit 0
+fi
+
+# ------------------------------------------------------------------------------------ build run
+ID="$(printf '%s' "${1:-}" | tr '[:lower:]' '[:upper:]')"
+case "$ID" in HEL-[0-9]*) ;; *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;; esac
+MODE=build
+[ "${2:-}" = "--review" ] && MODE=review
+RUN="$RUNS/$ID"
+mkdir -p "$RUN"
+
+# One run per card at a time. A lock whose process is gone is taken over.
+LOCK="$RUN/.running"
+if ! mkdir "$LOCK" 2>/dev/null; then
+  pid="$(cat "$LOCK/pid" 2>/dev/null || true)"
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then die "$ID is already running (process $pid)."; fi
+  rm -rf "$LOCK"; mkdir "$LOCK"
+fi
+echo $$ > "$LOCK/pid"
+REVIEW_DIR=""
+cleanup() {
+  if [ -n "$REVIEW_DIR" ] && [ -d "$REVIEW_DIR" ]; then
+    for d in head base; do
+      [ -d "$REVIEW_DIR/$d" ] && git -C "$MAIN" worktree remove --force "$REVIEW_DIR/$d" 2>/dev/null
+    done
+    rm -rf "$REVIEW_DIR"
+  fi
+  rm -rf "$LOCK"
+}
+trap cleanup EXIT
+status() { echo "$* ($(date -u +%FT%TZ))" > "$RUN/status"; say "$*"; }
+
+# 1. The card.
+"${LINEAR[@]}" card "$ID" "$RUN/card.md" > "$RUN/card.json"
+field() { python3 -I -c 'import json,sys; v=json.load(open(sys.argv[1]))[sys.argv[2]]; print(" ".join(v) if isinstance(v,list) else v)' "$RUN/card.json" "$1"; }
+TITLE="$(field title)"; STATE_TYPE="$(field state_type)"; LABELS=" $(field labels) "
+BLOCKERS="$(python3 -I -c 'import json,sys; print(", ".join(json.load(open(sys.argv[1]))["open_blockers"]))' "$RUN/card.json")"
+BASE_REF="$(field base)"; [ -n "$BASE_REF" ] || BASE_REF="origin/main"
+case "$STATE_TYPE" in completed|canceled) die "$ID is $(field state); nothing to build." ;; esac
+if [ -n "$BLOCKERS" ] && [ "${FORCE:-}" != "1" ]; then
+  die "$ID waits on $BLOCKERS. Finish those first, or run FORCE=1 scripts/card $ID."
+fi
+
+# The worker is the tool the card names; the reviewer is the other one.
+model_for() {
+  case "$1" in
+    codex) for m in luna:gpt-6-luna sol:gpt-6.1-sol astra:gpt-6-astra; do
+             case "$LABELS" in *" ${m%%:*} "*) echo "${m#*:}"; return ;; esac; done
+           echo gpt-6.1-sol ;;
+    claude) for m in fable opus sonnet haiku; do
+              case "$LABELS" in *" $m "*) echo "$m"; return ;; esac; done
+            echo opus ;;
+  esac
+}
+case "$LABELS" in
+  *" codex "*) WORKER_TOOL=codex; REVIEW_TOOL=claude; REVIEW_MODEL=opus ;;
+  *" claude "*) WORKER_TOOL=claude; REVIEW_TOOL=codex; REVIEW_MODEL=gpt-6-astra ;;
+  *) die "$ID has no harness label (codex or claude); add one on the card." ;;
+esac
+WORKER_MODEL="$(model_for "$WORKER_TOOL")"
+# CARD_TOOLS=codex (the default since 2026-10-20, while Wouter's weekly Claude allowance is
+# nearly used up) runs both the worker and the reviewer on Codex, whatever the card's label says.
+# The reviewer is still a fresh session that never sees the build. CARD_TOOLS=labels restores
+# the split above: the worker on the card's tool, the reviewer on the other one.
+if [ "${CARD_TOOLS:-codex}" = codex ]; then
+  if [ "$WORKER_TOOL" = claude ]; then
+    case "$WORKER_MODEL" in fable|opus) WORKER_MODEL=gpt-6-astra ;; *) WORKER_MODEL=gpt-6.1-sol ;; esac
+    WORKER_TOOL=codex
+  fi
+  REVIEW_TOOL=codex; REVIEW_MODEL=gpt-6-astra
+fi
+
+# 2. The lane.
+git -C "$MAIN" fetch -q origin || die "could not fetch origin"
+git -C "$MAIN" rev-parse -q --verify "$BASE_REF^{commit}" >/dev/null || die "the card's base '$BASE_REF' does not exist"
+LANE="$(lane_of "$ID")"
+if [ -z "$LANE" ]; then
+  others="$(open_lanes)"
+  if [ -n "$others" ] && [ "$(printf '%s\n' "$others" | wc -l | tr -d ' ')" -ge "$MAX_LANES" ]; then
+    die "two lanes are open already: $(printf '%s ' $others | sed "s#$LANES/##g"). Ship or close one first (scripts/card list)."
+  fi
+  slug="$(printf '%s' "$TITLE" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]\{1,\}/-/g; s/^-//; s/-$//' | cut -d- -f1-4)"
+  BRANCH="$(printf '%s' "$ID" | tr '[:upper:]' '[:lower:]')-$slug"
+  LANE="$LANES/$ID-$slug"
+  git -C "$MAIN" worktree add -q -b "$BRANCH" "$LANE" "$BASE_REF"
+  say "Made the lane $LANE on branch $BRANCH, from $BASE_REF."
+else
+  BRANCH="$(git -C "$LANE" branch --show-current)"
+  [ -z "$(git -C "$LANE" status --porcelain)" ] || die "$LANE has uncommitted changes; commit or clear them first."
+  say "Using the existing lane $LANE (branch $BRANCH)."
+fi
+echo "$BASE_REF" > "$RUN/base-ref"
+# Bring the lane up to its base here, outside the worker's sandbox (Codex treats git's own
+# files as read-only, so a worker cannot merge or commit).
+if [ "$MODE" = build ] && ! git -C "$LANE" merge-base --is-ancestor "$BASE_REF" HEAD; then
+  if ! git -C "$LANE" merge --no-edit "$BASE_REF" > "$RUN/merge.log" 2>&1; then
+    git -C "$LANE" merge --abort 2>/dev/null || true
+    die "merging $BASE_REF into the lane conflicts (see $RUN/merge.log). Resolve it in the lane by hand, then run again."
+  fi
+  say "Merged $BASE_REF into the lane."
+fi
+status "installing packages in the lane"
+( cd "$LANE" && pnpm install --frozen-lockfile --prefer-offline ) > "$RUN/install.log" 2>&1 \
+  || die "pnpm install failed in the lane; see $RUN/install.log"
+
+# run_agent TOOL MODEL EFFORT CWD EXTRA_WRITABLE PROMPT REPORT LOG SECONDS
+run_agent() {
+  local tool="$1" model="$2" effort="$3" cwd="$4" extra="$5" prompt="$6" report="$7" log="$8" secs="$9"
+  local pid code
+  set +e
+  if [ "$tool" = codex ]; then
+    mkdir -p "$CODEX_CARDS"
+    [ -e "$CODEX_CARDS/auth.json" ] || ln -s "$HOME/.codex/auth.json" "$CODEX_CARDS/auth.json"
+    [ -f "$CODEX_CARDS/config.toml" ] || printf '# isolated config for unattended card runs: no MCP servers, no hooks, no notify\n' > "$CODEX_CARDS/config.toml"
+    local add=(--add-dir "$MAIN/.git"); [ -n "$extra" ] && add+=(--add-dir "$extra")
+    CODEX_HOME="$CODEX_CARDS" codex exec -m "$model" -c "model_reasoning_effort=\"$effort\"" \
+      -s workspace-write -c 'approval_policy="never"' -C "$cwd" "${add[@]}" \
+      -o "$report" - < "$prompt" > "$log" 2>&1 &
+  else
+    # Shell commands run in Claude's sandbox: no network at all, writes only in the working
+    # folders and the repo's shared .git. File tools are limited by the rules below. The
+    # worker's run folder (.agent-runs) is unreadable, so a reviewer cannot see the build.
+    local writable="[\"$MAIN/.git\"${extra:+, \"$extra\"}]"
+    local settings="{\"sandbox\": {\"enabled\": true, \"allowUnsandboxedCommands\": false,
+      \"filesystem\": {\"allowWrite\": $writable, \"denyRead\": [\"$RUNS\"]},
+      \"network\": {\"allowedDomains\": [], \"strictAllowlist\": true}}}"
+    local allow=(Read Glob Grep Bash "Edit(/$cwd/**)" "Write(/$cwd/**)")
+    [ -n "$extra" ] && allow+=("Edit(/$extra/**)" "Write(/$extra/**)")
+    ( cd "$cwd" && claude -p --model "$model" --permission-mode dontAsk --setting-sources project \
+        --strict-mcp-config --settings "$settings" ${extra:+--add-dir "$extra"} \
+        --allowedTools "${allow[@]}" \
+        --disallowedTools WebFetch WebSearch "Read(/$RUNS/**)" "Bash(git push *)" \
+        --output-format stream-json --verbose < "$prompt" > "$log" 2>&1 ) &
+  fi
+  pid=$!
+  ( sleep "$secs"; echo "card: stopped after ${secs}s" >> "$log"; kill -TERM "$pid" 2>/dev/null ) &
+  local watch=$!
+  wait "$pid"; code=$?
+  pkill -P "$watch" 2>/dev/null; kill "$watch" 2>/dev/null; wait "$watch" 2>/dev/null  # and its sleep
+  set -e
+  if [ "$tool" = claude ]; then
+    python3 -I - "$log" "$report" <<'PY'
+import json, sys
+result = None
+for line in open(sys.argv[1], errors="replace"):
+    try:
+        ev = json.loads(line)
+    except ValueError:
+        continue
+    if ev.get("type") == "result":
+        result = ev
+with open(sys.argv[2], "w") as out:
+    if result and result.get("result"):
+        out.write(result["result"])
+    elif result:
+        out.write(f"(no report: the run ended with {result.get('subtype')})\n")
+PY
+  fi
+  [ -s "$report" ] || echo "(no report: the run stopped before it wrote one; see $log)" > "$report"
+  return "$code"
+}
+
+# 3. The worker (skipped with --review).
+OUTCOME="review only"
+if [ "$MODE" = build ]; then
+ROUND=1
+while [ -e "$RUN/worker-$ROUND.report.md" ]; do ROUND=$((ROUND + 1)); done
+PROMPT="$RUN/worker-$ROUND.prompt.md"
+{
+  echo "You are the worker for Linear card $ID, round $ROUND, running unattended."
+  echo
+  echo "Lane (work only here, full paths): $LANE"
+  echo "Branch: $BRANCH. Base: $BASE_REF (already fetched)."
+  echo "Main checkout (never edit it): $MAIN"
+  echo
+  echo "First read $RULES/SKILL.md in full and follow it."
+  [ "$WORKER_TOOL" = codex ] && echo "You are on Codex: also read $RULES/CODEX.md."
+  echo "There is no Linear connection. The card is below. Your final reply is your report, in the"
+  echo "format of SKILL.md rule 9, starting with the Outcome line."
+  if [ -f "$RUN/next-round.md" ]; then
+    echo; echo "----- NOTE FOR THIS ROUND (from Wouter or an earlier review) -----"; cat "$RUN/next-round.md"
+  fi
+  echo; echo "----- CARD $ID -----"; cat "$RUN/card.md"
+} > "$PROMPT"
+[ -f "$RUN/next-round.md" ] && mv "$RUN/next-round.md" "$RUN/next-round.used-in-$ROUND.md"
+
+status "worker round $ROUND running: $WORKER_TOOL $WORKER_MODEL in $LANE"
+W_REPORT="$RUN/worker-$ROUND.report.md"
+W_CODE=0
+run_agent "$WORKER_TOOL" "$WORKER_MODEL" high "$LANE" "" "$PROMPT" "$W_REPORT" \
+  "$RUN/worker-$ROUND.log" "${WORKER_SECONDS:-3600}" || W_CODE=$?
+
+# The worker leaves its changes uncommitted (see above); commit them here with the message from
+# its report's "## Commit message" section, so the pre-commit hook runs as usual.
+COMMIT_NOTE=""
+if [ -n "$(git -C "$LANE" status --porcelain)" ]; then
+  MSG="$RUN/worker-$ROUND.commit-msg"
+  sed -n '/^## Commit message/,/^## /p' "$W_REPORT" | sed '1d; /^## /d; /^```/d' | sed '/./,$!d' > "$MSG"
+  if [ ! -s "$MSG" ]; then
+    printf 'chore: worker round %s for %s\n\nThe worker report had no commit message.\n' "$ROUND" "$ID" > "$MSG"
+    COMMIT_NOTE="The report had no commit message, so a placeholder was used."
+  fi
+  git -C "$LANE" add -A
+  if git -C "$LANE" commit -q -F "$MSG" > "$RUN/worker-$ROUND.commit.log" 2>&1; then
+    COMMIT_NOTE="scripts/card committed the worker's changes as $(git -C "$LANE" rev-parse --short HEAD). $COMMIT_NOTE"
+  else
+    COMMIT_NOTE="Committing the worker's changes failed (see \`$RUN/worker-$ROUND.commit.log\`); they are still uncommitted in the lane."
+  fi
+fi
+OUTCOME="$(head -n 5 "$W_REPORT" | sed -n 's/^Outcome: *//p' | head -n 1)"
+fi
+
+HEAD_SHA="$(git -C "$LANE" rev-parse HEAD)"
+BASE_SHA="$(git -C "$LANE" merge-base HEAD "$BASE_REF")"
+COMMITS="$(git -C "$LANE" rev-list --count "$BASE_SHA..HEAD")"
+LEFT_OVER="$(git -C "$LANE" status --porcelain | wc -l | tr -d ' ')"
+SIZE="$(git -C "$LANE" diff --numstat "$BASE_SHA" HEAD -- . ':(exclude)reports' ':(exclude)pnpm-lock.yaml' \
+  | awk '{a+=$1; d+=$2} END {print a+d+0}')"
+
+if [ "$MODE" = build ]; then
+
+# 4. Worker report on the card.
+{
+  echo "**Worker report, round $ROUND** ($WORKER_TOOL, $WORKER_MODEL), from \`scripts/card\`."
+  echo
+  echo "Lane \`$LANE\`, branch \`$BRANCH\`: $COMMITS commit(s) on top of \`$BASE_REF\`, $SIZE changed lines (generated reports and the lockfile not counted)."
+  [ "$SIZE" -gt 400 ] && echo "That is over the 400-line aim for one pull request; consider splitting before shipping."
+  [ -n "$COMMIT_NOTE" ] && echo "$COMMIT_NOTE"
+  [ "$LEFT_OVER" -gt 0 ] && echo "$LEFT_OVER uncommitted file(s) are left in the lane."
+  [ "$W_CODE" -ne 0 ] && echo "The worker process ended with exit code $W_CODE (a timeout or an error); see the log in \`$RUN\`."
+  echo; echo "---"; echo; cat "$W_REPORT"
+} > "$RUN/worker-$ROUND.comment.md"
+"${LINEAR[@]}" comment "$ID" "$RUN/worker-$ROUND.comment.md" || say "Could not post the worker report; it is in $RUN."
+fi
+
+# 5. Fresh review on the other tool.
+VERDICT="not run"
+REV=1
+while [ -e "$RUN/review-$REV.report.md" ]; do REV=$((REV + 1)); done
+R_REPORT=""
+if [ "$COMMITS" -gt 0 ]; then
+  status "review round $REV running: $REVIEW_TOOL $REVIEW_MODEL"
+  REVIEW_DIR="$LANES/review/$ID"
+  rm -rf "$REVIEW_DIR"; mkdir -p "$REVIEW_DIR"
+  git -C "$MAIN" worktree add -q --detach "$REVIEW_DIR/head" "$HEAD_SHA"
+  git -C "$MAIN" worktree add -q --detach "$REVIEW_DIR/base" "$BASE_SHA"
+  for d in head base; do
+    ( cd "$REVIEW_DIR/$d" && pnpm install --frozen-lockfile --prefer-offline ) >> "$RUN/review-$REV.install.log" 2>&1 \
+      || die "pnpm install failed in the review checkout; see $RUN/review-$REV.install.log"
+  done
+  CHANGED="$(git -C "$LANE" diff --name-only "$BASE_SHA" HEAD)"
+  TESTS="$(printf '%s\n' "$CHANGED" | grep -E '(\.(test|spec)\.[cm]?[jt]sx?$|/__tests__/|/fixtures?/)' || true)"
+  PROD="$(printf '%s\n' "$CHANGED" | grep -vE '(\.(test|spec)\.[cm]?[jt]sx?$|/__tests__/|/fixtures?/)' || true)"
+  R_PROMPT="$RUN/review-$REV.prompt.md"
+  {
+    echo "You are the independent reviewer for Linear card $ID. You have no context from the build"
+    echo "and must not look for any. First read $RULES/REVIEWER.md in full and follow it exactly."
+    [ "$REVIEW_TOOL" = codex ] && echo "You are on Codex: also read $RULES/CODEX.md."
+    echo
+    echo "Head checkout (the change, $HEAD_SHA): $REVIEW_DIR/head"
+    echo "Base checkout (before it, $BASE_SHA): $REVIEW_DIR/base"
+    echo "Write checks and logs only under $REVIEW_DIR/head/.review/"
+    echo "You have about $(( ${REVIEW_SECONDS:-2700} / 60 )) minutes. Report before then; unrun checks are 'partial', never a pass."
+    echo
+    echo "Production files the branch changed:"; printf '%s\n' "$PROD" | sed 's/^/- /'
+    echo; echo "Test files the branch added or changed (do not open these):"
+    if [ -n "$TESTS" ]; then printf '%s\n' "$TESTS" | sed 's/^/- /'; else echo "- none"; fi
+    echo; echo "----- CARD $ID -----"; cat "$RUN/card.md"
+  } > "$R_PROMPT"
+  R_REPORT="$RUN/review-$REV.report.md"
+  R_CODE=0
+  run_agent "$REVIEW_TOOL" "$REVIEW_MODEL" medium "$REVIEW_DIR/head" "$REVIEW_DIR/base" "$R_PROMPT" "$R_REPORT" \
+    "$RUN/review-$REV.log" "${REVIEW_SECONDS:-2700}" || R_CODE=$?
+  # Keep the reviewer's checks and logs, and note anything it left changed in the checkouts.
+  [ -d "$REVIEW_DIR/head/.review" ] && cp -R "$REVIEW_DIR/head/.review" "$RUN/review-$REV.evidence"
+  UNRESTORED="$(git -C "$REVIEW_DIR/head" status --porcelain -- . ':(exclude).review'; git -C "$REVIEW_DIR/base" status --porcelain)"
+  VERDICT="$(head -n 3 "$R_REPORT" | sed -n 's/^Verdict: *\([a-z]*\).*/\1/p' | head -n 1)"
+  [ -n "$VERDICT" ] || VERDICT="unreadable"
+  {
+    echo "**Independent review, round $REV** ($REVIEW_TOOL, $REVIEW_MODEL), from \`scripts/card\`."
+    echo
+    echo "A fresh reviewer on the other tool, briefed only from this card and the review rules (\`.claude/skills/worker/REVIEWER.md\`), checked commit \`${HEAD_SHA:0:12}\` against base \`${BASE_SHA:0:12}\`. It did not see the worker's report. Its checks and logs are in \`$RUN/review-$REV.evidence\`."
+    [ "$R_CODE" -ne 0 ] && echo "The review process ended with exit code $R_CODE (a timeout or an error)."
+    [ -n "$UNRESTORED" ] && echo "The reviewer left changes in its checkouts; they were discarded with the checkouts."
+    echo; echo "---"; echo; cat "$R_REPORT"
+  } > "$RUN/review-$REV.comment.md"
+  "${LINEAR[@]}" comment "$ID" "$RUN/review-$REV.comment.md" || say "Could not post the review; it is in $RUN."
+  if [ "$VERDICT" = findings ]; then
+    { echo "The independent review of round $REV reproduced the findings below. Fix each one, or say why it is wrong."
+      echo; cat "$R_REPORT"; } > "$RUN/next-round.md"
+  fi
+fi
+
+# 6. Card state.
+if [ "$OUTCOME" = "needs-you" ] || [ "$COMMITS" -eq 0 ] || [ "$VERDICT" = findings ] || [ "$VERDICT" = unreadable ]; then
+  NEXT="Needs you"
+else
+  NEXT="In Review"
+fi
+"${LINEAR[@]}" state "$ID" "$NEXT" || say "Could not move $ID to $NEXT."
+status "finished: worker said '${OUTCOME:-no outcome line}', $COMMITS commit(s), review '$VERDICT', card moved to $NEXT"
+
+say ""
+say "Reports in $RUN (also on the card): ${W_REPORT:+$(basename "$W_REPORT") }${R_REPORT:+$(basename "$R_REPORT")}"
+case "$NEXT" in
+  "In Review") say "Next: read the reports, try the change, then run scripts/ship $ID to push it and open the pull request." ;;
+  *) say "Next: read the card. If the review found something, run scripts/card $ID again for a fix round (it gets the findings)." ;;
+esac

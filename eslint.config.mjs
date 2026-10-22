@@ -22,6 +22,11 @@ export default tseslint.config(
       // duplicate exclusion alongside the .gitignore entry.
       '.agents/**',
       '.claude/skills/**',
+      // Card lanes, desktop-app worktrees and scripts/card run output (reviewers' scratch
+      // checks): other checkouts or generated files, never this tree's code (ADR-0031).
+      '.worktrees/**',
+      '.claude/worktrees/**',
+      '.agent-runs/**',
     ],
   },
   js.configs.recommended,

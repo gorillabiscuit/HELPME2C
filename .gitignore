@@ -78,8 +78,6 @@ graphify-out/
 apps/web/scripts/search-coverage/coverage-report.md
 apps/web/scripts/search-coverage/coverage-results.json
 
-# dispatcher (ADR-0030): lanes, log and mutable state live beside the repo, never in it
+# scripts/card (ADR-0031): card lanes, and each run's card, prompts, logs and reports
 .worktrees/
-dispatch.json
-dispatch.log
-prune-state.json
+.agent-runs/
