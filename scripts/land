@@ -65,6 +65,10 @@ if [ "$STATE" = OPEN ]; then
     exit 4
   fi
   MERGEABLE="$(printf '%s' "$PR" | jq -r .mergeable)"
+  if [ "$MERGEABLE" = UNKNOWN ]; then
+    echo "GitHub is still working out whether $URL merges cleanly; run scripts/land again in a moment."
+    exit 4
+  fi
   [ "$MERGEABLE" = MERGEABLE ] \
     || die "GitHub says $URL is $MERGEABLE (UNKNOWN clears in a moment; CONFLICTING needs main merged into the branch)."
 

@@ -60,6 +60,8 @@ case "$ID" in HEL-[0-9]*) ;; *)
   FROM="$(git -C "$MAIN" worktree list --porcelain | awk -v b="branch refs/heads/$BRANCH" '/^worktree /{w=$2} $0==b{print w}')"
   [ -n "$FROM" ] || FROM="$SELF_ROOT"
   git -C "$FROM" push -u origin "$BRANCH"
+  OPEN="$(env -u GH_CONFIG_DIR gh pr view "$BRANCH" --repo "$REPO" --json state,url -q 'select(.state=="OPEN") | .url' 2>/dev/null || true)"
+  if [ -n "$OPEN" ]; then echo "updated $OPEN"; exit 0; fi
   ( cd "$FROM" && env -u GH_CONFIG_DIR gh pr create --repo "$REPO" --base main --head "$BRANCH" --fill )
   exit 0 ;;
 esac
