@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# scripts/land HEL-N|BRANCH [--yes] — merge a shipped pull request and tidy up after it.
+#
+# Claude runs this once Wouter has said "ship it" (or "merge it") for this pull request
+# (CLAUDE.md §7, ADR-0031); Wouter may run it himself. Merging into main also deploys: Vercel
+# builds production from main whenever a merge touches apps/web.
+#
+# It refuses unless the pull request is open, every CI check on it has passed, and GitHub says it
+# can merge. It does not wait for CI: while checks run it says so and exits 4, to be run again.
+# It merges exactly the commit CI checked (a merge commit), deletes the branch on GitHub, brings
+# the main checkout's main level with GitHub, removes the card's lane and its local branch with
+# git's safe delete, and notes the merge on the card. Moving the card to Done stays Wouter's call.
+#
+# Exit code: 0 merged (or already merged) and tidied, 1 refused, 4 CI still running.
+# Adapted from scripts/land in logbook-whatsapp-channel (2026-10-22).
+set -euo pipefail
+
+SELF_ROOT="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+MAIN="$(cd "$(git -C "$SELF_ROOT" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"
+REPO="gorillabiscuit/HELPME2C"
+LINEAR=(python3 -I "$SELF_ROOT/scripts/lib/linear.py")
+die() { printf 'land: %s\n' "$*" >&2; exit 1; }
+gh() { env -u GH_CONFIG_DIR command gh "$@"; }  # the personal login; the Polymodal one cannot see the repo
+
+TARGET="${1:?usage: scripts/land HEL-N|BRANCH [--yes]}"
+shift
+GO=0
+for arg in "$@"; do
+  case "$arg" in --yes) GO=1 ;; *) die "unknown option: $arg" ;; esac
+done
+
+if [ -n "${CODEX_SANDBOX:-}" ] || [ -n "${CODEX_SANDBOX_NETWORK_DISABLED:-}" ]; then
+  die "a card worker never merges (.claude/skills/worker/SKILL.md); Claude lands on Wouter's go."
+fi
+LOGIN="$(gh api user --jq .login 2>/dev/null || true)"
+[ "$LOGIN" = gorillabiscuit ] || die "gh is signed in as '${LOGIN:-nobody}', which cannot see $REPO. Run: gh auth switch --user gorillabiscuit"
+
+ID=""; LANE=""
+if [[ "$TARGET" =~ ^[A-Za-z]+-[0-9]+$ ]]; then
+  ID="$(printf '%s' "$TARGET" | tr '[:lower:]' '[:upper:]')"
+  LANE="$(ls -d "$MAIN/.worktrees/$ID-"* 2>/dev/null | head -n 1 || true)"
+  [ -n "$LANE" ] || die "$ID has no lane under $MAIN/.worktrees"
+  BRANCH="$(git -C "$LANE" branch --show-current)"
+else
+  BRANCH="$TARGET"
+fi
+
+PR="$(gh pr view "$BRANCH" --repo "$REPO" --json number,state,mergeable,headRefOid,url,statusCheckRollup 2>/dev/null)" \
+  || die "no pull request found for $BRANCH"
+STATE="$(printf '%s' "$PR" | jq -r .state)"
+URL="$(printf '%s' "$PR" | jq -r .url)"
+
+if [ "$STATE" = OPEN ]; then
+  # Each check is a CheckRun (status/conclusion) or a StatusContext (state).
+  CHECKS="$(printf '%s' "$PR" | jq -r '.statusCheckRollup[] |
+    if .__typename == "StatusContext" then .state
+    elif .status != "COMPLETED" then "PENDING"
+    else .conclusion end')"
+  [ -n "$CHECKS" ] || { echo "no CI result on $URL yet; run scripts/land again once CI has run"; exit 4; }
+  if printf '%s\n' "$CHECKS" | grep -qvE '^(SUCCESS|NEUTRAL|SKIPPED|PENDING|EXPECTED|QUEUED|IN_PROGRESS)$'; then
+    die "a CI check on $URL did not pass ($(printf '%s' "$CHECKS" | sort | uniq -c | tr -s ' \n' ' ')); fix it before landing."
+  fi
+  if printf '%s\n' "$CHECKS" | grep -qE '^(PENDING|EXPECTED|QUEUED|IN_PROGRESS)$'; then
+    echo "CI is still running on $URL; run scripts/land again when it finishes."
+    exit 4
+  fi
+  MERGEABLE="$(printf '%s' "$PR" | jq -r .mergeable)"
+  [ "$MERGEABLE" = MERGEABLE ] \
+    || die "GitHub says $URL is $MERGEABLE (UNKNOWN clears in a moment; CONFLICTING needs main merged into the branch)."
+
+  echo "Ready to merge $URL (all CI checks passed). Merging deploys the web app to production."
+  if [ "$GO" != 1 ]; then
+    [ -r /dev/tty ] || die "Not merged. Without a terminal, pass --yes once Wouter has said ship it."
+    printf 'Type yes to merge: '
+    read -r ANSWER < /dev/tty || ANSWER=""
+    [ "$ANSWER" = yes ] || die "Not merged."
+  fi
+  NUMBER="$(printf '%s' "$PR" | jq -r .number)"
+  HEAD="$(printf '%s' "$PR" | jq -r .headRefOid)"
+  ( cd "${TMPDIR:-/tmp}" && gh pr merge "$NUMBER" --repo "$REPO" --merge --match-head-commit "$HEAD" )
+  echo "merged $URL"
+elif [ "$STATE" = MERGED ]; then
+  echo "$URL is already merged; tidying up"
+else
+  die "$URL is $STATE; nothing to land"
+fi
+
+# ---- tidy up
+git -C "$MAIN" fetch -q --prune origin
+if git -C "$MAIN" ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+  git -C "$MAIN" push -q origin --delete "$BRANCH" && echo "deleted $BRANCH on GitHub"
+fi
+if [ "$(git -C "$MAIN" rev-parse --abbrev-ref HEAD)" = main ] && [ -z "$(git -C "$MAIN" status --porcelain --untracked-files=no)" ]; then
+  git -C "$MAIN" pull -q --ff-only origin main && echo "main checkout is level with GitHub"
+else
+  echo "note: the main checkout is not on a clean main, so it was not updated" >&2
+fi
+if [ -n "$LANE" ] && [ -z "$(git -C "$LANE" status --porcelain)" ]; then
+  git -C "$MAIN" worktree remove "$LANE" && echo "removed the lane $LANE"
+fi
+if git -C "$MAIN" worktree list --porcelain | grep -qx "branch refs/heads/$BRANCH"; then
+  echo "note: $BRANCH is still checked out in a worktree, so the local branch was kept" >&2
+elif git -C "$MAIN" show-ref --verify --quiet "refs/heads/$BRANCH"; then
+  git -C "$MAIN" branch -d "$BRANCH" >/dev/null && echo "deleted the local branch $BRANCH"
+fi
+if [ -n "$ID" ]; then
+  NOTE="$(mktemp)"
+  printf 'Merged into main: %s. Merging deployed it. Moving the card to Done is Wouter'"'"'s call.\n' "$URL" > "$NOTE"
+  "${LINEAR[@]}" comment "$ID" "$NOTE" || echo "warning: could not post the merge note on $ID" >&2
+  rm -f "$NOTE"
+  echo "landed $(date -u +%FT%TZ) $URL" > "$MAIN/.agent-runs/$ID/status" 2>/dev/null || true
+fi

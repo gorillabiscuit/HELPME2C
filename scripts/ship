@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# scripts/ship HEL-N — push a card's lane and open its pull request. Wouter runs this himself;
-# an agent never does.
+# scripts/ship HEL-N — push a card's lane and open its pull request. Claude runs this once Wouter
+# has said "ship it" for this card (CLAUDE.md §7, ADR-0031); Wouter may run it himself. A card
+# worker never does. Then scripts/land merges it once CI passes.
 #
 #   scripts/ship HEL-13            show what will be pushed, ask, then push and open the PR
+#   scripts/ship HEL-13 --yes      the same without asking (Claude, after Wouter's go)
 #   scripts/ship HEL-13 --anyway   ship even though the last review reproduced a finding
 #
 # It checks that the GitHub CLI is logged in as gorillabiscuit (the repo is personal; the
@@ -23,7 +25,15 @@ N24="$HOME/.nvm/versions/node/v24.16.0/bin"
 die() { printf 'ship: %s\n' "$*" >&2; exit 1; }
 
 ID="$(printf '%s' "${1:-}" | tr '[:lower:]' '[:upper:]')"
-case "$ID" in HEL-[0-9]*) ;; *) sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;; esac
+case "$ID" in HEL-[0-9]*) ;; *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;; esac
+shift
+GO=0; ANYWAY=0
+for arg in "$@"; do
+  case "$arg" in --yes) GO=1 ;; --anyway) ANYWAY=1 ;; *) die "unknown option: $arg" ;; esac
+done
+if [ -n "${CODEX_SANDBOX:-}" ] || [ -n "${CODEX_SANDBOX_NETWORK_DISABLED:-}" ]; then
+  die "a card worker never pushes (.claude/skills/worker/SKILL.md); Claude ships on Wouter's go."
+fi
 RUN="$RUNS/$ID"
 LANE="$(ls -d "$MAIN/.worktrees/$ID-"* 2>/dev/null | head -n 1 || true)"
 [ -n "$LANE" ] || die "$ID has no lane. Run scripts/card $ID first."
@@ -42,7 +52,7 @@ BEHIND="$(git -C "$LANE" rev-list --count HEAD..origin/main)"
 last_review="$(ls -t "$RUN"/review-*.report.md 2>/dev/null | head -n 1 || true)"
 verdict="none"
 [ -n "$last_review" ] && verdict="$(head -n 3 "$last_review" | sed -n 's/^Verdict: *\([a-z]*\).*/\1/p' | head -n 1)"
-if [ "$verdict" = findings ] && [ "${2:-}" != "--anyway" ]; then
+if [ "$verdict" = findings ] && [ "$ANYWAY" != 1 ]; then
   die "the last review reproduced a finding ($last_review). Run scripts/card $ID for a fix round, or add --anyway."
 fi
 
@@ -64,15 +74,18 @@ echo "  review   $verdict${last_review:+ ($last_review)}"
 echo "  PR body  $BODY"
 git -C "$LANE" log --oneline origin/main..HEAD | sed 's/^/  /'
 [ "$BEHIND" -gt 0 ] && echo "  Note: main has moved on; the pull request may need a merge from main."
-printf 'Push %s and open the pull request? [y/N] ' "$BRANCH"
-read -r answer
-[ "$answer" = y ] || [ "$answer" = Y ] || die "stopped; nothing was pushed."
+if [ "$GO" != 1 ]; then
+  [ -r /dev/tty ] || die "nothing pushed. Without a terminal, pass --yes once Wouter has said ship it."
+  printf 'Push %s and open the pull request? [y/N] ' "$BRANCH"
+  read -r answer < /dev/tty || answer=""
+  [ "$answer" = y ] || [ "$answer" = Y ] || die "stopped; nothing was pushed."
+fi
 
 git -C "$LANE" push -u origin "$BRANCH"
 PR_URL="$(env -u GH_CONFIG_DIR gh pr create --repo "$REPO" --base main --head "$BRANCH" \
   --title "$TITLE ($ID)" --body-file "$BODY")"
 echo "Opened $PR_URL"
-printf 'Pull request opened: %s\n\nBranch `%s`, %s commit(s). Pushed by Wouter with `scripts/ship`.\n' \
+printf 'Pull request opened: %s\n\nBranch `%s`, %s commit(s). Pushed with `scripts/ship`; `scripts/land` merges it once CI passes.\n' \
   "$PR_URL" "$BRANCH" "$AHEAD" > "$RUN/ship.comment.md"
 "${LINEAR[@]}" comment "$ID" "$RUN/ship.comment.md" || echo "Could not comment on $ID; add the link by hand."
 echo "shipped $(date -u +%FT%TZ) $PR_URL" > "$RUN/status"
