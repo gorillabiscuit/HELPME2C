@@ -1,61 +1,75 @@
 # HelpME2C
 
-Cross-medium TV + anime recommendation engine, built around two differentiators: group recommendations (find what 2+ people will both enjoy) and theme-based cross-medium taste bridging.
+Cross-medium TV and anime recommendation engine. It helps two people find a show they both want to watch, using themes and character arcs rather than flat genre or popularity.
 
-> **Pre-bootstrap state.** This repo currently contains design / contract scaffolding only — no `package.json`, no application code yet. Phase 1 (stack-selection ADRs) and Phase 2 (repo bootstrap) need to happen before this README's commands work.
+- **Live:** https://helpme2c.wouterschreuders.com (Phase 1A, web only, registered users)
+- **Tracker:** Linear, team `HEL` (ADR-0030)
 
 ## Read first
 
-Before doing anything, read in order:
+1. **`PROJECT.md`**: what we're building, and the North Star every change has to trace to.
+2. **`CLAUDE.md`**: the working contract (banned patterns, stop-and-ask list, commit rules, pre-PR review).
+3. **`docs/decisions/0000-architecture-overview.md`**: system shape. The other ADRs sit next to it.
+4. **`LEARNED.md`**: sharp edges that cost time once already.
 
-1. **`KICKOFF.md`** — what state this project is in and what the first session should do
-2. **`PROJECT.md`** — what we're building (Phase 1A scope, target users, revenue model)
-3. **`CLAUDE.md`** — working contract (read end to end; this is the rules of engagement)
-4. **`docs/decisions/0000-architecture-overview.md`** — macro architecture
-5. **`docs/decisions/QUEUE.md`** — pending stack-selection decisions
+## Setup
 
-## Eventual setup (after Phase 2 bootstrap)
+Needs Node 24 (`.nvmrc`) and pnpm 10 (`packageManager` in `package.json`).
 
 ```bash
-# Install everything (also runs husky install via prepare script)
-pnpm install
-
-# Develop
-pnpm dev                              # all apps
-pnpm dev --filter=@helpme2c/web       # just web
-
-# Quality gates
-pnpm preflight                        # typecheck + lint + test
-pnpm test:e2e                         # Playwright
-
-# Pre-push gates run automatically via .husky/pre-push
-# (AI-attribution scan; aborts the push if any commit has a forbidden trailer)
+pnpm install                                   # also wires the git hooks (husky)
+cp apps/web/.env.example apps/web/.env.local   # then fill in the values
+pnpm --filter=@helpme2c/web dev                # web app on http://localhost:3000
 ```
 
-## Repo layout (designed; not yet implemented)
+Background jobs (catalog sync, recommendation recompute) run on Inngest. Locally they need
+`INNGEST_DEV=1` in `.env.local` and the Inngest dev server running; see `docs/runbooks/inngest.md`.
+
+Database migrations (Drizzle, Neon Postgres):
+
+```bash
+pnpm --filter=@helpme2c/web db:generate   # write a migration from schema changes
+pnpm --filter=@helpme2c/web db:migrate    # apply migrations to DATABASE_URL
+```
+
+## Checks
+
+```bash
+pnpm preflight     # typecheck + lint + all tests; the same check runs on every pull request
+pnpm format        # Prettier
+```
+
+The pre-push hook runs an AI-attribution scan and `pnpm preflight`, and aborts the push if either fails.
+
+## Deploy
+
+Vercel, project root `apps/web`. Pushes to `main` deploy automatically, except commits that touch
+nothing under `apps/web/` (see `LEARNED.md`). For an explicit deploy, run `pnpm dlx vercel --prod`
+from the repo root, never from `apps/web/`.
+
+## How cards get built
+
+Work is tracked on Linear (team `HEL`). A card is built with `scripts/card HEL-N`: an unattended
+worker builds it in its own worktree, then a fresh reviewer checks the result, and both reports go
+on the card. `scripts/ship HEL-N` pushes the branch and opens the pull request. See ADR-0031.
+
+## Layout
 
 ```
 apps/
-  web/        Next.js 15 + React 19 + TypeScript strict (Phase 1A)
-  api/        Stub for now; potentially split out in Phase 2
-  mobile/     Expo / React Native (Phase 2; stub now)
+  web/          Next.js app; also hosts the tRPC API and the Inngest functions
+  mobile/       Expo / React Native, Phase 2 (placeholder only)
 packages/
-  shared/     Cross-platform code (types, schemas, hooks, utils)
-  ui/         React components for web
-  mobile-ui/  React Native components (Phase 2)
-  ml/         Recommendation engine module (the prospective product moat)
-  content/    Ingestion + sync from TMDB / AniList (Phase 1A)
+  ml/           recommendation engine, a pure module with no framework coupling
+  shared/       platform-agnostic types, schemas and utilities
+  ui/           React components for web
+  mobile-ui/    React Native components, Phase 2 (placeholder only)
 docs/
-  decisions/  ADRs (Architecture Decision Records)
-scripts/      Project scripts (gates, hooks)
-.claude/
-  commands/   Claude Code slash commands (e.g. /pre-pr)
+  decisions/    ADRs
+  runbooks/     one page per vendor: what breaks, how to recover
+scripts/        project scripts (gates, hooks)
 ```
 
 ## License
 
-TBD before public launch. Don't open-source any code yet — this is a product, not a template.
-
-## Contributing
-
-Solo project for now. If that changes, contributing rules go here. Until then: read `CLAUDE.md`.
+None yet. This is a product, not a template; don't open-source any of it.
