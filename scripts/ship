@@ -55,8 +55,12 @@ case "$ID" in HEL-[0-9]*) ;; *)
     read -r answer < /dev/tty || answer=""
     [ "$answer" = y ] || [ "$answer" = Y ] || die "stopped; nothing was pushed."
   fi
-  git -C "$MAIN" push -u origin "$BRANCH"
-  ( cd "$MAIN" && env -u GH_CONFIG_DIR gh pr create --repo "$REPO" --base main --head "$BRANCH" --fill )
+  # Push from the checkout that has the branch (or this one), so the pre-push check runs on
+  # that code and not on whatever the main checkout holds.
+  FROM="$(git -C "$MAIN" worktree list --porcelain | awk -v b="branch refs/heads/$BRANCH" '/^worktree /{w=$2} $0==b{print w}')"
+  [ -n "$FROM" ] || FROM="$SELF_ROOT"
+  git -C "$FROM" push -u origin "$BRANCH"
+  ( cd "$FROM" && env -u GH_CONFIG_DIR gh pr create --repo "$REPO" --base main --head "$BRANCH" --fill )
   exit 0 ;;
 esac
 RUN="$RUNS/$ID"
